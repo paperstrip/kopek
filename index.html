@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>VibeTime · NessyOS</title>
+<title>kopek · Cockpit Financier</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -108,8 +108,8 @@
           <i data-lucide="sparkles" class="w-8 h-8 text-white"></i>
         </div>
       </div>
-      <h1 class="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-zinc-200 to-zinc-400">VibeTime</h1>
-      <p class="text-sm text-zinc-500 mt-1 tracking-wider uppercase">NessyOS · Cockpit Financier</p>
+      <h1 class="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-zinc-200 to-zinc-400">kopek</h1>
+      <p class="text-sm text-zinc-500 mt-1 tracking-wider uppercase">Cockpit Financier & Time-Tracking</p>
     </div>
 
     <form id="login-form" class="card rounded-2xl p-6 shadow-2xl card-hover">
@@ -157,8 +157,8 @@
           </div>
         </div>
         <div>
-          <div class="text-sm font-bold tracking-tight leading-none">VibeTime</div>
-          <div class="text-[10px] text-zinc-500 leading-none mt-1 tracking-wider uppercase">NessyOS · Belgique</div>
+          <div class="text-sm font-bold tracking-tight leading-none">kopek</div>
+          <div class="text-[10px] text-zinc-500 leading-none mt-1 tracking-wider uppercase">Cockpit Financier · Belgique</div>
         </div>
       </div>
 
@@ -220,39 +220,69 @@
         <!-- Gauge -->
         <div class="mt-8 sm:mt-10 relative">
           <!-- Tier markers -->
-          <div class="relative mb-3">
-            <div class="absolute left-0 top-6 text-[10px] text-zinc-500 -translate-x-1">
-              <span class="font-mono">0 h</span>
+          <div class="relative mb-3 h-10">
+            <div class="absolute left-0 top-8 text-[11px] text-zinc-500 -translate-x-1">
+              <span class="font-mono font-semibold">0 h</span>
             </div>
-            <div id="tier1-marker" class="absolute top-0 text-[10px] text-zinc-500 -translate-x-1/2 flex flex-col items-center" style="left:0%">
-              <div class="w-px h-2 bg-zinc-700 mb-1"></div>
-              <span class="font-mono font-bold text-indigo-300">25 h</span>
-              <span class="text-[9px] text-zinc-600">Socle · 2 000 €</span>
+            <!-- MARKER SOCLE 25h -->
+            <div id="tier1-marker" class="absolute top-0 -translate-x-1/2 flex flex-col items-center" style="left:57.14%">
+              <span class="font-mono font-bold text-indigo-300 text-[11px]">25 h · Socle</span>
+              <span class="text-[10px] text-indigo-400/80 font-mono bg-indigo-500/10 px-1.5 py-0.5 rounded mt-0.5 border border-indigo-500/20">= 2 000 € HTVA</span>
+              <div class="w-0.5 h-4 bg-indigo-400/60 mt-1 rounded-full"></div>
             </div>
-            <div id="tier2-marker" class="absolute top-0 text-[10px] text-zinc-500 -translate-x-1/2 flex flex-col items-center" style="left:0%">
-              <div class="w-px h-2 bg-zinc-700 mb-1"></div>
-              <span class="font-mono font-bold text-fuchsia-300">43,75 h</span>
-              <span class="text-[9px] text-zinc-600">Min Garanti · 3 500 €</span>
+            <!-- MARKER GARANTIE 43,75h -->
+            <div id="tier2-marker" class="absolute top-0 -translate-x-1/2 flex flex-col items-center" style="left:100%">
+              <span class="font-mono font-bold text-fuchsia-300 text-[11px]">43,75 h · Min Garanti</span>
+              <span class="text-[10px] text-fuchsia-400/80 font-mono bg-fuchsia-500/10 px-1.5 py-0.5 rounded mt-0.5 border border-fuchsia-500/20">= 3 500 € HTVA</span>
+              <div class="w-0.5 h-4 bg-fuchsia-400/60 mt-1 rounded-full"></div>
+            </div>
+            <!-- MARKER SURPLUS (débord à 120%) -->
+            <div id="tier3-marker" class="absolute top-0 -translate-x-1/2 flex flex-col items-center opacity-70" style="left:120%">
+              <span class="font-mono font-bold text-emerald-300 text-[10px]">Surplus</span>
+              <span class="text-[9px] text-emerald-400/80 font-mono">@ 80 €/h</span>
             </div>
           </div>
 
-          <!-- Bar -->
-          <div class="relative h-4 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800">
-            <!-- Tier 1 background -->
-            <div class="absolute inset-y-0 left-0 bg-indigo-500/10" style="width:0%"></div>
-            <!-- Tier 2 background -->
-            <div class="absolute inset-y-0 bg-fuchsia-500/10" style="left:0%; width:0%"></div>
-            <!-- Tier 3 background -->
-            <div class="absolute inset-y-0 right-0 bg-emerald-500/10" style="width:0%"></div>
-            <!-- Progress fill -->
-            <div id="gauge-fill" class="gauge-seg absolute inset-y-0 left-0 rounded-full"
-              style="width:0%; background: linear-gradient(90deg, #6366f1 0%, #a855f7 50%, #34d399 100%); box-shadow: 0 0 20px -4px rgba(168,85,247,0.5);"></div>
-            <!-- Cursor -->
-            <div id="gauge-cursor" class="absolute top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white shadow-xl border-2 border-indigo-400 -translate-x-1/2 transition-all duration-500 ease-out" style="left:0%"></div>
+          <!-- Bar container 120% width to allow overflow surplus visual -->
+          <div class="pr-[16.666%]">
+            <div class="relative h-6 bg-zinc-900/80 rounded-full overflow-visible border border-zinc-800">
+
+              <div class="absolute inset-y-0 left-0 rounded-l-full flex items-center" style="width:57.14%; background: linear-gradient(90deg, rgba(99,102,241,0.22) 0%, rgba(99,102,241,0.14) 100%);">
+                <span class="absolute right-3 text-[10px] font-mono font-semibold text-indigo-300/80 tracking-wider uppercase">Socle</span>
+              </div>
+
+              <div class="absolute top-0 bottom-0 w-[3px] bg-indigo-300/80 z-[1]" style="left:57.14%"></div>
+
+              <div class="absolute inset-y-0 flex items-center" style="left:57.14%; width:42.86%; background: linear-gradient(90deg, rgba(217,70,239,0.18) 0%, rgba(217,70,239,0.10) 100%); border-top-right-radius:9999px; border-bottom-right-radius:9999px;">
+                <span class="absolute left-3 text-[10px] font-mono font-semibold text-fuchsia-300/80 tracking-wider uppercase">Régie Garantie · 80 €/h</span>
+              </div>
+
+              <div class="absolute top-0 bottom-0 w-[3px] bg-fuchsia-300/80 z-[1]" style="left:100%"></div>
+
+              <div class="absolute top-0 bottom-0 rounded-r-full flex items-center" style="left:100%; width:20%; background: linear-gradient(90deg, rgba(52,211,153,0.22) 0%, rgba(52,211,153,0.12) 100%);">
+                <span class="absolute left-3 text-[10px] font-mono font-semibold text-emerald-300/80 tracking-wider uppercase">Surplus Facturable</span>
+              </div>
+
+              <div class="absolute top-0 bottom-0 w-[2px] bg-emerald-300/50 z-[1]" style="left:120%"></div>
+
+              <div id="gauge-fill" class="gauge-seg absolute inset-y-0 left-0 rounded-full z-[2] pointer-events-none"
+                style="width:0%; background: linear-gradient(90deg, rgba(99,102,241,0.95) 0%, rgba(168,85,247,0.95) 50%, rgba(52,211,153,0.95) 100%); box-shadow: 0 0 24px -6px rgba(168,85,247,0.65); mix-blend-mode: normal;"></div>
+
+              <div id="gauge-cursor" class="absolute top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-white shadow-2xl border-[3px] border-white ring-4 ring-indigo-400/40 -translate-x-1/2 transition-all duration-500 ease-out z-[3] pointer-events-none flex items-center justify-center" style="left:0%">
+                <div class="w-2 h-2 rounded-full bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-emerald-400"></div>
+              </div>
+            </div>
+
+            <div class="flex justify-between mt-2 pr-[16.666%] text-[10px] text-zinc-500 font-mono chip">
+              <span>0 €</span>
+              <span style="margin-left:calc(57.14% - 3ch)">2 000 €</span>
+              <span style="margin-right:calc(0% - 0ch)">3 500 €</span>
+              <span class="text-emerald-400" style="margin-right:-1ch">+ 3 500 €</span>
+            </div>
           </div>
 
           <!-- Status band -->
-          <div id="gauge-status" class="mt-6 rounded-xl p-4 sm:p-4.5 flex items-start gap-3.5 border"></div>
+          <div id="gauge-status" class="mt-8 rounded-xl p-4 sm:p-4.5 flex items-start gap-3.5 border"></div>
         </div>
 
         <!-- Tier numbers -->
@@ -320,6 +350,206 @@
             <div>
               <div class="text-[9px] uppercase tracking-wider text-emerald-200/50 mb-1">Charges + Provisions</div>
               <div id="pocket-charges" class="font-mono font-bold text-sm chip text-emerald-100/80">−0 €</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- BENTO · MINE KOPEK · CARTOON 3D GAMIFIED VIEW (12 cols) -->
+      <section class="col-span-12 relative rounded-2xl card-hover overflow-hidden"
+        style="background: linear-gradient(180deg, rgba(30,41,59,0.45) 0%, rgba(15,23,42,0.75) 100%); border:1px solid rgba(99,102,241,0.25); box-shadow: 0 40px 120px -40px rgba(99,102,241,0.35);">
+
+        <!-- Sky / Clouds backdrop -->
+        <div class="absolute inset-0 overflow-hidden pointer-events-none">
+          <div class="absolute top-3 left-10 text-2xl opacity-40 animate-float" style="animation-duration:9s;">☁️</div>
+          <div class="absolute top-8 right-32 text-xl opacity-30 animate-float" style="animation-delay:-2s; animation-duration:11s;">☁️</div>
+          <div class="absolute top-5 right-12 text-3xl opacity-90 animate-float" style="animation-duration:5s;">☀️</div>
+          <div class="absolute bottom-10 left-6 text-2xl opacity-20">🌲</div>
+          <div class="absolute bottom-8 left-20 text-3xl opacity-25">🏔️</div>
+          <div class="absolute bottom-10 right-10 text-2xl opacity-20">🌲</div>
+        </div>
+
+        <div class="relative p-5 sm:p-6 grid grid-cols-12 gap-5">
+
+          <!-- ===== LEFT · 3D ISOMETRIC MINE (cols 1→8) ===== -->
+          <div class="col-span-12 lg:col-span-8">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <span class="text-2xl">⛏️</span>
+                <div>
+                  <h2 class="text-sm font-bold tracking-tight text-white">Mine Kopek · Chantier du Mois</h2>
+                  <p class="text-[11px] text-zinc-400">Plus tu encodes d'heures, plus la mine se remplit de richesses</p>
+                </div>
+              </div>
+              <div id="mine-level-badge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-200 text-[10px] font-bold tracking-wider uppercase border border-indigo-400/40">
+                <i data-lucide="flame" class="w-3 h-3 text-orange-300"></i> Niveau 0 · Débutant
+              </div>
+            </div>
+
+            <!-- Mine container · isometric 3D -->
+            <div id="mine-viewport" class="relative mx-auto w-full h-[340px] sm:h-[380px] [perspective:1600px]">
+              <div id="mine-scene" class="absolute inset-0 flex items-end justify-center" style="transform-style:preserve-3d; transform:rotateX(58deg) rotateZ(-40deg); transition: transform 0.4s ease;">
+
+                <!-- ===== NIVEAU 3 · DIAMANTS · SURPLUS (top layer, grand) ===== -->
+                <div class="absolute" style="width:260px; height:260px; transform-style:preserve-3d; transform:translateZ(170px);">
+                  <!-- floor -->
+                  <div class="absolute inset-0 rounded-lg" style="background:linear-gradient(135deg, rgba(16,185,129,0.18), rgba(99,102,241,0.10)); border:1px dashed rgba(16,185,129,0.55);"></div>
+                  <!-- fill diamonds · height = surplus % -->
+                  <div id="mine-l3-fill" class="absolute bottom-0 left-0 right-0 rounded-b-lg overflow-hidden transition-all duration-700" style="height:0%;">
+                    <div class="absolute inset-0 bg-gradient-to-t from-emerald-500/40 via-cyan-400/30 to-transparent"></div>
+                    <div id="mine-l3-sprites" class="absolute inset-0 flex flex-wrap items-end p-3 gap-1.5 text-[22px] sm:text-[26px] leading-none"></div>
+                  </div>
+                  <!-- walls -->
+                  <div class="absolute top-0 right-0 h-full w-5 origin-left rounded-r-md" style="background:linear-gradient(90deg, rgba(16,185,129,0.35), rgba(16,185,129,0.1)); border:1px solid rgba(16,185,129,0.45); transform: rotateY(90deg);"></div>
+                  <div class="absolute bottom-0 left-0 w-full h-5 origin-top rounded-b-md" style="background:linear-gradient(180deg, rgba(16,185,129,0.35), rgba(16,185,129,0.1)); border:1px solid rgba(16,185,129,0.45); transform: rotateX(-90deg);"></div>
+                  <!-- label tag -->
+                  <div class="absolute -top-12 left-1/2 -translate-x-1/2 whitespace-nowrap px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-200 text-[10px] font-bold tracking-[0.15em] uppercase border border-emerald-400/40">
+                    🟢 Palier 3 · Surplus · ∞ €
+                  </div>
+                </div>
+
+                <!-- ===== NIVEAU 2 · OR · RÉGIE GARANTIE (middle, medium) ===== -->
+                <div class="absolute" style="width:220px; height:220px; transform-style:preserve-3d; transform:translateZ(85px);">
+                  <div class="absolute inset-0 rounded-lg" style="background:linear-gradient(135deg, rgba(217,70,239,0.18), rgba(168,85,247,0.08)); border:1px dashed rgba(217,70,239,0.6);"></div>
+                  <div id="mine-l2-fill" class="absolute bottom-0 left-0 right-0 rounded-b-lg overflow-hidden transition-all duration-700" style="height:0%;">
+                    <div class="absolute inset-0 bg-gradient-to-t from-fuchsia-600/50 via-amber-400/40 to-transparent"></div>
+                    <div id="mine-l2-sprites" class="absolute inset-0 flex flex-wrap items-end p-2.5 gap-1.5 text-[22px] sm:text-[26px] leading-none"></div>
+                  </div>
+                  <div class="absolute top-0 right-0 h-full w-5 origin-left rounded-r-md" style="background:linear-gradient(90deg, rgba(217,70,239,0.40), rgba(217,70,239,0.1)); border:1px solid rgba(217,70,239,0.5); transform: rotateY(90deg);"></div>
+                  <div class="absolute bottom-0 left-0 w-full h-5 origin-top rounded-b-md" style="background:linear-gradient(180deg, rgba(217,70,239,0.40), rgba(217,70,239,0.1)); border:1px solid rgba(217,70,239,0.5); transform: rotateX(-90deg);"></div>
+                  <div class="absolute -top-11 left-1/2 -translate-x-1/2 whitespace-nowrap px-3 py-1 rounded-full bg-fuchsia-500/20 text-fuchsia-200 text-[10px] font-bold tracking-[0.15em] uppercase border border-fuchsia-400/40">
+                    🟣 Palier 2 · Régie Garantie · 1 500 €
+                  </div>
+                </div>
+
+                <!-- ===== NIVEAU 1 · CUIVRE/BRONZE · SOCLE (bottom, small) ===== -->
+                <div class="absolute" style="width:180px; height:180px; transform-style:preserve-3d; transform:translateZ(0px);">
+                  <div class="absolute inset-0 rounded-lg" style="background:linear-gradient(135deg, rgba(99,102,241,0.22), rgba(30,64,175,0.10)); border:1px dashed rgba(99,102,241,0.75);"></div>
+                  <div id="mine-l1-fill" class="absolute bottom-0 left-0 right-0 rounded-b-lg overflow-hidden transition-all duration-700" style="height:0%;">
+                    <div class="absolute inset-0 bg-gradient-to-t from-orange-600/55 via-amber-500/45 to-transparent"></div>
+                    <div id="mine-l1-sprites" class="absolute inset-0 flex flex-wrap items-end p-2 gap-1 text-[22px] sm:text-[26px] leading-none"></div>
+                  </div>
+                  <div class="absolute top-0 right-0 h-full w-5 origin-left rounded-r-md" style="background:linear-gradient(90deg, rgba(99,102,241,0.50), rgba(99,102,241,0.12)); border:1px solid rgba(99,102,241,0.6); transform: rotateY(90deg);"></div>
+                  <div class="absolute bottom-0 left-0 w-full h-5 origin-top rounded-b-md" style="background:linear-gradient(180deg, rgba(99,102,241,0.50), rgba(99,102,241,0.12)); border:1px solid rgba(99,102,241,0.6); transform: rotateX(-90deg);"></div>
+                  <div class="absolute -top-10 left-1/2 -translate-x-1/2 whitespace-nowrap px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-200 text-[10px] font-bold tracking-[0.15em] uppercase border border-indigo-400/40">
+                    🔵 Palier 1 · Socle · 2 000 €
+                  </div>
+                </div>
+
+                <!-- ===== Miner + Cart on top of scene ===== -->
+                <div id="miner-char" class="absolute text-4xl sm:text-5xl transition-all duration-1000 ease-out" style="transform: translate(90px, -90px) translateZ(210px); filter:drop-shadow(0 8px 10px rgba(0,0,0,0.4));">
+                  🧑‍🏭
+                </div>
+                <div id="miner-cart" class="absolute text-3xl sm:text-4xl" style="transform: translate(150px, -70px) translateZ(215px); filter:drop-shadow(0 6px 8px rgba(0,0,0,0.35));">
+                  🛒
+                </div>
+                <div id="mine-flags" class="absolute text-2xl" style="transform: translate(130px, -210px) translateZ(230px);">
+                  🚩
+                </div>
+                <!-- pile of rocks outside -->
+                <div class="absolute text-2xl opacity-60" style="transform: translate(-30px, 40px) translateZ(-30px);">🪨</div>
+                <div class="absolute text-xl opacity-50" style="transform: translate(260px, 20px) translateZ(-30px);">🪨🪨</div>
+              </div>
+
+              <!-- XP bar · bottom of mine viewport (not rotated, flat) -->
+              <div class="absolute bottom-2 left-3 right-3">
+                <div class="flex items-center justify-between text-[10px] font-mono text-zinc-300 mb-1">
+                  <span id="mine-xp-label">XP · 0 / 43,75 h</span>
+                  <span id="mine-xp-pct">0%</span>
+                </div>
+                <div class="h-3 rounded-full bg-zinc-900/80 border border-zinc-700/70 overflow-hidden shadow-inner relative">
+                  <div class="absolute inset-y-0 left-0 w-full opacity-25" style="background-image: linear-gradient(45deg, rgba(255,255,255,0.08) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.08) 75%, transparent 75%, transparent); background-size: 14px 14px;"></div>
+                  <div id="mine-xp-fill" class="relative h-full rounded-full" style="width:0%; background: linear-gradient(90deg, #6366f1 0%, #a855f7 40%, #34d399 80%, #bef264 100%); box-shadow: 0 0 20px -2px rgba(168,85,247,0.55); transition: width 0.7s cubic-bezier(.22,1,.36,1);"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== RIGHT · SCOREBOARD MOIS (cols 9→12) ===== -->
+          <div class="col-span-12 lg:col-span-4 space-y-3">
+
+            <!-- OBJECTIF PRINCIPAL -->
+            <div class="relative rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-4 overflow-hidden">
+              <div class="absolute top-0 right-0 text-5xl opacity-10">🎯</div>
+              <div class="text-[10px] uppercase tracking-[0.18em] text-amber-300 font-bold mb-2 flex items-center gap-1.5">
+                <i data-lucide="swords" class="w-3 h-3"></i> Objectif Principal · Boss du Mois
+              </div>
+              <div id="boss-title" class="text-lg font-bold text-white leading-tight mb-1.5">
+                Remplir le coffre · Min Garanti
+              </div>
+              <div id="boss-hp-label" class="text-[11px] text-zinc-400 font-mono mb-2">
+                PV · 0 / 3 500 €
+              </div>
+              <!-- HP bar -->
+              <div class="relative h-4 rounded-md bg-zinc-950 border border-zinc-700 overflow-hidden">
+                <div class="absolute inset-0 opacity-20" style="background-image: linear-gradient(45deg, rgba(239,68,68,0.25) 25%, transparent 25%, transparent 50%, rgba(239,68,68,0.25) 50%, rgba(239,68,68,0.25) 75%, transparent 75%, transparent); background-size: 10px 10px; animation: shimmer 1.2s linear infinite;"></div>
+                <div id="boss-hp-fill" class="absolute inset-y-0 left-0 bg-gradient-to-r from-red-500 via-orange-500 to-amber-400 transition-all duration-700" style="width:0%; box-shadow: 0 0 18px -3px rgba(239,68,68,0.6);"></div>
+              </div>
+              <div id="boss-summary" class="text-[11px] text-zinc-400 mt-2.5">
+                Encode 43,75 h sur le contrat principal pour valider le mois.
+              </div>
+            </div>
+
+            <!-- ACHIEVEMENTS -->
+            <div class="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-4">
+              <div class="text-[10px] uppercase tracking-[0.18em] text-indigo-300 font-bold mb-3 flex items-center gap-1.5">
+                <i data-lucide="trophy" class="w-3 h-3"></i> Succès du Mois
+              </div>
+              <div id="achievements-list" class="space-y-2">
+                <div data-ach="socle" class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-zinc-800 bg-zinc-950/40 opacity-60">
+                  <div class="w-8 h-8 rounded-md bg-zinc-900 border border-zinc-800 flex items-center justify-center text-lg grayscale">🟦</div>
+                  <div class="flex-1">
+                    <div class="text-[12px] font-bold text-zinc-300">Premier Palier</div>
+                    <div class="text-[10px] text-zinc-500">Remplir le Socle 2 000 € (25 h)</div>
+                  </div>
+                  <div class="text-[10px] font-mono text-zinc-500">🔒 Verrouillé</div>
+                </div>
+
+                <div data-ach="garantie" class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-zinc-800 bg-zinc-950/40 opacity-60">
+                  <div class="w-8 h-8 rounded-md bg-zinc-900 border border-zinc-800 flex items-center justify-center text-lg grayscale">🟨</div>
+                  <div class="flex-1">
+                    <div class="text-[12px] font-bold text-zinc-300">Garanti Validé</div>
+                    <div class="text-[10px] text-zinc-500">Atteindre le Min Garanti (43,75 h)</div>
+                  </div>
+                  <div class="text-[10px] font-mono text-zinc-500">🔒 Verrouillé</div>
+                </div>
+
+                <div data-ach="surplus" class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-zinc-800 bg-zinc-950/40 opacity-60">
+                  <div class="w-8 h-8 rounded-md bg-zinc-900 border border-zinc-800 flex items-center justify-center text-lg grayscale">💎</div>
+                  <div class="flex-1">
+                    <div class="text-[12px] font-bold text-zinc-300">Surplus Démarré</div>
+                    <div class="text-[10px] text-zinc-500">Première heure facturée au-delà de 43,75 h</div>
+                  </div>
+                  <div class="text-[10px] font-mono text-zinc-500">🔒 Verrouillé</div>
+                </div>
+
+                <div data-ach="secondary" class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-zinc-800 bg-zinc-950/40 opacity-60">
+                  <div class="w-8 h-8 rounded-md bg-zinc-900 border border-zinc-800 flex items-center justify-center text-lg grayscale">🚀</div>
+                  <div class="flex-1">
+                    <div class="text-[12px] font-bold text-zinc-300">Multi-Clients</div>
+                    <div class="text-[10px] text-zinc-500">Encoder ≥ 500 € HTVA sur un client secondaire</div>
+                  </div>
+                  <div class="text-[10px] font-mono text-zinc-500">🔒 Verrouillé</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- STATS RAPIDES -->
+            <div class="grid grid-cols-2 gap-2">
+              <div class="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-3">
+                <div class="text-[9px] uppercase tracking-[0.15em] text-zinc-500 mb-1">Temps Réel / Facturé</div>
+                <div class="flex items-end justify-between gap-1">
+                  <span id="stat-h-rf" class="font-mono text-base font-bold text-zinc-100 chip">0h / 0h</span>
+                </div>
+                <div id="stat-h-pct" class="text-[10px] text-zinc-500 font-mono mt-0.5">+0 % arrondi</div>
+              </div>
+              <div class="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-3">
+                <div class="text-[9px] uppercase tracking-[0.15em] text-zinc-500 mb-1">Jours écoulés / Mois</div>
+                <div class="flex items-end justify-between gap-1">
+                  <span id="stat-days" class="font-mono text-base font-bold text-zinc-100 chip">0 / 31j</span>
+                </div>
+                <div id="stat-days-pace" class="text-[10px] text-zinc-500 font-mono mt-0.5">Rythme · 0,00 h/j</div>
+              </div>
             </div>
           </div>
         </div>
@@ -511,7 +741,7 @@
     </div>
 
     <footer class="mt-10 mb-6 text-center text-[10px] text-zinc-600 tracking-wider uppercase">
-      VibeTime · NessyOS · v2.0 · Firebase Firestore · GitHub Pages
+      kopek · Cockpit Financier · v2.0 · Firebase Firestore · GitHub Pages
     </footer>
   </main>
 </div>

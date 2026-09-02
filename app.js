@@ -121,7 +121,7 @@ $('#login-form').addEventListener('submit', async (e) => {
   err.classList.add('hidden');
   try {
     await signInWithEmailAndPassword(auth, email, password);
-    toast('Connecté · Bienvenue dans VibeTime ✨', 'sparkles');
+    toast('Connecté · Bienvenue dans kopek ✨', 'sparkles');
   } catch (ex) {
     let msg = 'Identifiants incorrects.';
     if (ex.code === 'auth/invalid-credential' || ex.code === 'auth/wrong-password' || ex.code === 'auth/user-not-found') msg = 'Identifiants incorrects.';
@@ -457,11 +457,9 @@ function aggregateMonth() {
   const avance = isAvanceMonth(monthIdx) ? NESSY.avanceDeduct : 0;
   const netPocket = globalCA + TRESORERIE.creditTVA - TOTAL_CHARGES - inasti - ipp - avance;
 
-  // Pour jauge (0 → minHoursEq en base 100% du min garanti, >100% → surplus)
+  // Pour jauge · 0 → minHoursEq = 100% ; max 120% pour que ça déborde visuellement dans la zone surplus
   const gaugeBaseHours = NESSY.minHoursEq;
-  const gaugePct = hoursHourlyNessy <= gaugeBaseHours
-    ? (hoursHourlyNessy / gaugeBaseHours) * 100
-    : 100 + Math.min(50, (t3h / 20) * 100); // 20h surplus = +50% bar
+  const gaugePct = Math.min(120, (hoursHourlyNessy / gaugeBaseHours) * 100);
 
   return {
     monthIdx, minG, minApplied,
@@ -499,12 +497,13 @@ async function refreshPeriod() {
   populateClientSelects();
   renderHeader(agg);
   renderNessyGauge(agg);
+  renderMine(agg);
   renderPocket(agg);
   renderMetrics(agg);
   renderWaterfall(agg);
   renderClientsList(agg);
   renderLogs(agg);
-  lucide.createIcons();
+  if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
 }
 
 function renderHeader(agg) {
@@ -532,27 +531,28 @@ function renderHeader(agg) {
 }
 
 function renderNessyGauge(agg) {
-  // Tier markers (0% → 25h, then +18,75h → 43,75h sur une base minHoursEq)
-  const base = NESSY.minHoursEq;
-  const t1Pct = (NESSY.socleHours / base) * 100;
-  const t2Pct = 100;
-  $('#tier1-marker').style.left = `${t1Pct}%`;
-  $('#tier2-marker').style.left = `${t2Pct}%`;
-  // Background tiers
-  const bars = $$('#gauge-fill').parentElement.querySelectorAll(':scope > div');
-  // bars[0] = t1 bg, bars[1] = t2 bg, bars[2] = t3 bg, bars[3] = fill, bars[4] = cursor
-  const bgBars = $$('#gauge-fill').parentElement.children;
-  bgBars[0].style.width = `${t1Pct}%`;
-  bgBars[1].style.left = `${t1Pct}%`;
-  bgBars[1].style.width = `${t2Pct - t1Pct}%`;
-  bgBars[2].style.width = '0%'; // pas de zone 3 explicite, le curseur va "déborder"
+  const hoursNessy = agg.mainHoursHourly;          // h facturées sur contrat principal
+  const socleH = NESSY.socleHours;                 // 25 h
+  const garantieH = NESSY.minHoursEq;              // 43,75 h
 
-  // Curseur / remplissage · on clamp à 100% + visual overflow du curseur
-  const pct = Math.min(100, agg.gaugePct);
-  $('#gauge-fill').style.width = `${pct}%`;
-  $('#gauge-cursor').style.left = `${pct}%`;
+  // ============================================================
+  // ⚠️ POSITIONS DES ZONES SOCLE / GARANTIE / SURPLUS SONT FIXES EN DUR DANS LE HTML
+  //    (fond coloré en filigrane + séparateurs verticaux épais)
+  //    Ici on ne fait que positionner le FILL et le CURSEUR sur cette grille fixe.
+  // ============================================================
+  const pct = agg.gaugePct; // 0..120
+  $('#gauge-fill').style.width   = `${pct}%`;
+  $('#gauge-cursor').style.left  = `${pct}%`;
 
-  // Cards tiers
+  // Titre header : HEURES ENCODÉES / BASE
+  const hh = HHdecimal(hoursNessy * 60);           // heures decimal pour affichage
+  const beforeSocle = socleH - hoursNessy;
+  const beforeGarantie = garantieH - hoursNessy;
+  $('#nessy-sub').innerHTML = hoursNessy <= 0
+    ? `0 h · encodé sur <b class="text-indigo-300">${socleH.toFixed(2)} h Socle</b> → <b class="text-fuchsia-300">${garantieH.toFixed(2)} h Min Garanti</b>`
+    : `<b class="chip font-bold text-white">${hh} h</b> facturées sur le contrat · <span class="text-zinc-500">Base ${garantieH.toFixed(2)} h</span>`;
+
+  // Cards tiers (3 sous-cartes sous la jauge)
   $('#tier1-h').textContent   = `${agg.tiers.t1.h.toFixed(2)} h`;
   $('#tier1-eur').textContent = EUR(agg.tiers.t1.eur);
   $('#tier2-h').textContent   = `${agg.tiers.t2.h.toFixed(2)} h`;
@@ -560,31 +560,267 @@ function renderNessyGauge(agg) {
   $('#tier3-h').textContent   = `${agg.tiers.t3.h.toFixed(2)} h`;
   $('#tier3-eur').textContent = `+ ${EUR(agg.tiers.t3.eur + agg.mainFlatEur)}`;
 
-  // Status
+  // ---- STATUS BAND : position EXPLICITE vs SOCLE puis vs GARANTIE ----
   const st = $('#gauge-status');
   const minGap = agg.minG - agg.mainRevenusAvantMin;
+
+  // Cas 0 · Rien d'encodé
   if (agg.mainFinalCA === 0) {
     st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-zinc-800 bg-zinc-900/40';
-    st.innerHTML = `<i data-lucide="sparkles" class="w-5 h-5 text-zinc-500 flex-none mt-0.5"></i>
-      <div><strong class="text-zinc-200">Aucune heure enregistrée sur le contrat principal.</strong><br>
-      <span class="text-zinc-500 text-sm">Sélectionnez <b>${agg.mainClient?.name || 'NESSY'}</b> dans la saisie rapide pour activer le palier Socle 2 000 €.</span></div>`;
-  } else if (agg.minApplied) {
-    st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-indigo-500/30 bg-indigo-500/5';
-    st.innerHTML = `<i data-lucide="shield-check" class="w-5 h-5 text-indigo-300 flex-none mt-0.5"></i>
-      <div><strong class="text-indigo-100">Minimum garanti appliqué · ${EUR(agg.minG)} facturés</strong>
-      <div class="text-indigo-200/70 text-sm mt-1">
-        Socle ${EUR(agg.tiers.t1.eur)} · Régie garantie ${EUR(agg.tiers.t2.eur)} · Forfaits ${EUR(agg.mainFlatEur)} · Surplus horaire ${EUR(agg.tiers.t3.eur)}
-        ${minGap > 0 ? `<br><span class="text-indigo-300">Il manque <b>${EUR(minGap)}</b> de prestations pour dépasser le seuil et basculer en surplus facturable.</span>` : ''}
-      </div></div>`;
-  } else {
-    const surplus = agg.mainFinalCA - agg.minG;
-    st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-emerald-500/40 bg-emerald-500/5';
-    st.innerHTML = `<i data-lucide="trending-up" class="w-5 h-5 text-emerald-300 flex-none mt-0.5"></i>
-      <div><strong class="text-emerald-100">Surplus facturable atteint !</strong> · CA principal <b>${EUR(agg.mainFinalCA)}</b> · <span class="text-emerald-300">+${EUR(surplus)} au-dessus du seuil</span>
-      <div class="text-emerald-200/70 text-sm mt-1">
-        Palier Socle ${HHdecimal(agg.tiers.t1.h * 60)} · Palier Régie Garantie ${HHdecimal(agg.tiers.t2.h * 60)} · Palier Surplus ${HHdecimal(agg.tiers.t3.h * 60)}
+    st.innerHTML = `<i data-lucide="hash" class="w-5 h-5 text-zinc-500 flex-none mt-0.5"></i>
+      <div><strong class="text-zinc-200">Heures encodées NESSY · <span class="chip text-zinc-100">0,00 h</span> / ${garantieH.toFixed(2)} h</strong><br>
+      <div class="mt-1.5 grid grid-cols-3 gap-3 text-xs font-mono">
+        <div class="text-indigo-300/90"><b>0 / 25 h</b><br><span class="text-zinc-500 text-[11px]">Socle 2 000 €</span></div>
+        <div class="text-fuchsia-300/90"><b>0 / 18,75 h</b><br><span class="text-zinc-500 text-[11px]">Régie Garantie</span></div>
+        <div class="text-emerald-300/90"><b>0 h</b><br><span class="text-zinc-500 text-[11px]">Surplus facturable</span></div>
+      </div>
+      <span class="text-zinc-500 text-sm mt-2 block">Sélectionnez <b>${agg.mainClient?.name || 'NESSY'}</b> dans la saisie rapide pour activer le palier Socle.</span></div>`;
+  }
+
+  // Cas 1 · Dans le SOCLE (0 → 25h)
+  else if (hoursNessy < socleH) {
+    const pctSocle = Math.min(100, (hoursNessy / socleH) * 100);
+    st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-indigo-500/40 bg-indigo-500/[0.07]';
+    st.innerHTML = `<i data-lucide="move-up-right" class="w-5 h-5 text-indigo-300 flex-none mt-0.5"></i>
+      <div class="flex-1"><strong class="text-indigo-100">Zone Socle · <span class="chip">${agg.tiers.t1.h.toFixed(2)} h / 25,00 h</span> effectués</strong>
+      <div class="mt-2 h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-indigo-400/80 rounded-full" style="width:${pctSocle}%"></div></div>
+      <div class="flex justify-between text-[11px] font-mono mt-1.5 text-indigo-300/80">
+        <span>Avancement Socle · ${pctSocle.toFixed(0)}%</span>
+        <span>Il manque <b>${beforeSocle.toFixed(2)} h</b> pour remplir le socle</span>
+      </div>
+      <div class="text-zinc-400 text-[12px] mt-2">
+        Palier Socle <b class="text-indigo-300">${EUR(agg.tiers.t1.eur)}</b> · Forfaits ajoutés <b>${EUR(agg.mainFlatEur)}</b> ·
+        ${minGap > 0 ? `Pour dépasser le Min Garanti : encore <b class="text-fuchsia-300">${EUR(minGap)}</b> de prestations` : `Min Garanti atteint`}
       </div></div>`;
   }
+
+  // Cas 2 · Dans la RÉGIE GARANTIE (25h → 43,75h)
+  else if (hoursNessy < garantieH) {
+    const regieH = hoursNessy - socleH;
+    const regieMax = garantieH - socleH; // 18,75 h
+    const pctRegie = Math.min(100, (regieH / regieMax) * 100);
+    st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-fuchsia-500/40 bg-fuchsia-500/[0.07]';
+    st.innerHTML = `<i data-lucide="shield-check" class="w-5 h-5 text-fuchsia-300 flex-none mt-0.5"></i>
+      <div class="flex-1"><strong class="text-fuchsia-100">Socle <span class="text-emerald-300">✓</span> rempli · Zone Régie Garantie · <span class="chip">${regieH.toFixed(2)} h / 18,75 h</span></strong>
+      <div class="mt-2 grid grid-cols-2 gap-3">
+        <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-indigo-400 rounded-full" style="width:100%"></div></div>
+        <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-fuchsia-400/80 rounded-full" style="width:${pctRegie}%"></div></div>
+      </div>
+      <div class="flex justify-between text-[11px] font-mono mt-1.5 text-zinc-400">
+        <span class="text-indigo-300/80">Socle 100% · 25 h · 2 000 €</span>
+        <span class="text-fuchsia-300/80">Régie ${pctRegie.toFixed(0)}% · manque <b>${beforeGarantie.toFixed(2)} h</b></span>
+      </div>
+      <div class="text-zinc-400 text-[12px] mt-2">
+        Socle <b class="text-indigo-300">${EUR(agg.tiers.t1.eur)}</b> · Régie Garantie <b class="text-fuchsia-300">${EUR(agg.tiers.t2.eur)}</b> @ ${NESSY.regieRate} €/h · Forfaits <b>${EUR(agg.mainFlatEur)}</b>
+        ${agg.minApplied ? `<br><span class="text-amber-300">⚠ Minimum garanti <b>${EUR(agg.minG)}</b> sera appliqué en facturation</span>` : `<br><span class="text-emerald-300">✓ Min Garanti atteint sans top-up</span>`}
+      </div></div>`;
+  }
+
+  // Cas 3 · SURPLUS (≥ 43,75h)
+  else {
+    const surplusH = agg.tiers.t3.h;
+    st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-emerald-500/40 bg-emerald-500/[0.07]';
+    st.innerHTML = `<i data-lucide="trending-up" class="w-5 h-5 text-emerald-300 flex-none mt-0.5"></i>
+      <div class="flex-1"><strong class="text-emerald-100">Socle ✓ · Min Garanti ✓ · Surplus facturable · <span class="chip">+${surplusH.toFixed(2)} h</span></strong>
+      <div class="mt-2 grid grid-cols-3 gap-3">
+        <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-indigo-400 rounded-full" style="width:100%"></div></div>
+        <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-fuchsia-400 rounded-full" style="width:100%"></div></div>
+        <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-emerald-400 to-lime-400 rounded-full" style="width:${Math.min(100,(surplusH/8.75)*100)}%"></div></div>
+      </div>
+      <div class="flex justify-between text-[11px] font-mono mt-1.5 text-zinc-400">
+        <span class="text-indigo-300/80">Socle 25 h · 2 000 €</span>
+        <span class="text-fuchsia-300/80">Régie 18,75 h · 1 500 €</span>
+        <span class="text-emerald-300/80">Surplus · ${surplusH.toFixed(2)} h × 80 €</span>
+      </div>
+      <div class="text-zinc-400 text-[12px] mt-2">
+        Palier Socle <b class="text-indigo-300">${agg.tiers.t1.h.toFixed(2)} h</b> ·
+        Palier Régie Garantie <b class="text-fuchsia-300">${agg.tiers.t2.h.toFixed(2)} h</b> ·
+        Palier Surplus <b class="text-emerald-300">${agg.tiers.t3.h.toFixed(2)} h</b> ·
+        CA principal total <b>${EUR(agg.mainFinalCA)}</b>
+        ${agg.tiers.t3.eur + agg.mainFlatEur > 0 ? ` · Surplus encaissé <b class="text-emerald-300">+${EUR(agg.tiers.t3.eur + agg.mainFlatEur)}</b>` : ''}
+      </div></div>`;
+  }
+  if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
+}
+
+// =================================================================
+// 🎮 GAMIFIED · MINE KOPEK 3D + SCOREBOARD
+// =================================================================
+function renderMine(agg) {
+  // ---- DONNÉES NÉCESSAIRES ----
+  const socleMaxH = NESSY.socleHours;                            // 25 h
+  const garantieMaxH = NESSY.minHoursEq;                         // 43,75 h
+  const hoursNessy = agg.mainHoursHourly;                        // h facturées NESSY
+  const t1h = agg.tiers.t1.h;
+  const t2h = agg.tiers.t2.h;
+  const t3h = agg.tiers.t3.h;
+  const pctL1 = Math.min(100, (t1h / socleMaxH) * 100);          // 0→25h => 0→100% L1
+  const pctL2 = t1h >= socleMaxH ? Math.min(100, (t2h / (garantieMaxH - socleMaxH)) * 100) : 0;
+  const pctL3 = hoursNessy >= garantieMaxH ? Math.min(100, Math.min(100, (t3h / 8.75) * 100)) : 0;
+
+  // ---- FILLS HEIGHTS (chaque niveau se remplit depuis le bas) ----
+  $('#mine-l1-fill').style.height = `${pctL1}%`;
+  $('#mine-l2-fill').style.height = `${pctL2}%`;
+  $('#mine-l3-fill').style.height = `${pctL3}%`;
+
+  // ---- SPRITES GÉNÉRATEUR : créer N emojis selon % pour chaque niveau ----
+  function fillSprites(containerId, pct, palette, countMax) {
+    const wrap = document.getElementById(containerId);
+    if (!wrap) return;
+    // Combien d'items afficher (proportionnel au pct, mini 0, max countMax)
+    const target = Math.round((pct / 100) * countMax);
+    const existing = wrap.children.length;
+    if (target === existing && target > 0) return; // déjà bon
+    wrap.innerHTML = '';
+    for (let i = 0; i < target; i++) {
+      const span = document.createElement('span');
+      const emoji = palette[i % palette.length];
+      span.textContent = emoji;
+      // rotations / offsets random pour un look "entassé cartoon"
+      const rot = (Math.random() * 40 - 20).toFixed(1);
+      const ty = (Math.random() * 4).toFixed(1);
+      const scale = (0.85 + Math.random() * 0.35).toFixed(2);
+      span.style.display = 'inline-block';
+      span.style.transform = `rotate(${rot}deg) translateY(${ty}px) scale(${scale})`;
+      span.style.filter = `drop-shadow(0 2px 2px rgba(0,0,0,0.35))`;
+      wrap.appendChild(span);
+    }
+  }
+
+  fillSprites('mine-l1-sprites', pctL1, ['🪙','🟠','🟫','🟡','🏺','⚱️'], 24);
+  fillSprites('mine-l2-sprites', pctL2, ['🟨','🟧','🥇','🏆','💰','🪙','🪙'], 22);
+  fillSprites('mine-l3-sprites', pctL3, ['💎','💠','💚','🟢','👑','💵','🪙'], 24);
+
+  // ---- POSITION DU PERSONNAGE MINER : il se déplace le long du "chemin" de remplissage ----
+  // On calcule un "score de progression global" 0..120 (socle 0-57, garantie 57-100, surplus 100-120)
+  const globalPct = Math.min(120, (hoursNessy / garantieMaxH) * 100);
+  // Position x (-100 → +150), y (0 → -180)
+  const minerX = -100 + (globalPct / 120) * 220;
+  const minerY = 10 - Math.min(180, (globalPct / 120) * 180);
+  const zOffset = 200 + Math.min(40, (globalPct / 120) * 60);
+  const minerEl = $('#miner-char');
+  const cartEl = $('#miner-cart');
+  if (minerEl) minerEl.style.transform = `translate(${minerX}px, ${minerY}px) translateZ(${zOffset}px)`;
+  if (cartEl) cartEl.style.transform = `translate(${minerX + 40}px, ${minerY + 20}px) translateZ(${zOffset + 5}px)`;
+
+  // ---- BADGE NIVEAU ----
+  let level = 0; let levelName = 'Débutant'; let badgeColor = 'indigo';
+  if (hoursNessy >= 0.01) { level = 1; levelName = 'Apprenti Mineur'; badgeColor = 'indigo'; }
+  if (hoursNessy >= socleMaxH) { level = 2; levelName = 'Socle Atteint'; badgeColor = 'sky'; }
+  if (hoursNessy >= garantieMaxH * 0.9) { level = 3; levelName = 'Bientôt Garanti'; badgeColor = 'fuchsia'; }
+  if (hoursNessy >= garantieMaxH) { level = 4; levelName = 'Garanti Validé'; badgeColor = 'amber'; }
+  if (t3h >= 5) { level = 5; levelName = 'Surplus Pro'; badgeColor = 'emerald'; }
+  if (t3h >= 15) { level = 6; levelName = 'Kopek Magnat'; badgeColor = 'lime'; }
+  const badge = $('#mine-level-badge');
+  if (badge) {
+    const cls = {indigo: 'bg-indigo-500/20 text-indigo-200 border-indigo-400/40', sky:'bg-sky-500/20 text-sky-200 border-sky-400/40', fuchsia:'bg-fuchsia-500/20 text-fuchsia-200 border-fuchsia-400/40', amber:'bg-amber-500/20 text-amber-200 border-amber-400/40', emerald:'bg-emerald-500/20 text-emerald-200 border-emerald-400/40', lime:'bg-lime-500/20 text-lime-200 border-lime-400/40'}[badgeColor];
+    badge.className = `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold tracking-wider uppercase border ${cls}`;
+    badge.innerHTML = `<i data-lucide="flame" class="w-3 h-3 text-orange-300"></i> Niveau ${level} · ${levelName}`;
+  }
+
+  // ---- XP BAR (0 → garantieMaxH) ----
+  const xpPct = Math.min(100, (hoursNessy / garantieMaxH) * 100);
+  if ($('#mine-xp-fill'))  $('#mine-xp-fill').style.width = `${xpPct}%`;
+  if ($('#mine-xp-label')) $('#mine-xp-label').textContent = `XP · ${hoursNessy.toFixed(2).replace('.',',')} / ${garantieMaxH.toFixed(2).replace('.',',')} h`;
+  if ($('#mine-xp-pct'))   $('#mine-xp-pct').textContent = `${xpPct.toFixed(0)}%`;
+
+  // ---- BOSS DU MOIS (HP bar = mainFinalCA / minG) ----
+  const minG = agg.minG;
+  const bossTitle = $('#boss-title');
+  const bossHpLabel = $('#boss-hp-label');
+  const bossHpFill = $('#boss-hp-fill');
+  const bossSummary = $('#boss-summary');
+  if (bossTitle) {
+    if (hoursNessy <= 0) {
+      bossTitle.textContent = 'Réveiller la Machine · Premier Encodage';
+    } else if (t1h < socleMaxH) {
+      bossTitle.textContent = 'Creuser le Socle · 2 000 €';
+    } else if (agg.mainFinalCA < minG) {
+      bossTitle.textContent = 'Valider le Min Garanti · 3 500 €';
+    } else {
+      bossTitle.textContent = '🎊 Boss Battu · Surplus illimité activé';
+    }
+  }
+  if (bossHpLabel) bossHpLabel.textContent = `CA · ${EUR(agg.mainFinalCA)} / ${EUR(minG)}${agg.minApplied ? ' · ⚠ Top-up Min Garanti' : ''}`;
+  let bossPct = minG > 0 ? Math.min(100, (agg.mainFinalCA / minG) * 100) : 0;
+  // Inversement logique "PV" remplis par boss : on commence à 0%, on attaque le boss (HP 100%) → l'UI sera progress fill : 0% = boss full HP
+  // Ici on veut plus : 100% = boss vaincu. Donc notre % = bossPct tel quel.
+  if (bossHpFill) {
+    bossHpFill.style.width = `${bossPct}%`;
+    // Gradient selon phase
+    if (bossPct < 40) bossHpFill.style.background = 'linear-gradient(90deg,#f87171,#fb923c)';
+    else if (bossPct < 80) bossHpFill.style.background = 'linear-gradient(90deg,#fb923c,#facc15)';
+    else bossHpFill.style.background = 'linear-gradient(90deg,#facc15,#34d399,#a3e635)';
+  }
+  if (bossSummary) {
+    if (hoursNessy < socleMaxH) {
+      bossSummary.innerHTML = `🔵 Focus : remplir le Socle 25 h. Il manque <b class="text-indigo-300">${(socleMaxH - hoursNessy).toFixed(2)} h</b> (soit ~${Math.max(0, Math.ceil((socleMaxH - hoursNessy) * 4))} quarts d'heure).`;
+    } else if (agg.mainFinalCA < minG) {
+      const gap = minG - agg.mainFinalCA;
+      bossSummary.innerHTML = `🟣 Objectif Min Garanti <b>${EUR(minG)}</b>. Encore <b class="text-fuchsia-300">${EUR(gap)}</b> de prestations à encoder pour éviter le top-up.`;
+    } else if (agg.tiers.t3.h > 0) {
+      bossSummary.innerHTML = `🟢 <b>Mission réussie !</b> Tu es en Surplus. Chaque heure supplémentaire = <b class="text-emerald-300">${Math.round(agg.tiers.t3.h > 0 ? (agg.tiers.t3.eur / Math.max(0.01, agg.tiers.t3.h)) : NESSY.regieRate)} € nets</b> en plus.`;
+    } else {
+      bossSummary.innerHTML = `🟢 <b>Min Garanti validé</b>. Le mois est safe. Continue pour déclencher le Surplus !`;
+    }
+  }
+
+  // ---- SUCCÈS / ACHIEVEMENTS ----
+  function setAchievement(key, unlocked, icon, reward) {
+    const row = document.querySelector(`#achievements-list [data-ach="${key}"]`);
+    if (!row) return;
+    const badge = row.children[3] || row.lastElementChild;
+    const iconBox = row.children[0];
+    if (unlocked) {
+      row.classList.remove('opacity-60','bg-zinc-950/40','border-zinc-800');
+      row.classList.add('bg-emerald-500/[0.08]','border-emerald-500/40','shadow-[0_0_30px_-10px_rgba(16,185,129,0.5)]');
+      if (iconBox) { iconBox.classList.remove('grayscale'); iconBox.classList.add('bg-emerald-500/15','border-emerald-500/40'); iconBox.textContent = icon || iconBox.textContent; }
+      if (badge) { badge.textContent = `✓ ${reward || 'Débloqué'}`; badge.className = 'text-[10px] font-mono text-emerald-300 font-bold'; }
+    }
+  }
+  setAchievement('socle',     hoursNessy >= socleMaxH, '🟦', `Socle 25h`);
+  setAchievement('garantie',  hoursNessy >= garantieMaxH, '🟨', `Min Garanti OK`);
+  setAchievement('surplus',   t3h > 0, '💎', `+${t3h.toFixed(1)} h surplus`);
+  setAchievement('secondary', agg.secondaryEur >= 500, '🚀', `${EUR(agg.secondaryEur)} secondaire`);
+
+  // ---- STATS RAPIDES ----
+  if ($('#stat-h-rf')) {
+    $('#stat-h-rf').textContent = `${HH(agg.mainRealMinutes)} / ${HH(agg.mainBilledMinutes)}`;
+    const pctRounded = agg.mainRealMinutes > 0
+      ? (((agg.mainBilledMinutes - agg.mainRealMinutes) / agg.mainRealMinutes) * 100)
+      : 0;
+    const badgeEl = $('#stat-h-pct');
+    if (badgeEl) {
+      badgeEl.textContent = pctRounded > 0
+        ? `+${pctRounded.toFixed(1)} % arrondi auto`
+        : `0 % d'arrondi`;
+      badgeEl.className = `text-[10px] font-mono mt-0.5 ${pctRounded >= 5 ? 'text-emerald-400 font-bold' : 'text-zinc-500'}`;
+    }
+  }
+  if ($('#stat-days')) {
+    const now = new Date();
+    const y = STATE.selectedYear, m = STATE.selectedMonth;
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    let dayElapsed;
+    if (now.getFullYear() === y && now.getMonth() === m) dayElapsed = now.getDate();
+    else if (y < now.getFullYear() || (y === now.getFullYear() && m < now.getMonth())) dayElapsed = daysInMonth;
+    else dayElapsed = 0;
+    $('#stat-days').textContent = `${dayElapsed} / ${daysInMonth}j`;
+    const pace = dayElapsed > 0 ? hoursNessy / dayElapsed : 0;
+    const rythmeEl = $('#stat-days-pace');
+    if (rythmeEl) {
+      const required = garantieMaxH / daysInMonth;
+      const delta = pace - required;
+      let color = 'text-zinc-500', arrow = '';
+      if (delta > 0.1) { color = 'text-emerald-400 font-bold'; arrow = '▲ en avance '; }
+      else if (delta < -0.1) { color = 'text-amber-400 font-bold'; arrow = '▼ en retard '; }
+      rythmeEl.className = `text-[10px] font-mono mt-0.5 ${color}`;
+      rythmeEl.textContent = `Rythme ${pace.toFixed(2)} h/j · ${arrow}${Math.abs(delta).toFixed(2)} h/j vs ${required.toFixed(2)} h/j requis`;
+    }
+  }
+
+  // Re-render les icônes lucide car on a modifié innerHTML
+  if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
 }
 
 function renderPocket(agg) {
@@ -1094,7 +1330,7 @@ function exportCSV() {
   const a = document.createElement('a');
   a.href = url;
   const mm = String(STATE.selectedMonth + 1).padStart(2, '0');
-  a.download = `VibeTime_releve_${STATE.selectedYear}-${mm}.csv`;
+  a.download = `kopek_releve_${STATE.selectedYear}-${mm}.csv`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
   toast('CSV téléchargé', 'download');
