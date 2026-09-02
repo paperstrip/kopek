@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="fr-BE">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Freelance OS · Nessy Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          brand: {
+            50: '#eef2ff', 100: '#e0e7ff', 200: '#c7d2fe', 300: '#a5b4fc',
+            400: '#818cf8', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca',
+            800: '#3730a3', 900: '#312e81',
+          },
+        },
+        fontFamily: {
+          sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        },
+      },
+    },
+  };
+</script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script type="module" src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
+<script type="module" src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js"></script>
+<script type="module" src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"></script>
+<style>
+  * { -webkit-font-smoothing: antialiased; }
+  body { background:#0f172a; }
+  .glass { background: rgba(30,41,59,0.7); backdrop-filter: blur(8px); }
+  .card-hover { transition: transform .15s ease, box-shadow .15s ease; }
+  .card-hover:hover { transform: translateY(-1px); box-shadow: 0 10px 30px -10px rgba(0,0,0,.5); }
+  @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(16,185,129,.6);} 70% {box-shadow:0 0 0 10px rgba(16,185,129,0);} 100%{box-shadow:0 0 0 0 rgba(16,185,129,0);} }
+  .timer-running { animation: pulse-ring 1.5s infinite; border-radius: 9999px; }
+  .scrollbar-thin::-webkit-scrollbar { width:6px; height:6px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: #1e293b; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+  .fade-in { animation: fadeIn .25s ease forwards; }
+  @keyframes fadeIn { from { opacity:0; transform: translateY(4px);} to { opacity:1; transform: translateY(0);} }
+</style>
+</head>
+<body class="min-h-screen text-slate-100 font-sans">
+
+<!-- ================= LOGIN SCREEN ================= -->
+<div id="login-screen" class="min-h-screen flex items-center justify-center px-4">
+  <div class="w-full max-w-md">
+    <div class="flex flex-col items-center mb-8">
+      <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center mb-4 shadow-lg shadow-brand-600/30">
+        <i data-lucide="timer" class="w-8 h-8 text-white"></i>
+      </div>
+      <h1 class="text-2xl font-semibold tracking-tight">Freelance OS</h1>
+      <p class="text-sm text-slate-400 mt-1">Time Tracker · Financial Dashboard</p>
+    </div>
+
+    <form id="login-form" class="bg-slate-800/80 border border-slate-700 rounded-2xl p-6 shadow-2xl">
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1.5 uppercase tracking-wider">Email</label>
+          <input id="login-email" type="email" required autocomplete="email"
+            class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+            placeholder="dev@nessy.be" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1.5 uppercase tracking-wider">Mot de passe</label>
+          <input id="login-password" type="password" required autocomplete="current-password"
+            class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+            placeholder="••••••••" />
+        </div>
+        <div id="login-error" class="hidden text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2"></div>
+        <button type="submit"
+          class="w-full py-2.5 bg-gradient-to-r from-brand-600 to-brand-700 hover:from-brand-500 hover:to-brand-600 text-white font-medium rounded-lg shadow-lg shadow-brand-600/25 transition-all flex items-center justify-center gap-2">
+          <i data-lucide="log-in" class="w-4 h-4"></i> Se connecter
+        </button>
+      </div>
+      <p class="text-xs text-slate-500 text-center mt-5">Session persistante · Firebase Auth</p>
+    </form>
+  </div>
+</div>
+
+<!-- ================= DASHBOARD (hidden until auth) ================= -->
+<div id="dashboard-screen" class="hidden">
+
+  <!-- ===== TOP BAR ===== -->
+  <header class="sticky top-0 z-40 glass border-b border-slate-800">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center shadow-md shadow-brand-600/30">
+          <i data-lucide="timer" class="w-5 h-5 text-white"></i>
+        </div>
+        <div class="hidden sm:block">
+          <div class="text-sm font-semibold leading-tight">Freelance OS</div>
+          <div class="text-[11px] text-slate-400 leading-tight">Contrat Nessy · Belgique</div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <div class="flex items-center bg-slate-800 rounded-lg border border-slate-700 p-0.5">
+          <button id="prev-month" class="p-2 hover:bg-slate-700 rounded-md text-slate-300 transition">
+            <i data-lucide="chevron-left" class="w-4 h-4"></i>
+          </button>
+          <select id="month-select" class="bg-transparent text-sm font-medium px-2 py-1.5 outline-none text-white cursor-pointer">
+          </select>
+          <select id="year-select" class="bg-transparent text-sm font-medium px-2 py-1.5 outline-none text-white cursor-pointer">
+          </select>
+          <button id="next-month" class="p-2 hover:bg-slate-700 rounded-md text-slate-300 transition">
+            <i data-lucide="chevron-right" class="w-4 h-4"></i>
+          </button>
+        </div>
+        <button id="btn-export" title="Exporter Timesheet" class="hidden sm:flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-sm transition">
+          <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> Export
+        </button>
+        <button id="btn-logout" title="Déconnexion" class="p-2 text-slate-300 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition">
+          <i data-lucide="log-out" class="w-5 h-5"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+    <!-- ===== WELCOME + CONTRACT STATUS ===== -->
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+      <div>
+        <h1 id="period-title" class="text-2xl font-bold tracking-tight"></h1>
+        <p id="contract-phase" class="text-sm text-slate-400 mt-0.5"></p>
+      </div>
+      <div class="flex gap-2">
+        <span id="badge-phase" class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full bg-brand-500/10 text-brand-300 border border-brand-500/30"></span>
+        <span id="badge-avance" class="hidden inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/30"></span>
+      </div>
+    </div>
+
+    <!-- ===== TIMER + MANUAL ENTRY ===== -->
+    <section class="grid lg:grid-cols-3 gap-5">
+      <!-- TIMER WIDGET -->
+      <div class="lg:col-span-2 bg-slate-800/70 border border-slate-700 rounded-2xl p-5 card-hover">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <div class="w-9 h-9 rounded-lg bg-brand-500/15 flex items-center justify-center text-brand-400">
+              <i data-lucide="timer" class="w-5 h-5"></i>
+            </div>
+            <h2 class="font-semibold">Timer en cours</h2>
+          </div>
+          <div id="timer-status" class="flex items-center gap-1.5 text-xs text-slate-400">
+            <span class="w-2 h-2 rounded-full bg-slate-500"></span> En pause
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-3 gap-3 mb-4">
+          <div class="sm:col-span-2">
+            <label class="block text-[11px] text-slate-400 mb-1 uppercase tracking-wider">Description</label>
+            <input id="timer-desc" type="text"
+              class="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              placeholder="Tâche en cours…" />
+          </div>
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1 uppercase tracking-wider">Catégorie</label>
+            <select id="timer-category"
+              class="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+              <option value="socle">Forfait Socle</option>
+              <option value="regie_80" selected>Régie Dev · 80€/h</option>
+              <option value="regie_95">Régie Lead · 95€/h</option>
+              <option value="forfait">Forfait Projet Spe</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row sm:items-center gap-4">
+          <div id="timer-display" class="font-mono text-5xl sm:text-6xl font-bold tracking-tight tabular-nums text-center sm:text-left">
+            00:00:00
+          </div>
+          <div class="flex-1"></div>
+          <div class="flex gap-2">
+            <button id="btn-timer-start"
+              class="flex-1 sm:flex-none px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl shadow-lg shadow-emerald-600/25 transition flex items-center justify-center gap-2">
+              <i data-lucide="play" class="w-4 h-4 fill-current"></i> Démarrer
+            </button>
+            <button id="btn-timer-stop" disabled
+              class="hidden flex-1 sm:flex-none px-6 py-3 bg-red-600 hover:bg-red-500 disabled:bg-red-600/40 disabled:cursor-not-allowed text-white font-semibold rounded-xl shadow-lg shadow-red-600/25 transition flex items-center justify-center gap-2">
+              <i data-lucide="square" class="w-4 h-4 fill-current"></i> Arrêter &amp; Enregistrer
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MANUAL ENTRY -->
+      <div class="bg-slate-800/70 border border-slate-700 rounded-2xl p-5 card-hover">
+        <div class="flex items-center gap-2 mb-4">
+          <div class="w-9 h-9 rounded-lg bg-brand-500/15 flex items-center justify-center text-brand-400">
+            <i data-lucide="plus-circle" class="w-5 h-5"></i>
+          </div>
+          <h2 class="font-semibold">Saisie manuelle</h2>
+        </div>
+        <form id="manual-form" class="space-y-3">
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1 uppercase tracking-wider">Date</label>
+            <input id="manual-date" type="date" required
+              class="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1 uppercase tracking-wider">Catégorie</label>
+            <select id="manual-category" required
+              class="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+              <option value="socle">Forfait Socle</option>
+              <option value="regie_80" selected>Régie Dev · 80€/h</option>
+              <option value="regie_95">Régie Lead · 95€/h</option>
+              <option value="forfait">Forfait Projet Spe</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1 uppercase tracking-wider">Durée (heures) · <span id="manual-rounded-hint" class="text-amber-400/80">arrondi 15 min</span></label>
+            <input id="manual-duration" type="number" min="0.25" step="0.25" required placeholder="1.25"
+              class="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+          <div class="hidden" id="forfait-budget-wrap">
+            <label class="block text-[11px] text-slate-400 mb-1 uppercase tracking-wider">Budget Forfait (€ HTVA)</label>
+            <input id="manual-forfait-budget" type="number" min="0" step="50" placeholder="3200"
+              class="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1 uppercase tracking-wider">Description</label>
+            <input id="manual-desc" type="text" placeholder="Description de la tâche…"
+              class="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          </div>
+          <div id="manual-error" class="hidden text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2"></div>
+          <button type="submit"
+            class="w-full py-2.5 bg-brand-600 hover:bg-brand-500 text-white font-medium rounded-lg shadow-lg shadow-brand-600/25 transition flex items-center justify-center gap-2">
+            <i data-lucide="save" class="w-4 h-4"></i> Ajouter l'entrée
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- ===== MINIMUM GUARANTEED GAUGE ===== -->
+    <section class="bg-gradient-to-br from-slate-800/80 to-slate-800/40 border border-slate-700 rounded-2xl p-5 sm:p-6 card-hover">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+        <div>
+          <h2 class="font-semibold flex items-center gap-2">
+            <i data-lucide="target" class="w-5 h-5 text-brand-400"></i>
+            Jauge Minimum Garanti
+          </h2>
+          <p id="gauge-subtitle" class="text-sm text-slate-400 mt-0.5"></p>
+        </div>
+        <div class="text-right">
+          <div id="gauge-hours" class="text-3xl font-bold tabular-nums tracking-tight"></div>
+          <div id="gauge-target" class="text-xs text-slate-400"></div>
+        </div>
+      </div>
+
+      <div class="relative">
+        <div class="h-4 bg-slate-900 rounded-full overflow-hidden border border-slate-700">
+          <div id="gauge-bar" class="h-full rounded-full transition-all duration-500 ease-out bg-gradient-to-r from-brand-500 to-brand-400" style="width:0%"></div>
+        </div>
+        <div class="flex justify-between mt-2 text-[11px] text-slate-500 tabular-nums">
+          <span>0 h</span>
+          <span id="gauge-midpoint"></span>
+          <span id="gauge-end"></span>
+        </div>
+      </div>
+
+      <div id="gauge-status" class="mt-4 text-sm rounded-lg px-4 py-2.5 flex items-start gap-2.5"></div>
+    </section>
+
+    <!-- ===== FINANCIAL METRICS ===== -->
+    <section class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="bg-slate-800/70 border border-slate-700 rounded-2xl p-5 card-hover">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs text-slate-400 uppercase tracking-wider">CA HTVA Facturé</span>
+          <div class="w-9 h-9 rounded-lg bg-brand-500/15 flex items-center justify-center text-brand-400">
+            <i data-lucide="euro" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div id="metric-ca" class="text-2xl font-bold tabular-nums tracking-tight">0 €</div>
+        <div id="metric-ca-detail" class="text-xs text-slate-400 mt-1"></div>
+      </div>
+
+      <div class="bg-slate-800/70 border border-slate-700 rounded-2xl p-5 card-hover">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs text-slate-400 uppercase tracking-wider">TVA Nette à reverser</span>
+          <div class="w-9 h-9 rounded-lg bg-amber-500/15 flex items-center justify-center text-amber-400">
+            <i data-lucide="receipt-text" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div id="metric-tva" class="text-2xl font-bold tabular-nums tracking-tight text-amber-300">0 €</div>
+        <div id="metric-tva-detail" class="text-xs text-slate-400 mt-1"></div>
+      </div>
+
+      <div class="bg-slate-800/70 border border-slate-700 rounded-2xl p-5 card-hover">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs text-slate-400 uppercase tracking-wider">Provisions (INASTI + IPP)</span>
+          <div class="w-9 h-9 rounded-lg bg-rose-500/15 flex items-center justify-center text-rose-400">
+            <i data-lucide="shield-alert" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div id="metric-provisions" class="text-2xl font-bold tabular-nums tracking-tight text-rose-300">0 €</div>
+        <div id="metric-provisions-detail" class="text-xs text-slate-400 mt-1"></div>
+      </div>
+
+      <div class="bg-gradient-to-br from-emerald-600/20 to-emerald-800/10 border border-emerald-500/30 rounded-2xl p-5 card-hover relative overflow-hidden">
+        <div class="absolute -right-6 -top-6 w-24 h-24 rounded-full bg-emerald-500/10 blur-2xl"></div>
+        <div class="flex items-center justify-between mb-3 relative">
+          <span class="text-xs text-emerald-300 uppercase tracking-wider font-medium">Reste NET dispo</span>
+          <div class="w-9 h-9 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-300">
+            <i data-lucide="wallet" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div id="metric-net" class="text-2xl font-bold tabular-nums tracking-tight text-emerald-300 relative">0 €</div>
+        <div id="metric-net-detail" class="text-xs text-emerald-200/70 mt-1 relative"></div>
+      </div>
+    </section>
+
+    <!-- ===== CASHFLOW WATERFALL ===== -->
+    <section class="bg-slate-800/70 border border-slate-700 rounded-2xl p-5 sm:p-6 card-hover">
+      <h2 class="font-semibold mb-4 flex items-center gap-2">
+        <i data-lucide="workflow" class="w-5 h-5 text-brand-400"></i>
+        Cascade de Trésorerie
+      </h2>
+      <div id="waterfall" class="space-y-2"></div>
+    </section>
+
+    <!-- ===== MONTHLY LOGS ===== -->
+    <section class="bg-slate-800/70 border border-slate-700 rounded-2xl overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+        <h2 class="font-semibold flex items-center gap-2">
+          <i data-lucide="list-todo" class="w-5 h-5 text-brand-400"></i>
+          Journal du mois
+          <span id="log-count" class="text-xs text-slate-400 font-normal"></span>
+        </h2>
+        <button id="btn-export-sm" title="Exporter" class="sm:hidden p-2 bg-slate-900 hover:bg-slate-700 rounded-lg border border-slate-700">
+          <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <div class="overflow-x-auto scrollbar-thin">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-900/50 text-xs uppercase tracking-wider text-slate-400">
+            <tr>
+              <th class="text-left px-5 py-3 font-medium">Date</th>
+              <th class="text-left px-5 py-3 font-medium">Description</th>
+              <th class="text-left px-5 py-3 font-medium">Catégorie</th>
+              <th class="text-right px-5 py-3 font-medium">Durée</th>
+              <th class="text-right px-5 py-3 font-medium hidden sm:table-cell">€ HTVA</th>
+              <th class="text-right px-5 py-3 font-medium w-16"></th>
+            </tr>
+          </thead>
+          <tbody id="log-tbody" class="divide-y divide-slate-700/60"></tbody>
+          <tfoot id="log-tfoot" class="bg-slate-900/70 border-t border-slate-700 text-sm font-semibold"></tfoot>
+        </table>
+        <div id="log-empty" class="hidden px-5 py-16 text-center text-slate-400">
+          <i data-lucide="clock-3" class="w-10 h-10 mx-auto mb-3 opacity-40"></i>
+          <p>Aucune entrée pour ce mois.</p>
+          <p class="text-xs mt-1">Démarrez le timer ou ajoutez une saisie manuelle.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+  <footer class="text-center text-xs text-slate-500 py-8">Freelance OS · v1.0 · Firebase + GitHub Pages</footer>
+</div>
+
+<!-- ================= EXPORT MODAL ================= -->
+<div id="export-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+  <div class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" data-close-modal></div>
+  <div class="relative bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col fade-in">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+      <div>
+        <h3 class="font-semibold text-lg flex items-center gap-2"><i data-lucide="file-spreadsheet" class="w-5 h-5 text-brand-400"></i> Timesheet · Export</h3>
+        <p id="export-period" class="text-xs text-slate-400 mt-0.5"></p>
+      </div>
+      <button data-close-modal class="p-2 hover:bg-slate-700 rounded-lg transition text-slate-300">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+    <div id="export-body" class="overflow-auto scrollbar-thin p-5 flex-1"></div>
+    <div class="px-5 py-3 border-t border-slate-700 flex flex-col sm:flex-row gap-2 sm:justify-end bg-slate-900/50">
+      <button data-close-modal class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition flex items-center justify-center gap-1.5">
+        <i data-lucide="x" class="w-4 h-4"></i> Fermer
+      </button>
+      <button id="btn-print" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition flex items-center justify-center gap-1.5">
+        <i data-lucide="printer" class="w-4 h-4"></i> Imprimer
+      </button>
+      <button id="btn-csv" class="px-4 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg text-sm font-medium shadow-md shadow-brand-600/25 transition flex items-center justify-center gap-1.5">
+        <i data-lucide="download" class="w-4 h-4"></i> Télécharger CSV
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TOAST ===== -->
+<div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 bg-slate-800 border border-slate-700 text-sm rounded-xl shadow-2xl flex items-center gap-2 fade-in"></div>
+
+<script type="module" src="./firebase-config.js"></script>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
