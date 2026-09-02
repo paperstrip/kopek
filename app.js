@@ -732,135 +732,136 @@ function renderNessyGauge(agg) {
 // =================================================================
 function renderCity(agg) {
   // ==========================================================================
-  // 🎬 RENDU · KOPEK CITY (simcity-like cartoon pixar)
-  //  — Socle (0→25h) : villas + shops → quartier rouge
-  //  — Garantie (25→43,75h) : immeubles moyens → quartier fuchsia
-  //  — Bonus (>43,75h) : gratte-ciels + tours → quartier emerald
-  //
-  // Logique métier · ACQUIS PAR CONTRAT :
-  //   → Les QUARTIERS Socle + Garantie sont LÉGÈREMENT "chantier" (en cours
-  //     d'achèvement) tant que les heures remboursées < heures du contrat.
-  //   → Arriver à 43,75 h en remboursement → ville 100% terminée + feux.
-  //   → À partir de là : BONUS → quartier emerald (droite) s'active avec des
-  //     bâtiments hauts dorés, ballons, hélicos etc.
+  // KOPEK CITY · VRAI RENDU "CITY BUILDER" 2,5D
+  //  - lecture visuelle façon SimCity / jeu de gestion
+  //  - districts organisés sur un plateau isométrique
+  //  - routes diagonales, lots, carrefour, place centrale, canal
+  //  - bâtiments plus "volumiques" avec faces gauche/droite/toit
   // ==========================================================================
   const root = document.getElementById('city-buildings');
   if (!root) return;
 
-  const socleH = NESSY.socleHours;                 // 25 h
-  const fullH  = NESSY.minHoursEq;                 // 43,75 h
-  const refunded = agg.refundedH || 0;             // 0 → fullH
-  const bonusH   = agg.tiers?.t3?.h || 0;          // 0 → infini
+  const socleH = NESSY.socleHours;
+  const fullH = NESSY.minHoursEq;
+  const refunded = agg.refundedH || 0;
+  const bonusH = agg.tiers?.t3?.h || 0;
   const soclePct = Math.min(100, (refunded / socleH) * 100);
   const garantiPct = refunded >= socleH
     ? Math.min(100, ((refunded - socleH) / (fullH - socleH)) * 100)
     : 0;
-  // Pct du quartier bonus : on prend bonusH / 12 h → 100% (on laisse déborder après)
   const bonusPct = Math.min(150, (bonusH / 12) * 100);
 
-  // Effet "usine en marche" dès qu'on encode des heures ce mois
   const factory = document.getElementById('k-factory');
   if (factory) {
     if (agg.mainHoursHourly > 0.01) factory.classList.add('lit');
     else factory.classList.remove('lit');
   }
 
-  // ---------------------------------------------------------------------------
-  // HELPERS · construction des quartiers
-  // ---------------------------------------------------------------------------
-  // Générer N bâtiments d'un type donné dans un range X% donné,
-  // se construisant progressivement selon pctBuild.
-  function buildingsForQuarter(opts) {
-    const {
-      minX, maxX, minY, maxY,     // % range dans city-buildings
-      types,                      // ex. ['t-villa','t-villa','t-shop']
-      count,
-      startX,                     // pct avant d'aligner les premiers
-      pctBuild                    // 0→100 : nb bâtiments terminés
-    } = opts;
-    const built = Math.round(count * (pctBuild / 100));
-    const leftBase = minX; const leftRange = maxX - minX;
-    const rowA_y = maxY; const rowB_y = Math.max(minY, maxY - 12);
-    let html = '';
-    for (let i = 0; i < count; i++) {
-      const t = types[i % types.length];
-      // Alternance lignes A/B pour donnée profondeur
-      const isRowB = (i % 2) === 1;
-      const y = isRowB ? rowB_y : rowA_y;
-      const xLeftish = (i / Math.max(1, count - 1));
-      const x = leftBase + xLeftish * leftRange + (isRowB ? -1 : 1) * 1.2;
-      const isDone = i < built;
-      const isCurrent = !isDone && i === built && pctBuild < 100;
-      const twinkle = Math.random() < 0.35 ? ' k-twinkle' : '';
-      const clsBuild = `k-b ${t} ${isDone ? `on${twinkle}` : (isCurrent ? 'chantier' : '')}`;
-      html += `<div class="${clsBuild}" style="left:${x.toFixed(1)}%; bottom:${y.toFixed(1)}%;">
-        ${!isDone && isCurrent ? `<div class="scaf"></div>` : ''}
+  const districtLots = {
+    socle: [
+      { x: 6, y: 29, type: 'villa' },
+      { x: 15, y: 34, type: 'shop' },
+      { x: 24, y: 29, type: 'villa' },
+      { x: 10, y: 19, type: 'villa' },
+      { x: 20, y: 23, type: 'shop' },
+      { x: 28, y: 18, type: 'villa' },
+    ],
+    garantie: [
+      { x: 34, y: 37, type: 'shop' },
+      { x: 44, y: 42, type: 'midrise' },
+      { x: 55, y: 37, type: 'midrise' },
+      { x: 38, y: 24, type: 'shop' },
+      { x: 49, y: 28, type: 'midrise' },
+      { x: 60, y: 23, type: 'midrise' },
+    ],
+    bonus: [
+      { x: 67, y: 39, type: 'tower' },
+      { x: 79, y: 44, type: 'spire' },
+      { x: 90, y: 39, type: 'tower' },
+      { x: 73, y: 24, type: 'tower' },
+      { x: 85, y: 21, type: 'spire' },
+    ],
+  };
+
+  function completionState(list, pct, index) {
+    const progress = (pct / 100) * list.length;
+    const completed = Math.floor(progress);
+    const hasActive = progress > 0 && completed < list.length;
+    return {
+      built: index < completed,
+      active: hasActive && index === completed,
+      empty: index > completed || (completed === 0 && progress === 0),
+    };
+  }
+
+  function buildingMarkup(type, state, idx) {
+    if (state.empty) return '';
+    const cls = [
+      'k-iso',
+      type,
+      state.built ? 'lit' : '',
+      state.active ? 'construction' : '',
+      idx % 2 === 0 ? 'k-twinkle' : '',
+    ].filter(Boolean).join(' ');
+    return `<div class="${cls}">
+      <div class="top"></div>
+      <div class="left"></div>
+      <div class="right"></div>
+      <div class="front"></div>
+      ${state.active ? '<div class="k-crane"><div class="hook"></div></div>' : ''}
+    </div>`;
+  }
+
+  function lotCluster(zone, pct, list) {
+    return list.map((lot, index) => {
+      const state = completionState(list, pct, index);
+      return `<div class="k-lot ${zone}" style="left:${lot.x}%; bottom:${lot.y}%;">
+        ${buildingMarkup(lot.type, state, index)}
       </div>`;
-    }
-    return html;
+    }).join('');
   }
 
-  // Foulons population (petits points colorés = habitants qui viennent d'arriver)
-  function crowdDots(count, xmin, xmax, ybottom) {
-    const palette = ['#f472b6','#60a5fa','#34d399','#facc15','#f59e0b','#a78bfa'];
-    let s = '';
-    for (let i = 0; i < count; i++) {
-      const x = xmin + Math.random() * (xmax - xmin);
-      const y = ybottom + Math.random() * 3;
-      const c = palette[i % palette.length];
-      s += `<div class="k-crowd-dot" style="left:${x.toFixed(1)}%; bottom:${y.toFixed(1)}%; background:${c}; animation: sky-pulse-y ${2 + Math.random() * 2}s ease-in-out infinite; animation-delay: ${-Math.random()*3}s;"></div>`;
-    }
-    return s;
-  }
-
-  // ---------------------------------------------------------------------------
-  // CONSTRUISONS LA VILLE !
-  // ---------------------------------------------------------------------------
-  let html = '';
-  // 1) Quartier SOCLE (gauche) → villas + petits commerces
-  //    Plage X : 4 % → 30 %   |  Plage Y : 2 % (petit) à 14 %
-  html += buildingsForQuarter({
-    minX: 5, maxX: 30, minY: 3, maxY: 13,
-    types: ['t-villa','t-villa','t-shop','t-villa','t-shop','t-villa'],
-    count: 6,
-    startX: 5,
-    pctBuild: soclePct
-  });
-  // Foule dans Socle
-  html += crowdDots(Math.round(soclePct / 100 * 18), 5, 30, 0.5);
-
-  // 2) Quartier GARANTIE (centre) → immeubles violets + un shop
-  //    Plage X : 32 % → 63 %   |  Plage Y : 6 % → 22 % (un peu plus haut)
-  html += buildingsForQuarter({
-    minX: 32, maxX: 62, minY: 7, maxY: 22,
-    types: ['t-shop','t-immeuble','t-shop','t-immeuble','t-immeuble','t-shop'],
-    count: 6,
-    startX: 32,
-    pctBuild: garantiPct
-  });
-  html += crowdDots(Math.round(garantiPct / 100 * 22), 32, 62, 0.8);
-
-  // 3) Quartier BONUS (droite) → gratte-ciels dorés + tours cyan
-  //    Plage X : 65 % → 96 %   |  Plage Y : 10 % → 42 %
-  html += buildingsForQuarter({
-    minX: 65, maxX: 95, minY: 10, maxY: 42,
-    types: ['t-gratte','t-tour','t-gratte','t-tour','t-gratte'],
-    count: 5,
-    startX: 65,
-    pctBuild: bonusPct
-  });
-  html += crowdDots(Math.round(bonusPct / 100 * 28), 65, 95, 1);
-
-  // 4) Arbres éparpillés (Cartoon Pixar) — indépendants du pct
-  const trees = [
-    [31, 1.2],[46, 1.2],[63.5, 1.2],[80.5, 1.2],[94, 1.2],
-    [36, 0.5],[51, 0.5],[71, 0.5],[88, 0.5]
+  const treePositions = [
+    [31, 19], [35, 14], [63, 18], [67, 13], [95, 19], [92, 13], [58, 47], [26, 42],
   ];
-  trees.forEach(([x,y], i) => {
-    html += `<div class="k-tree ${i % 3 === 0 ? 'big' : ''}" style="left:${x}%; bottom:${y}%;"></div>`;
-  });
+  const trees = treePositions.map(([x, y]) =>
+    `<div class="k-stage-tree" style="left:${x}%; bottom:${y}%"></div>`
+  ).join('');
 
-  root.innerHTML = html;
+  const crowdPositions = [
+    [47, 29, '#f472b6'], [49, 31, '#60a5fa'], [51, 27, '#34d399'], [53, 29, '#facc15'],
+    [41, 24, '#f59e0b'], [57, 24, '#a78bfa'], [46, 21, '#fb7185'], [54, 21, '#22c55e'],
+  ];
+  const crowds = crowdPositions.map(([x, y, color], idx) =>
+    `<div class="k-crowd-dot" style="left:${x}%; bottom:${y}%; background:${color}; animation: sky-pulse-y ${2.2 + (idx % 3) * 0.4}s ease-in-out infinite; animation-delay:-${idx * 0.25}s;"></div>`
+  ).join('');
+
+  const vans = `
+    <div class="k-van" style="left:4%; bottom:15%; --v1:#60a5fa; --v2:#1d4ed8; animation:diagDriveA 11s linear infinite;"></div>
+    <div class="k-van" style="left:82%; bottom:33%; --v1:#34d399; --v2:#047857; animation:diagDriveB 13s linear infinite -4s;"></div>
+    <div class="k-van" style="left:12%; bottom:15%; --v1:#f59e0b; --v2:#b45309; animation:diagDriveA 15s linear infinite -7s;"></div>
+  `;
+
+  root.innerHTML = `
+    <div class="k-stage">
+      <div class="k-district-band"></div>
+      <div class="k-canal"></div>
+      <div class="k-rail"></div>
+      <div class="k-avenue a1"></div>
+      <div class="k-avenue a2"></div>
+      <div class="k-cross"></div>
+      <div class="k-plaza"></div>
+      <div class="k-district-tag socle" style="left:8%; bottom:57%;">District Socle</div>
+      <div class="k-district-tag garantie" style="left:41%; bottom:61%;">District Garantie</div>
+      <div class="k-district-tag bonus" style="left:73%; bottom:58%;">District Bonus</div>
+      ${lotCluster('socle', soclePct, districtLots.socle)}
+      ${lotCluster('garantie', garantiPct, districtLots.garantie)}
+      ${lotCluster('bonus', bonusPct, districtLots.bonus)}
+      ${trees}
+      ${crowds}
+      ${vans}
+    </div>
+  `;
 
   // ---------------------------------------------------------------------------
   // HUD · City Board (infobulle en bas à droite)
@@ -880,9 +881,9 @@ function renderCity(agg) {
   if (bar) bar.style.width = `${pctForBar}%`;
   const label = document.getElementById('hud-label');
   if (label) {
-    if (!agg.hasAnyNessy) label.textContent = `Aucun encodage Nessy ce mois · Acquis non activé`;
-    else if (refunded < fullH) label.textContent = `🔜 Engagement · ${refunded.toFixed(2).replace('.',',')} / ${fullH.toFixed(2).replace('.',',')} h (reste ${agg.debtRemainH.toFixed(2).replace('.',',')} h)`;
-    else label.textContent = `✅ Engagement tenu · Surplus : ${EUR(agg.bonusEur || 0)} (${bonusH.toFixed(1).replace('.',',')} h · + clients ${EUR(agg.secondaryEur || 0)})`;
+    if (!agg.hasAnyNessy) label.textContent = 'Contrat principal non activé sur la période';
+    else if (refunded < fullH) label.textContent = `Engagement ${refunded.toFixed(2).replace('.', ',')} / ${fullH.toFixed(2).replace('.', ',')} h · reste ${agg.debtRemainH.toFixed(2).replace('.', ',')} h`;
+    else label.textContent = `Engagement validé · Bonus ${EUR(agg.bonusEur || 0)} · Surplus ${bonusH.toFixed(1).replace('.', ',')} h`;
   }
 
   // ---------------------------------------------------------------------------
@@ -893,19 +894,19 @@ function renderCity(agg) {
     pop.classList.remove('hidden');
     let popHtml = '';
     if (!agg.hasAnyNessy) {
-      popHtml = `<span class="text-white font-bold">📋 Contrat en attente</span><br><span class="text-zinc-400">Encode tes premières heures pour activer l'acquis ${EUR(agg.minG)}.</span>`;
+      popHtml = `<span class="text-white font-bold">Contrat en attente</span><br><span class="text-zinc-400">Premier encodage nécessaire pour lancer la ville et activer ${EUR(agg.minG)}.</span>`;
       pop.classList.remove('gain','loss');
     } else if (refunded < socleH) {
-      popHtml = `<span class="text-white font-bold">🧱 Chantier en cours</span><br><span class="text-zinc-400">Tu remplis le <b>Socle</b> (${soclePct.toFixed(0)}%). Reste <b>${(socleH - refunded).toFixed(2).replace('.',',')} h</b>.</span>`;
+      popHtml = `<span class="text-white font-bold">Chantier Socle</span><br><span class="text-zinc-400">${soclePct.toFixed(0)}% du district livré · reste <b>${(socleH - refunded).toFixed(2).replace('.', ',')} h</b>.</span>`;
       pop.classList.remove('gain','loss');
     } else if (refunded < fullH) {
-      popHtml = `<span class="text-white font-bold">🏗️ Garantie en construction</span><br><span class="text-zinc-400">${garantiPct.toFixed(0)}% · Reste <b>${agg.debtRemainH.toFixed(2).replace('.',',')} h</b> pour solder l'engagement.</span>`;
+      popHtml = `<span class="text-white font-bold">Garantie en construction</span><br><span class="text-zinc-400">${garantiPct.toFixed(0)}% du centre-ville livré · encore <b>${agg.debtRemainH.toFixed(2).replace('.', ',')} h</b>.</span>`;
       pop.classList.remove('gain','loss');
     } else if (agg.bonusEur > 50) {
-      popHtml = `<span class="text-emerald-300 font-bold">🎉 BONUS 🎉</span><br><span class="text-zinc-300">${bonusH.toFixed(1).replace('.',',')} h facturables en plus → <b>+${EUR(agg.bonusEur)}</b> nets.</span>`;
+      popHtml = `<span class="text-emerald-300 font-bold">District Bonus lancé</span><br><span class="text-zinc-300">${bonusH.toFixed(1).replace('.', ',')} h en surplus · <b>+${EUR(agg.bonusEur)}</b> facturables.</span>`;
       pop.classList.add('gain'); pop.classList.remove('loss');
     } else {
-      popHtml = `<span class="text-emerald-300 font-bold">✅ Engagement TENU</span><br><span class="text-zinc-300">La ville est prête · Continue pour déclencher le surplus bonus.</span>`;
+      popHtml = `<span class="text-emerald-300 font-bold">Ville stabilisée</span><br><span class="text-zinc-300">Engagement contractuel couvert · continue pour ouvrir le quartier bonus.</span>`;
       pop.classList.add('gain'); pop.classList.remove('loss');
     }
     pop.innerHTML = popHtml;

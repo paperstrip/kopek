@@ -26,10 +26,16 @@
           'pocket': '0 0 60px -15px rgba(16,185,129,0.45)',
           'brand':  '0 0 80px -25px rgba(99,102,241,0.55)',
         },
-        keyframes: {
-          shimmer: { '0% {background-position: -200% 0;} 100% {background-position: 200% 0;}' },
-          float:   { '0%,100% { transform: translateY(0);} 50% { transform: translateY(-4px);}' },
-        },
+          keyframes: {
+            shimmer: { 
+              '0%': { backgroundPosition: '-200% 0' },
+              '100%': { backgroundPosition: '200% 0' },
+            },
+            float: {
+              '0%, 100%': { transform: 'translateY(0)' },
+              '50%': { transform: 'translateY(-4px)' },
+            },
+          },
         animation: {
           shimmer: 'shimmer 2.5s linear infinite',
           float: 'float 6s ease-in-out infinite',
@@ -159,7 +165,7 @@
     background: radial-gradient(circle at 30% 30%, #a3a3a3, #27272a 65%);
     box-shadow: inset 0 -2px 0 rgba(0,0,0,0.55);
   }
-  .k-car .cw::after { /* 2nd wheel */ }
+  .k-car .cw::after { opacity: 1; }
   @keyframes k-car-right { from { transform: translateX(-10vw);} to { transform: translateX(120vw);} }
   @keyframes k-car-left  { from { transform: translateX(120vw);} to { transform: translateX(-10vw);} }
 
@@ -324,6 +330,272 @@
   }
   .k-pop.gain { color:#86efac; border-color:rgba(52,211,153,0.45); background: rgba(6,78,59,0.75); }
   .k-pop.loss { color:#fda4af; border-color:rgba(244,63,94,0.4);   background: rgba(88,28,135,0.45); }
+  /* ---------- PLATEAU 2,5D / CITY-BUILDER ---------- */
+  .k-stage {
+    position:absolute; inset: 10% 23% 14% 4%;
+    pointer-events:none;
+  }
+  @media (max-width: 1024px) {
+    .k-stage { inset: 12% 4% 26% 4%; }
+    .k-district-tag { font-size: 9px; letter-spacing: .10em; }
+  }
+  .k-stage::before {
+    content:""; position:absolute; inset:0;
+    background:
+      radial-gradient(circle at 18% 82%, rgba(190,242,100,0.12), transparent 20%),
+      radial-gradient(circle at 70% 18%, rgba(125,211,252,0.10), transparent 22%);
+  }
+  .k-district-band {
+    position:absolute; inset:0;
+    background:
+      linear-gradient(90deg,
+        rgba(239,68,68,0.08) 0% 31%,
+        rgba(217,70,239,0.09) 31% 64%,
+        rgba(16,185,129,0.08) 64% 100%);
+    border-radius: 36px;
+    filter: blur(6px);
+    opacity: .8;
+  }
+  .k-avenue {
+    position:absolute; height:30px; border-radius: 16px;
+    background: linear-gradient(180deg, rgba(63,63,70,0.96), rgba(24,24,27,0.96));
+    box-shadow: 0 10px 24px rgba(15,23,42,0.3), inset 0 2px 0 rgba(255,255,255,0.06);
+    overflow:hidden;
+  }
+  .k-avenue::before {
+    content:""; position:absolute; inset: 50% 8px auto 8px; height:3px; transform: translateY(-50%);
+    background: repeating-linear-gradient(90deg, rgba(250,204,21,0.95) 0 26px, transparent 26px 54px);
+  }
+  .k-avenue.a1 { left:4%; right:12%; bottom:16%; transform: skewX(-28deg); }
+  .k-avenue.a2 { left:26%; right:8%; bottom:33%; transform: skewX(28deg); opacity:.95; }
+  .k-cross {
+    position:absolute; left:45%; bottom:22%; width:18%; height:16%;
+    transform: rotate(45deg);
+    background: radial-gradient(circle, rgba(63,63,70,0.96), rgba(24,24,27,0.96) 70%);
+    border:1px solid rgba(255,255,255,0.06);
+    box-shadow: 0 18px 32px rgba(15,23,42,0.28);
+  }
+  .k-rail {
+    position:absolute; left:8%; right:10%; bottom:44%; height:16px;
+    transform: skewX(-28deg);
+    background:
+      repeating-linear-gradient(90deg, rgba(161,161,170,0.9) 0 6px, transparent 6px 28px),
+      linear-gradient(180deg, rgba(82,82,91,0.9), rgba(39,39,42,0.9));
+    border-radius:10px;
+    opacity:.7;
+  }
+  .k-canal {
+    position:absolute; left:61%; right:2%; bottom:39%; height:18%;
+    transform: skewX(-28deg);
+    border-radius: 18px;
+    background:
+      linear-gradient(180deg, rgba(125,211,252,0.95), rgba(14,116,144,0.95)),
+      repeating-linear-gradient(90deg, rgba(255,255,255,0.18) 0 40px, transparent 40px 74px);
+    box-shadow: 0 14px 40px rgba(14,165,233,0.2), inset 0 2px 0 rgba(255,255,255,0.2);
+    opacity:.85;
+  }
+  .k-plaza {
+    position:absolute; left:42%; bottom:30%; width:12%; height:12%;
+    transform: rotate(45deg);
+    background:
+      radial-gradient(circle at 50% 50%, rgba(250,250,249,0.28) 0 12%, transparent 12%),
+      repeating-linear-gradient(90deg, rgba(255,255,255,0.08) 0 8px, transparent 8px 16px),
+      linear-gradient(180deg, rgba(212,212,216,0.75), rgba(82,82,91,0.75));
+    border:1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 12px 20px rgba(15,23,42,0.22);
+  }
+  .k-lot {
+    position:absolute; width:124px; height:64px;
+    transform-style: preserve-3d;
+  }
+  .k-lot::before {
+    content:""; position:absolute; inset:0;
+    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+    background: linear-gradient(180deg, var(--lot1, rgba(34,197,94,0.95)), var(--lot2, rgba(22,163,74,0.96)));
+    border:1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 12px 24px rgba(15,23,42,0.22), inset 0 1px 0 rgba(255,255,255,0.12);
+  }
+  .k-lot::after {
+    content:""; position:absolute; inset:9px;
+    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+    border:1px dashed rgba(255,255,255,0.08);
+    opacity:.7;
+  }
+  .k-lot.socle { --lot1: rgba(252,165,165,0.95); --lot2: rgba(239,68,68,0.95); }
+  .k-lot.garantie { --lot1: rgba(240,171,252,0.95); --lot2: rgba(192,38,211,0.96); }
+  .k-lot.bonus { --lot1: rgba(110,231,183,0.95); --lot2: rgba(5,150,105,0.96); }
+  .k-lot.road::before {
+    background: linear-gradient(180deg, rgba(82,82,91,0.95), rgba(24,24,27,0.98));
+  }
+  .k-lot.road::after {
+    inset: 28px 18px;
+    clip-path: none;
+    border:0;
+    background: repeating-linear-gradient(90deg, rgba(250,204,21,0.9) 0 16px, transparent 16px 30px);
+    opacity:.9;
+  }
+  .k-iso {
+    position:absolute; left:50%; bottom:20px;
+    width:var(--bw,78px); height:var(--bh,96px);
+    transform: translateX(-50%);
+    filter: drop-shadow(0 18px 18px rgba(15,23,42,0.28));
+  }
+  .k-iso .front,
+  .k-iso .left,
+  .k-iso .right,
+  .k-iso .top {
+    position:absolute;
+  }
+  .k-iso .front {
+    left:0; bottom:0; width:var(--bw,78px); height:var(--bh,96px);
+    background: linear-gradient(180deg, var(--front1), var(--front2));
+    border-radius: 8px 8px 4px 4px;
+    box-shadow: inset 0 10px 0 rgba(255,255,255,0.14), inset 0 -10px 0 rgba(0,0,0,0.18);
+    overflow:hidden;
+  }
+  .k-iso .front::after {
+    content:""; position:absolute; inset:10px 12px 10px 12px;
+    background:
+      repeating-linear-gradient(90deg, rgba(253,224,71,0.0) 0 8px, rgba(253,224,71,0.52) 8px 14px, transparent 14px 22px),
+      repeating-linear-gradient(180deg, rgba(253,224,71,0.0) 0 10px, rgba(253,224,71,0.52) 10px 16px, transparent 16px 24px);
+    opacity: var(--windows, .4);
+    mix-blend-mode: screen;
+  }
+  .k-iso .left {
+    left: calc(var(--depth,18px) * -1); bottom: 0;
+    width:var(--depth,18px); height:var(--bh,96px);
+    background: linear-gradient(180deg, var(--left1), var(--left2));
+    transform: skewY(38deg);
+    transform-origin: right bottom;
+    border-radius: 6px 0 0 3px;
+    box-shadow: inset -4px 0 0 rgba(0,0,0,0.15);
+  }
+  .k-iso .right {
+    right: calc(var(--depth,18px) * -1); bottom: 0;
+    width:var(--depth,18px); height:var(--bh,96px);
+    background: linear-gradient(180deg, var(--right1), var(--right2));
+    transform: skewY(-38deg);
+    transform-origin: left bottom;
+    border-radius: 0 6px 3px 0;
+    box-shadow: inset 4px 0 0 rgba(255,255,255,0.08);
+  }
+  .k-iso .top {
+    left:0; top:-26px; width:var(--bw,78px); height:52px;
+    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+    background: linear-gradient(180deg, var(--top1), var(--top2));
+    box-shadow: 0 4px 0 rgba(0,0,0,0.10), inset 0 2px 0 rgba(255,255,255,0.18);
+  }
+  .k-iso.villa {
+    --bw:72px; --bh:54px; --depth:16px;
+    --front1:#fecaca; --front2:#f87171; --left1:#fca5a5; --left2:#dc2626; --right1:#fb7185; --right2:#be123c; --top1:#7c2d12; --top2:#431407;
+  }
+  .k-iso.shop {
+    --bw:78px; --bh:74px; --depth:18px;
+    --front1:#bae6fd; --front2:#0ea5e9; --left1:#7dd3fc; --left2:#0284c7; --right1:#38bdf8; --right2:#0369a1; --top1:#155e75; --top2:#083344;
+  }
+  .k-iso.midrise {
+    --bw:82px; --bh:120px; --depth:20px;
+    --front1:#ddd6fe; --front2:#8b5cf6; --left1:#c4b5fd; --left2:#7c3aed; --right1:#a78bfa; --right2:#6d28d9; --top1:#581c87; --top2:#3b0764;
+  }
+  .k-iso.tower {
+    --bw:88px; --bh:178px; --depth:22px;
+    --front1:#e0f2fe; --front2:#06b6d4; --left1:#bae6fd; --left2:#0891b2; --right1:#67e8f9; --right2:#0e7490; --top1:#164e63; --top2:#083344;
+  }
+  .k-iso.spire {
+    --bw:96px; --bh:230px; --depth:24px;
+    --front1:#fef3c7; --front2:#d97706; --left1:#fde68a; --left2:#a16207; --right1:#fcd34d; --right2:#92400e; --top1:#78350f; --top2:#451a03;
+  }
+  .k-iso.lit .front::after { --windows: .92; filter: drop-shadow(0 0 7px rgba(253,224,71,0.55)); }
+  .k-iso.construction .front,
+  .k-iso.construction .left,
+  .k-iso.construction .right { filter: saturate(.55) brightness(.85); }
+  .k-iso.construction .top {
+    background: repeating-linear-gradient(45deg, #facc15 0 8px, #111827 8px 16px);
+    animation: shimmer 1.7s linear infinite;
+    background-size: 200% 100%;
+  }
+  .k-iso.construction .front::after { --windows: .08; }
+  .k-crane {
+    position:absolute; left:50%; bottom: calc(100% - 6px); width:70px; height:92px;
+    transform: translateX(-50%);
+    transform-origin: bottom center;
+    animation: craneSwing 4.8s ease-in-out infinite;
+  }
+  .k-crane::before {
+    content:""; position:absolute; left:34px; bottom:0; width:6px; height:100%;
+    background: linear-gradient(180deg, #facc15, #ca8a04);
+    box-shadow: inset 0 -4px 0 rgba(0,0,0,0.18);
+  }
+  .k-crane::after {
+    content:""; position:absolute; left:34px; top:10px; width:44px; height:6px;
+    background: linear-gradient(90deg, #facc15, #eab308);
+    box-shadow: inset 0 -2px 0 rgba(0,0,0,0.16);
+  }
+  .k-crane .hook {
+    position:absolute; left:72px; top:16px; width:2px; height:34px;
+    background: linear-gradient(180deg, #e5e7eb, #71717a);
+  }
+  .k-crane .hook::after {
+    content:""; position:absolute; left:-3px; bottom:-6px; width:8px; height:8px;
+    border:2px solid #eab308; border-top:none; border-radius:0 0 8px 8px;
+  }
+  @keyframes craneSwing {
+    0%,100% { transform: translateX(-50%) rotate(-2deg); }
+    50% { transform: translateX(-50%) rotate(3deg); }
+  }
+  .k-van {
+    position:absolute; width:38px; height:20px;
+    background: linear-gradient(180deg, var(--v1,#60a5fa), var(--v2,#1d4ed8));
+    border-radius: 7px 9px 6px 6px;
+    box-shadow: inset 0 4px 0 rgba(255,255,255,0.18), inset 0 -4px 0 rgba(0,0,0,0.18), 0 6px 14px rgba(15,23,42,0.24);
+  }
+  .k-van::before {
+    content:""; position:absolute; left:8px; right:8px; top:3px; height:7px;
+    background: linear-gradient(180deg, #dbeafe, #7dd3fc);
+    border-radius: 5px 7px 3px 3px;
+  }
+  .k-van::after {
+    content:""; position:absolute; left:5px; right:5px; bottom:-5px; height:10px;
+    background:
+      radial-gradient(circle, #d4d4d8 0 4px, #18181b 4px 5px, transparent 5px) left center / 10px 10px no-repeat,
+      radial-gradient(circle, #d4d4d8 0 4px, #18181b 4px 5px, transparent 5px) right center / 10px 10px no-repeat;
+  }
+  @keyframes diagDriveA {
+    from { transform: translate(-8%, 8%) rotate(-28deg); opacity:0; }
+    10%,90% { opacity:1; }
+    to { transform: translate(88%, -26%) rotate(-28deg); opacity:0; }
+  }
+  @keyframes diagDriveB {
+    from { transform: translate(90%, 10%) rotate(28deg); opacity:0; }
+    10%,90% { opacity:1; }
+    to { transform: translate(-14%, -28%) rotate(28deg); opacity:0; }
+  }
+  .k-district-tag {
+    position:absolute; padding:7px 10px; border-radius: 999px;
+    font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase;
+    background: rgba(15,23,42,0.82);
+    border:1px solid rgba(255,255,255,0.10);
+    box-shadow: 0 8px 18px rgba(15,23,42,0.24);
+    backdrop-filter: blur(10px);
+  }
+  .k-district-tag.socle { color:#fca5a5; border-color: rgba(248,113,113,0.30); }
+  .k-district-tag.garantie { color:#f0abfc; border-color: rgba(217,70,239,0.30); }
+  .k-district-tag.bonus { color:#6ee7b7; border-color: rgba(16,185,129,0.30); }
+  .k-stage-tree {
+    position:absolute; width:30px; height:42px;
+    filter: drop-shadow(0 8px 8px rgba(15,23,42,0.18));
+  }
+  .k-stage-tree::before {
+    content:""; position:absolute; left:50%; bottom:0; width:7px; height:14px; transform: translateX(-50%);
+    border-radius: 3px;
+    background: linear-gradient(180deg, #92400e, #78350f);
+  }
+  .k-stage-tree::after {
+    content:""; position:absolute; left:50%; bottom:9px; width:28px; height:28px; transform: translateX(-50%);
+    border-radius: 50% 50% 44% 44%;
+    background: radial-gradient(circle at 30% 30%, #86efac, #16a34a 70%);
+    box-shadow: inset -5px -6px 0 rgba(22,101,52,0.35);
+  }
 </style>
 </head>
 <body class="min-h-screen text-zinc-100 font-sans relative overflow-x-hidden">
@@ -781,7 +1053,7 @@
       <section id="kopek-city" class="col-span-12 relative rounded-3xl card-hover overflow-hidden select-none"
         style="background:#0b1120; border:1px solid rgba(129,140,248,0.3);
                box-shadow: 0 40px 120px -40px rgba(99,102,241,0.55), inset 0 1px 0 rgba(255,255,255,0.05);
-               min-height: 560px;">
+               min-height: 680px;">
 
         <!-- Skylight (saturation cartoon : ciel Pixar) -->
         <div class="k-sky-wrap absolute inset-0">
@@ -841,48 +1113,48 @@
         <!-- Panneaux indicateurs quartiers -->
         <div class="absolute left-6  top-5 rounded-xl px-3 py-1.5 text-xs font-bold uppercase tracking-wider
                     bg-red-500/15 border border-red-400/40 text-red-300 backdrop-blur">
-          🏘️ Quartier Socle · 25 h
+          District Socle · 25 h
         </div>
         <div class="absolute left-1/2 -translate-x-1/2 top-5 rounded-xl px-3 py-1.5 text-xs font-bold uppercase tracking-wider
                     bg-fuchsia-500/15 border border-fuchsia-400/40 text-fuchsia-300 backdrop-blur">
-          🏢 Quartier Garantie · +18,75 h
+          District Garantie · +18,75 h
         </div>
         <div class="absolute right-6 top-5 rounded-xl px-3 py-1.5 text-xs font-bold uppercase tracking-wider
                     bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 backdrop-blur">
-          🗼 Quartier Bonus · Surplus €€€
+          District Bonus · Surplus
         </div>
 
         <!-- ================= POP UP ACQUIS (info-bulle Pixar) ================= -->
         <div id="city-pop" class="k-pop hidden" style="left:10%; animation: float 4s ease-in-out infinite;"></div>
 
         <!-- ================= HUD SIMCITY (info-bulle droite) ================= -->
-        <div class="absolute right-4 bottom-4 w-72 rounded-2xl p-3.5 backdrop-blur-xl
+        <div class="absolute right-4 bottom-4 w-[20rem] max-w-[calc(100%-2rem)] rounded-2xl p-3.5 backdrop-blur-xl
                     bg-zinc-950/70 border border-white/10 shadow-[0_30px_60px_-10px_rgba(0,0,0,0.7)]
                     grid grid-cols-2 gap-2.5 text-[11px] leading-tight">
           <div class="col-span-2 flex items-center gap-2 pb-2 mb-1 border-b border-white/10">
             <i data-lucide="map" class="w-4 h-4 text-indigo-400"></i>
-            <div class="font-bold tracking-wider uppercase text-white text-[11px]">Kopek · City Board</div>
+            <div class="font-bold tracking-wider uppercase text-white text-[11px]">Kopek · City Builder</div>
           </div>
           <div class="rounded-xl bg-red-500/10 border border-red-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-red-300/90">🏛️ Socle</div>
+            <div class="text-[9px] uppercase tracking-wider text-red-300/90">Socle</div>
             <div id="hud-socle" class="font-mono font-bold text-red-300 text-[13px] mt-0.5">—</div>
           </div>
           <div class="rounded-xl bg-fuchsia-500/10 border border-fuchsia-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-fuchsia-300/90">🔒 Garantie</div>
+            <div class="text-[9px] uppercase tracking-wider text-fuchsia-300/90">Garantie</div>
             <div id="hud-garanti" class="font-mono font-bold text-fuchsia-300 text-[13px] mt-0.5">—</div>
           </div>
           <div class="rounded-xl bg-emerald-500/10 border border-emerald-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-emerald-300/90">✨ Bonus</div>
+            <div class="text-[9px] uppercase tracking-wider text-emerald-300/90">Bonus</div>
             <div id="hud-bonus" class="font-mono font-bold text-emerald-300 text-[13px] mt-0.5">—</div>
           </div>
           <div class="rounded-xl bg-indigo-500/10 border border-indigo-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-indigo-300/90">👥 Population</div>
+            <div class="text-[9px] uppercase tracking-wider text-indigo-300/90">Population</div>
             <div id="hud-pop" class="font-mono font-bold text-indigo-300 text-[13px] mt-0.5">—</div>
           </div>
           <div class="col-span-2 rounded-xl bg-amber-500/10 border border-amber-400/30 p-2.5">
             <div class="flex items-center justify-between">
               <div>
-                <div class="text-[9px] uppercase tracking-wider text-amber-300/90">💼 Acquis contractuel (€ HT)</div>
+                <div class="text-[9px] uppercase tracking-wider text-amber-300/90">Acquis Contractuel (€ HT)</div>
                 <div id="hud-acquis" class="font-mono font-bold text-amber-300 text-[14px] mt-0.5">—</div>
               </div>
               <div class="text-right">
