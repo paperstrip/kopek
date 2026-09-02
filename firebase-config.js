@@ -21,21 +21,22 @@ import {
   orderBy,
   Timestamp,
   serverTimestamp,
+  setDoc,
+  limit,
+  startAt,
+  endAt,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 // =============================================================
-// 🔧 CONFIGURATION FIREBASE — À REMPLIR AVEC VOTRE PROJET
-// =============================================================
-// Récupérez ces valeurs dans :
-// Firebase Console → Project Settings → "Your apps" → "Web App" → SDK setup (CDN)
+// 🔧 CONFIGURATION FIREBASE · Projet kopek-4ffe6
 // =============================================================
 const firebaseConfig = {
-  apiKey: "AIzaSyAtvekD4jUt75sAyKvJFPeHDxPHTyaEUUQ",
-    authDomain: "kopek-4ffe6.firebaseapp.com",
-    projectId: "kopek-4ffe6",
-    storageBucket: "kopek-4ffe6.firebasestorage.app",
-    messagingSenderId: "474763017409",
-    appId: "1:474763017409:web:fdd11e36b76987ce512840"
+  apiKey:            'AIzaSyAtvekD4jUt75sAyKvJFPeHDxPHTyaEUUQ',
+  authDomain:        'kopek-4ffe6.firebaseapp.com',
+  projectId:         'kopek-4ffe6',
+  storageBucket:     'kopek-4ffe6.firebasestorage.app',
+  messagingSenderId: '474763017409',
+  appId:             '1:474763017409:web:fdd11e36b76987ce512840',
 };
 
 // =============================================================
@@ -45,8 +46,8 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Persistance de session (rester connecté entre visites)
-setPersistence(auth, browserLocalPersistence).catch(console.warn);
+// Persistance de session · localStorage · reste connecté entre visites
+setPersistence(auth, browserLocalPersistence).catch((e) => console.warn('setPersistence', e));
 
 // =============================================================
 // EXPORTS (disponibles dans app.js via import)
@@ -55,7 +56,7 @@ export {
   app,
   auth,
   db,
-  // Auth helpers
+  // Auth
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
@@ -72,4 +73,8 @@ export {
   orderBy,
   Timestamp,
   serverTimestamp,
+  setDoc,
+  limit,
+  startAt,
+  endAt,
 };
