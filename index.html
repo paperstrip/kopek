@@ -69,25 +69,261 @@
     color: transparent;
   }
   .gauge-seg { transition: width .6s cubic-bezier(.22,1,.36,1); }
-  .badge-pulse {
-    box-shadow: 0 0 0 0 rgba(16,185,129,.4);
-    animation: badgePulse 2.2s infinite;
+  /* ============================================================================
+     🎬 KOPEK · SIMCITY-LIKE CARTOON VIEW (Pixar-ish) — Keyframes / Animations
+     ============================================================================ */
+  /* ---------- CIEL : Soleil, nuages, avions ---------- */
+  @keyframes sky-drift-x { from { transform: translateX(-10%); } to { transform: translateX(110%); } }
+  @keyframes sky-pulse-y { 0%,100% { transform: translateY(0);} 50% { transform: translateY(-6px);} }
+  .k-sky-wrap::before {
+    content:""; position:absolute; inset:0;
+    background:
+      radial-gradient(ellipse 60% 55% at 80% 10%, rgba(255,231,153,0.35), transparent 60%),
+      radial-gradient(ellipse 55% 65% at 15% 20%, rgba(191,219,254,0.30), transparent 65%),
+      linear-gradient(180deg, #60a5fa 0%, #7dd3fc 30%, #99f6e4 65%, #86efac 100%);
   }
-  @keyframes badgePulse {
-    0% { box-shadow: 0 0 0 0 rgba(16,185,129,.35);}
-    70%{ box-shadow: 0 0 0 10px rgba(16,185,129,0);}
-    100%{box-shadow: 0 0 0 0 rgba(16,185,129,0);}
+  .k-cloud { position:absolute; filter: drop-shadow(0 8px 14px rgba(30,64,175,0.22)); will-change: transform; }
+  .k-cloud > i { display:block; border-radius:9999px; background:#fff; box-shadow: 22px 10px 0 -6px #fff, 50px 6px 0 -10px #fff, -18px 12px 0 -8px #fff; }
+  .k-sun {
+    position:absolute; top:5%; right:8%; width:110px; height:110px; border-radius:9999px;
+    background: radial-gradient(circle at 30% 30%, #fff7cc 0%, #fde68a 45%, #fbbf24 100%);
+    box-shadow: 0 0 120px 20px rgba(251,191,36,0.55), inset -8px -10px 0 -6px rgba(249,115,22,0.25);
+    animation: sky-pulse-y 5s ease-in-out infinite;
   }
-  .scrollbar-thin::-webkit-scrollbar { width:6px; height:6px; }
-  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
-  .scrollbar-thin::-webkit-scrollbar-thumb { background: #27272a; border-radius:3px; }
-  .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
-  select, input[type=date] { color-scheme: dark; }
-  .fade-in { animation: fadeIn .25s ease forwards; }
-  @keyframes fadeIn { from {opacity:0; transform: translateY(3px);} to {opacity:1; transform: translateY(0);} }
-  input[type=number]::-webkit-outer-spin-button,
-  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-  input[type=number] { -moz-appearance: textfield; }
+  .k-plane {
+    position:absolute; font-size:24px; filter:drop-shadow(0 4px 6px rgba(15,23,42,0.3));
+    animation: sky-drift-x 28s linear infinite;
+  }
+  .k-plane.trail::after {
+    content:""; position:absolute; top:50%; right:100%; width:90px; height:3px; transform: translateY(-50%);
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.75)); border-radius:9999px; opacity:0.75;
+  }
+  /* ---------- SOL & PENTE 3D CARTOON (perspective basse comme Pixar) ---------- */
+  .k-ground {
+    position:absolute; left:-10%; right:-10%; bottom:0; height:60%;
+    background: linear-gradient(180deg, #4ade80 0%, #22c55e 35%, #16a34a 65%, #166534 100%);
+    border-top-left-radius: 60% 45%; border-top-right-radius: 60% 45%;
+    transform: perspective(1400px) rotateX(58deg) translateY(18%);
+    transform-origin: top center;
+    box-shadow: inset 0 30px 60px rgba(22,163,74,0.35), 0 -10px 0 -2px rgba(250,204,21,0.18);
+  }
+  .k-ground::before {
+    content:""; position:absolute; inset:8% 8% 12% 8%; border-radius:45%;
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(250,204,21,0.22) 0 4px, transparent 6px),
+      radial-gradient(circle at 65% 70%, rgba(250,204,21,0.18) 0 3px, transparent 5px),
+      radial-gradient(circle at 80% 25%, rgba(250,204,21,0.18) 0 3px, transparent 5px),
+      radial-gradient(circle at 35% 80%, rgba(250,204,21,0.16) 0 2px, transparent 4px);
+    background-size: 80px 80px, 120px 120px, 90px 90px, 100px 100px;
+  }
+  /* ---------- ROUTE & VOITURES CARTOON ---------- */
+  .k-road {
+    position:absolute; left:0; right:0; bottom:22%; height:56px;
+    background: linear-gradient(180deg, #3f3f46, #18181b);
+    box-shadow: 0 6px 0 -2px rgba(0,0,0,0.25), inset 0 4px 0 rgba(255,255,255,0.05);
+    border-top: 3px solid #71717a; border-bottom: 3px solid #52525b;
+    transform: perspective(1200px) rotateX(46deg) translateY(20%);
+    transform-origin: top center;
+  }
+  .k-road::before {
+    content:""; position:absolute; top:50%; left:0; right:0; height:4px; transform:translateY(-50%);
+    background-image: repeating-linear-gradient(90deg, #fde047 0 28px, transparent 28px 54px);
+  }
+  .k-road::after {
+    content:""; position:absolute; inset:-8px -8px -8px -8px; border-radius: 8px; pointer-events:none;
+    box-shadow: inset 0 0 0 4px rgba(0,0,0,0.05);
+  }
+  .k-car {
+    position:absolute; left:-15%; display:flex; align-items:flex-end; gap:2px; will-change:transform;
+    filter: drop-shadow(0 6px 6px rgba(0,0,0,0.28));
+  }
+  .k-car .cb {
+    position:relative; width:64px; height:34px; border-radius:10px 14px 8px 8px;
+    background: linear-gradient(180deg, var(--c1,#ef4444) 0%, var(--c2,#b91c1c) 100%);
+    box-shadow: inset 0 -5px 0 rgba(0,0,0,0.18), inset 0 6px 0 rgba(255,255,255,0.22);
+  }
+  .k-car .cb::before {
+    content:""; position:absolute; left:12px; right:12px; top:4px; height:14px; border-radius:8px 12px 4px 4px;
+    background: linear-gradient(180deg, #bae6fd 0%, #7dd3fc 100%);
+    box-shadow: inset 0 -2px 0 rgba(14,116,144,0.25), inset 0 1px 0 rgba(255,255,255,0.6);
+  }
+  .k-car .cb::after {
+    content:""; position:absolute; left:4px; right:4px; top:50%; transform: translateY(-50%);
+    display:flex; justify-content:space-between;
+  }
+  .k-car .cw {
+    position:absolute; bottom:-7px; left:8px; right:8px; display:flex; justify-content:space-between;
+  }
+  .k-car .cw::before, .k-car .cw::after {
+    content:""; width:14px; height:14px; border-radius:9999px;
+    background: radial-gradient(circle at 30% 30%, #a3a3a3, #27272a 65%);
+    box-shadow: inset 0 -2px 0 rgba(0,0,0,0.55);
+  }
+  .k-car .cw::after { /* 2nd wheel */ }
+  @keyframes k-car-right { from { transform: translateX(-10vw);} to { transform: translateX(120vw);} }
+  @keyframes k-car-left  { from { transform: translateX(120vw);} to { transform: translateX(-10vw);} }
+
+  /* ---------- PIETONS (petits personnages en mousse) ---------- */
+  .k-ped {
+    position:absolute; bottom:calc(22% + 58px); left:-8%; width:22px; height:36px;
+    display:flex; flex-direction:column; align-items:center; justify-content:flex-end;
+    filter: drop-shadow(0 3px 2px rgba(0,0,0,0.25));
+    animation: sky-drift-x 42s linear infinite;
+  }
+  .k-ped::before {
+    content:""; width:14px; height:14px; border-radius:9999px; background: radial-gradient(circle at 30% 30%, #fde68a, #f59e0b);
+    box-shadow: inset -2px -3px 0 rgba(180,83,9,0.4);
+  }
+  .k-ped::after {
+    content:""; margin-top:-2px; width:18px; height:22px; border-radius:8px 8px 6px 6px;
+    background: linear-gradient(180deg, var(--c1,#fb7185) 0%, var(--c2,#e11d48) 100%);
+    box-shadow: inset 0 -4px 0 rgba(0,0,0,0.2);
+  }
+
+  /* ---------- BÂTIMENTS STYLE CARTOON (coins ronds + ombres cartoon) ---------- */
+  .k-b {
+    position:absolute; bottom: calc(22% + 56px);
+    border-radius: 10px 10px 6px 6px;
+    box-shadow:
+      inset 0 -10px 0 rgba(0,0,0,0.18),
+      inset 0 6px 0 rgba(255,255,255,0.18),
+      10px 12px 0 -4px rgba(15,23,42,0.18),
+      18px 28px 0 -10px rgba(15,23,42,0.10);
+    transform-origin: bottom center;
+  }
+  /* Toit cartoon */
+  .k-b::before {
+    content:""; position:absolute; left:-6%; right:-6%; top:-20px; height:28px; border-radius: 8px 8px 4px 4px;
+    background: linear-gradient(180deg, var(--tc1,#991b1b) 0%, var(--tc2,#7f1d1d) 100%);
+    box-shadow: inset 0 -6px 0 rgba(0,0,0,0.25), 0 3px 0 rgba(0,0,0,0.12);
+  }
+  /* Fenêtres (réseau) */
+  .k-b::after {
+    content:""; position:absolute; left:10%; right:10%; top:14px; bottom:10%;
+    background-image:
+      linear-gradient(90deg, rgba(253,224,71,0.0) 0 10px, rgba(253,224,71,0.55) 10px 16px, transparent 16px),
+      linear-gradient(0deg,  rgba(253,224,71,0.0) 0 10px, rgba(253,224,71,0.55) 10px 16px, transparent 16px);
+    background-size: 18px 22px, 18px 22px;
+    background-repeat: repeat;
+    mix-blend-mode: screen;
+    opacity: 0.9;
+  }
+  /* Villas "quartier Socle" petites maisons */
+  .k-b.t-villa { width:72px; height:76px;
+    background: linear-gradient(180deg, #fecaca 0%, #f87171 100%); }
+  .k-b.t-villa::before { top:-22px; height:28px; --tc1:#7c2d12; --tc2:#431407; }
+  .k-b.t-shop  { width:96px; height:96px; background: linear-gradient(180deg, #bae6fd 0%, #0ea5e9 100%); }
+  .k-b.t-shop::before  { top:-18px; height:26px; --tc1:#155e75; --tc2:#083344; }
+  .k-b.t-immeuble { width:92px; height:140px; background: linear-gradient(180deg, #ddd6fe 0%, #8b5cf6 100%); }
+  .k-b.t-immeuble::before { top:-16px; height:22px; --tc1:#581c87; --tc2:#3b0764; }
+  .k-b.t-gratte  { width:108px; height:210px; background: linear-gradient(180deg, #fef9c3 0%, #ca8a04 100%); }
+  .k-b.t-gratte::before  { top:-14px; height:22px; --tc1:#713f12; --tc2:#422006; }
+  .k-b.t-tour   { width:96px; height:250px; background: linear-gradient(180deg, #cffafe 0%, #06b6d4 55%, #0e7490 100%); }
+  .k-b.t-tour::before    { top:-12px; height:22px; --tc1:#164e63; --tc2:#083344; }
+
+  /* Lumieres allumées (ajoutées via classe .on) */
+  .k-b.on::after { background-image:
+      linear-gradient(90deg, transparent 0 10px, #fde047 10px 16px, transparent 16px),
+      linear-gradient(0deg,  transparent 0 10px, #fde047 10px 16px, transparent 16px);
+    filter: drop-shadow(0 0 6px rgba(253,224,71,0.6));
+  }
+  .k-b.chantier { filter: saturate(0.5) brightness(0.85); }
+  .k-b.chantier::after { opacity: 0.15; }
+  .k-b.chantier::before {
+    background: repeating-linear-gradient(45deg, #facc15 0 8px, #111827 8px 16px);
+    box-shadow: inset 0 -4px 0 rgba(0,0,0,0.25);
+    animation: shimmer 1.8s linear infinite;
+    background-size: 200% 100%;
+  }
+  /* Échafaudage */
+  .k-b.chantier .scaf {
+    position:absolute; inset: 6% 6% 0 6%; border-radius: 6px; pointer-events:none;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(15,23,42,0.55) 0 2px, transparent 2px 16px),
+      repeating-linear-gradient(90deg, rgba(15,23,42,0.55) 0 2px, transparent 2px 28px);
+    mix-blend-mode: multiply;
+  }
+
+  /* ---------- USINE QUI FUME (quand on encode du temps) ---------- */
+  .k-factory {
+    position:absolute; bottom:calc(22% + 56px); left:6%; width:150px; height:120px;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #9ca3af 0%, #4b5563 100%);
+    box-shadow: inset 0 -10px 0 rgba(0,0,0,0.25), inset 0 6px 0 rgba(255,255,255,0.15),
+      10px 12px 0 -4px rgba(15,23,42,0.18);
+  }
+  .k-factory .chim {
+    position:absolute; top:-58px; left:22%; width:24px; height:72px; border-radius: 4px 4px 0 0;
+    background: linear-gradient(90deg, #52525b, #3f3f46);
+    box-shadow: inset 4px 0 0 rgba(0,0,0,0.2);
+  }
+  .k-factory .chim::before,
+  .k-factory .chim::after {
+    content:""; position:absolute; left:0; right:0; top:-6px; height:6px; border-radius: 2px;
+    background: repeating-linear-gradient(90deg, #ef4444 0 6px, #f8fafc 6px 12px);
+  }
+  .k-factory .chim::after { top:-16px; }
+  .k-smoke {
+    position:absolute; left:calc(6% + 22px + 12px); bottom:calc(22% + 56px + 150px - 20px);
+    width:40px; height:40px; border-radius: 9999px;
+    background: radial-gradient(circle, rgba(255,255,255,0.9), rgba(161,161,170,0.1) 70%, transparent 75%);
+    filter: blur(2px);
+    opacity: 0;
+  }
+  @keyframes puf {
+    0%   { opacity: 0; transform: translate(0,0) scale(0.6); }
+    20%  { opacity: 0.9; }
+    100% { opacity: 0; transform: translate(20px,-160px) scale(2.6); }
+  }
+  .k-factory.lit .chim { background: linear-gradient(90deg, #f97316, #b91c1c); }
+  .k-factory.lit::before {
+    content:""; position:absolute; inset: 24% 10% 10% 10%;
+    background:
+      radial-gradient(circle at 20% 20%, #fde047 0 5px, transparent 7px),
+      radial-gradient(circle at 60% 40%, #fb923c 0 5px, transparent 7px),
+      radial-gradient(circle at 30% 80%, #f59e0b 0 5px, transparent 7px);
+    filter: blur(0.3px);
+    mix-blend-mode: screen;
+  }
+
+  /* ---------- ARBRES & VÉGÉTATION CARTOON ---------- */
+  .k-tree { position:absolute; bottom:calc(22% + 56px); width:36px; height:56px;
+    display:flex; align-items:flex-end; justify-content:center; filter: drop-shadow(0 6px 2px rgba(0,0,0,0.2)); }
+  .k-tree::before {
+    content:""; position:absolute; bottom:0; width:8px; height:18px; border-radius: 2px;
+    background: linear-gradient(180deg, #92400e, #78350f);
+  }
+  .k-tree::after {
+    content:""; position:absolute; bottom:14px; width:36px; height:42px; border-radius: 50% 50% 45% 45%;
+    background: radial-gradient(circle at 30% 30%, #86efac, #16a34a 70%);
+    box-shadow: inset -6px -8px 0 rgba(22,101,52,0.4);
+  }
+  .k-tree.big::after { width:48px; height:56px; }
+
+  /* ---------- FOULE / PUBLIC (petits points colorés = population) ---------- */
+  .k-crowd-dot {
+    position:absolute; width:7px; height:7px; border-radius: 9999px;
+    box-shadow: 0 2px 0 rgba(0,0,0,0.2);
+  }
+  /* ---------- FENÊTRES QUI CLIGNOTENT (mode nuisettes animées) ---------- */
+  @keyframes twinkle { 0%,100%{opacity:1;} 30%{opacity:0.3;} 55%{opacity:1;} 78%{opacity:0.5;} }
+  .k-twinkle { animation: twinkle 2.6s ease-in-out infinite; }
+
+  /* ---------- STAT POP-UP BULLE ---------- */
+  .k-pop {
+    position:absolute; bottom: calc(22% + 56px + 240px);
+    padding: 10px 12px; border-radius: 16px; background: rgba(15,23,42,0.85);
+    border:1px solid rgba(250,204,21,0.35); color:#facc15;
+    font-family: ui-monospace, monospace; font-size: 12px; font-weight:700;
+    box-shadow: 0 20px 40px -10px rgba(0,0,0,0.6);
+  }
+  .k-pop::after {
+    content:""; position:absolute; left:20px; bottom:-7px; width:12px; height:12px; background:inherit;
+    border-right:1px solid rgba(250,204,21,0.35); border-bottom:1px solid rgba(250,204,21,0.35);
+    transform: rotate(45deg);
+  }
+  .k-pop.gain { color:#86efac; border-color:rgba(52,211,153,0.45); background: rgba(6,78,59,0.75); }
+  .k-pop.loss { color:#fda4af; border-color:rgba(244,63,94,0.4);   background: rgba(88,28,135,0.45); }
 </style>
 </head>
 <body class="min-h-screen text-zinc-100 font-sans relative overflow-x-hidden">
@@ -355,205 +591,6 @@
         </div>
       </section>
 
-      <!-- BENTO · MINE KOPEK · CARTOON 3D GAMIFIED VIEW (12 cols) -->
-      <section class="col-span-12 relative rounded-2xl card-hover overflow-hidden"
-        style="background: linear-gradient(180deg, rgba(30,41,59,0.45) 0%, rgba(15,23,42,0.75) 100%); border:1px solid rgba(99,102,241,0.25); box-shadow: 0 40px 120px -40px rgba(99,102,241,0.35);">
-
-        <!-- Sky / Clouds backdrop -->
-        <div class="absolute inset-0 overflow-hidden pointer-events-none">
-          <div class="absolute top-3 left-10 text-2xl opacity-40 animate-float" style="animation-duration:9s;">☁️</div>
-          <div class="absolute top-8 right-32 text-xl opacity-30 animate-float" style="animation-delay:-2s; animation-duration:11s;">☁️</div>
-          <div class="absolute top-5 right-12 text-3xl opacity-90 animate-float" style="animation-duration:5s;">☀️</div>
-          <div class="absolute bottom-10 left-6 text-2xl opacity-20">🌲</div>
-          <div class="absolute bottom-8 left-20 text-3xl opacity-25">🏔️</div>
-          <div class="absolute bottom-10 right-10 text-2xl opacity-20">🌲</div>
-        </div>
-
-        <div class="relative p-5 sm:p-6 grid grid-cols-12 gap-5">
-
-          <!-- ===== LEFT · 3D ISOMETRIC MINE (cols 1→8) ===== -->
-          <div class="col-span-12 lg:col-span-8">
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-2">
-                <span class="text-2xl">⛏️</span>
-                <div>
-                  <h2 class="text-sm font-bold tracking-tight text-white">Mine Kopek · Chantier du Mois</h2>
-                  <p class="text-[11px] text-zinc-400">Plus tu encodes d'heures, plus la mine se remplit de richesses</p>
-                </div>
-              </div>
-              <div id="mine-level-badge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-200 text-[10px] font-bold tracking-wider uppercase border border-indigo-400/40">
-                <i data-lucide="flame" class="w-3 h-3 text-orange-300"></i> Niveau 0 · Débutant
-              </div>
-            </div>
-
-            <!-- Mine container · isometric 3D -->
-            <div id="mine-viewport" class="relative mx-auto w-full h-[340px] sm:h-[380px] [perspective:1600px]">
-              <div id="mine-scene" class="absolute inset-0 flex items-end justify-center" style="transform-style:preserve-3d; transform:rotateX(58deg) rotateZ(-40deg); transition: transform 0.4s ease;">
-
-                <!-- ===== NIVEAU 3 · DIAMANTS · SURPLUS (top layer, grand) ===== -->
-                <div class="absolute" style="width:260px; height:260px; transform-style:preserve-3d; transform:translateZ(170px);">
-                  <!-- floor -->
-                  <div class="absolute inset-0 rounded-lg" style="background:linear-gradient(135deg, rgba(16,185,129,0.18), rgba(99,102,241,0.10)); border:1px dashed rgba(16,185,129,0.55);"></div>
-                  <!-- fill diamonds · height = surplus % -->
-                  <div id="mine-l3-fill" class="absolute bottom-0 left-0 right-0 rounded-b-lg overflow-hidden transition-all duration-700" style="height:0%;">
-                    <div class="absolute inset-0 bg-gradient-to-t from-emerald-500/40 via-cyan-400/30 to-transparent"></div>
-                    <div id="mine-l3-sprites" class="absolute inset-0 flex flex-wrap items-end p-3 gap-1.5 text-[22px] sm:text-[26px] leading-none"></div>
-                  </div>
-                  <!-- walls -->
-                  <div class="absolute top-0 right-0 h-full w-5 origin-left rounded-r-md" style="background:linear-gradient(90deg, rgba(16,185,129,0.35), rgba(16,185,129,0.1)); border:1px solid rgba(16,185,129,0.45); transform: rotateY(90deg);"></div>
-                  <div class="absolute bottom-0 left-0 w-full h-5 origin-top rounded-b-md" style="background:linear-gradient(180deg, rgba(16,185,129,0.35), rgba(16,185,129,0.1)); border:1px solid rgba(16,185,129,0.45); transform: rotateX(-90deg);"></div>
-                  <!-- label tag -->
-                  <div class="absolute -top-12 left-1/2 -translate-x-1/2 whitespace-nowrap px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-200 text-[10px] font-bold tracking-[0.15em] uppercase border border-emerald-400/40">
-                    🟢 Palier 3 · Surplus · ∞ €
-                  </div>
-                </div>
-
-                <!-- ===== NIVEAU 2 · OR · RÉGIE GARANTIE (middle, medium) ===== -->
-                <div class="absolute" style="width:220px; height:220px; transform-style:preserve-3d; transform:translateZ(85px);">
-                  <div class="absolute inset-0 rounded-lg" style="background:linear-gradient(135deg, rgba(217,70,239,0.18), rgba(168,85,247,0.08)); border:1px dashed rgba(217,70,239,0.6);"></div>
-                  <div id="mine-l2-fill" class="absolute bottom-0 left-0 right-0 rounded-b-lg overflow-hidden transition-all duration-700" style="height:0%;">
-                    <div class="absolute inset-0 bg-gradient-to-t from-fuchsia-600/50 via-amber-400/40 to-transparent"></div>
-                    <div id="mine-l2-sprites" class="absolute inset-0 flex flex-wrap items-end p-2.5 gap-1.5 text-[22px] sm:text-[26px] leading-none"></div>
-                  </div>
-                  <div class="absolute top-0 right-0 h-full w-5 origin-left rounded-r-md" style="background:linear-gradient(90deg, rgba(217,70,239,0.40), rgba(217,70,239,0.1)); border:1px solid rgba(217,70,239,0.5); transform: rotateY(90deg);"></div>
-                  <div class="absolute bottom-0 left-0 w-full h-5 origin-top rounded-b-md" style="background:linear-gradient(180deg, rgba(217,70,239,0.40), rgba(217,70,239,0.1)); border:1px solid rgba(217,70,239,0.5); transform: rotateX(-90deg);"></div>
-                  <div class="absolute -top-11 left-1/2 -translate-x-1/2 whitespace-nowrap px-3 py-1 rounded-full bg-fuchsia-500/20 text-fuchsia-200 text-[10px] font-bold tracking-[0.15em] uppercase border border-fuchsia-400/40">
-                    🟣 Palier 2 · Régie Garantie · 1 500 €
-                  </div>
-                </div>
-
-                <!-- ===== NIVEAU 1 · CUIVRE/BRONZE · SOCLE (bottom, small) ===== -->
-                <div class="absolute" style="width:180px; height:180px; transform-style:preserve-3d; transform:translateZ(0px);">
-                  <div class="absolute inset-0 rounded-lg" style="background:linear-gradient(135deg, rgba(99,102,241,0.22), rgba(30,64,175,0.10)); border:1px dashed rgba(99,102,241,0.75);"></div>
-                  <div id="mine-l1-fill" class="absolute bottom-0 left-0 right-0 rounded-b-lg overflow-hidden transition-all duration-700" style="height:0%;">
-                    <div class="absolute inset-0 bg-gradient-to-t from-orange-600/55 via-amber-500/45 to-transparent"></div>
-                    <div id="mine-l1-sprites" class="absolute inset-0 flex flex-wrap items-end p-2 gap-1 text-[22px] sm:text-[26px] leading-none"></div>
-                  </div>
-                  <div class="absolute top-0 right-0 h-full w-5 origin-left rounded-r-md" style="background:linear-gradient(90deg, rgba(99,102,241,0.50), rgba(99,102,241,0.12)); border:1px solid rgba(99,102,241,0.6); transform: rotateY(90deg);"></div>
-                  <div class="absolute bottom-0 left-0 w-full h-5 origin-top rounded-b-md" style="background:linear-gradient(180deg, rgba(99,102,241,0.50), rgba(99,102,241,0.12)); border:1px solid rgba(99,102,241,0.6); transform: rotateX(-90deg);"></div>
-                  <div class="absolute -top-10 left-1/2 -translate-x-1/2 whitespace-nowrap px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-200 text-[10px] font-bold tracking-[0.15em] uppercase border border-indigo-400/40">
-                    🔵 Palier 1 · Socle · 2 000 €
-                  </div>
-                </div>
-
-                <!-- ===== Miner + Cart on top of scene ===== -->
-                <div id="miner-char" class="absolute text-4xl sm:text-5xl transition-all duration-1000 ease-out" style="transform: translate(90px, -90px) translateZ(210px); filter:drop-shadow(0 8px 10px rgba(0,0,0,0.4));">
-                  🧑‍🏭
-                </div>
-                <div id="miner-cart" class="absolute text-3xl sm:text-4xl" style="transform: translate(150px, -70px) translateZ(215px); filter:drop-shadow(0 6px 8px rgba(0,0,0,0.35));">
-                  🛒
-                </div>
-                <div id="mine-flags" class="absolute text-2xl" style="transform: translate(130px, -210px) translateZ(230px);">
-                  🚩
-                </div>
-                <!-- pile of rocks outside -->
-                <div class="absolute text-2xl opacity-60" style="transform: translate(-30px, 40px) translateZ(-30px);">🪨</div>
-                <div class="absolute text-xl opacity-50" style="transform: translate(260px, 20px) translateZ(-30px);">🪨🪨</div>
-              </div>
-
-              <!-- XP bar · bottom of mine viewport (not rotated, flat) -->
-              <div class="absolute bottom-2 left-3 right-3">
-                <div class="flex items-center justify-between text-[10px] font-mono text-zinc-300 mb-1">
-                  <span id="mine-xp-label">XP · 0 / 43,75 h</span>
-                  <span id="mine-xp-pct">0%</span>
-                </div>
-                <div class="h-3 rounded-full bg-zinc-900/80 border border-zinc-700/70 overflow-hidden shadow-inner relative">
-                  <div class="absolute inset-y-0 left-0 w-full opacity-25" style="background-image: linear-gradient(45deg, rgba(255,255,255,0.08) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.08) 75%, transparent 75%, transparent); background-size: 14px 14px;"></div>
-                  <div id="mine-xp-fill" class="relative h-full rounded-full" style="width:0%; background: linear-gradient(90deg, #6366f1 0%, #a855f7 40%, #34d399 80%, #bef264 100%); box-shadow: 0 0 20px -2px rgba(168,85,247,0.55); transition: width 0.7s cubic-bezier(.22,1,.36,1);"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ===== RIGHT · SCOREBOARD MOIS (cols 9→12) ===== -->
-          <div class="col-span-12 lg:col-span-4 space-y-3">
-
-            <!-- OBJECTIF PRINCIPAL -->
-            <div class="relative rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-4 overflow-hidden">
-              <div class="absolute top-0 right-0 text-5xl opacity-10">🎯</div>
-              <div class="text-[10px] uppercase tracking-[0.18em] text-amber-300 font-bold mb-2 flex items-center gap-1.5">
-                <i data-lucide="swords" class="w-3 h-3"></i> Objectif Principal · Boss du Mois
-              </div>
-              <div id="boss-title" class="text-lg font-bold text-white leading-tight mb-1.5">
-                Remplir le coffre · Min Garanti
-              </div>
-              <div id="boss-hp-label" class="text-[11px] text-zinc-400 font-mono mb-2">
-                PV · 0 / 3 500 €
-              </div>
-              <!-- HP bar -->
-              <div class="relative h-4 rounded-md bg-zinc-950 border border-zinc-700 overflow-hidden">
-                <div class="absolute inset-0 opacity-20" style="background-image: linear-gradient(45deg, rgba(239,68,68,0.25) 25%, transparent 25%, transparent 50%, rgba(239,68,68,0.25) 50%, rgba(239,68,68,0.25) 75%, transparent 75%, transparent); background-size: 10px 10px; animation: shimmer 1.2s linear infinite;"></div>
-                <div id="boss-hp-fill" class="absolute inset-y-0 left-0 bg-gradient-to-r from-red-500 via-orange-500 to-amber-400 transition-all duration-700" style="width:0%; box-shadow: 0 0 18px -3px rgba(239,68,68,0.6);"></div>
-              </div>
-              <div id="boss-summary" class="text-[11px] text-zinc-400 mt-2.5">
-                Encode 43,75 h sur le contrat principal pour valider le mois.
-              </div>
-            </div>
-
-            <!-- ACHIEVEMENTS -->
-            <div class="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-4">
-              <div class="text-[10px] uppercase tracking-[0.18em] text-indigo-300 font-bold mb-3 flex items-center gap-1.5">
-                <i data-lucide="trophy" class="w-3 h-3"></i> Succès du Mois
-              </div>
-              <div id="achievements-list" class="space-y-2">
-                <div data-ach="socle" class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-zinc-800 bg-zinc-950/40 opacity-60">
-                  <div class="w-8 h-8 rounded-md bg-zinc-900 border border-zinc-800 flex items-center justify-center text-lg grayscale">🟦</div>
-                  <div class="flex-1">
-                    <div class="text-[12px] font-bold text-zinc-300">Premier Palier</div>
-                    <div class="text-[10px] text-zinc-500">Remplir le Socle 2 000 € (25 h)</div>
-                  </div>
-                  <div class="text-[10px] font-mono text-zinc-500">🔒 Verrouillé</div>
-                </div>
-
-                <div data-ach="garantie" class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-zinc-800 bg-zinc-950/40 opacity-60">
-                  <div class="w-8 h-8 rounded-md bg-zinc-900 border border-zinc-800 flex items-center justify-center text-lg grayscale">🟨</div>
-                  <div class="flex-1">
-                    <div class="text-[12px] font-bold text-zinc-300">Garanti Validé</div>
-                    <div class="text-[10px] text-zinc-500">Atteindre le Min Garanti (43,75 h)</div>
-                  </div>
-                  <div class="text-[10px] font-mono text-zinc-500">🔒 Verrouillé</div>
-                </div>
-
-                <div data-ach="surplus" class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-zinc-800 bg-zinc-950/40 opacity-60">
-                  <div class="w-8 h-8 rounded-md bg-zinc-900 border border-zinc-800 flex items-center justify-center text-lg grayscale">💎</div>
-                  <div class="flex-1">
-                    <div class="text-[12px] font-bold text-zinc-300">Surplus Démarré</div>
-                    <div class="text-[10px] text-zinc-500">Première heure facturée au-delà de 43,75 h</div>
-                  </div>
-                  <div class="text-[10px] font-mono text-zinc-500">🔒 Verrouillé</div>
-                </div>
-
-                <div data-ach="secondary" class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-zinc-800 bg-zinc-950/40 opacity-60">
-                  <div class="w-8 h-8 rounded-md bg-zinc-900 border border-zinc-800 flex items-center justify-center text-lg grayscale">🚀</div>
-                  <div class="flex-1">
-                    <div class="text-[12px] font-bold text-zinc-300">Multi-Clients</div>
-                    <div class="text-[10px] text-zinc-500">Encoder ≥ 500 € HTVA sur un client secondaire</div>
-                  </div>
-                  <div class="text-[10px] font-mono text-zinc-500">🔒 Verrouillé</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- STATS RAPIDES -->
-            <div class="grid grid-cols-2 gap-2">
-              <div class="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-3">
-                <div class="text-[9px] uppercase tracking-[0.15em] text-zinc-500 mb-1">Temps Réel / Facturé</div>
-                <div class="flex items-end justify-between gap-1">
-                  <span id="stat-h-rf" class="font-mono text-base font-bold text-zinc-100 chip">0h / 0h</span>
-                </div>
-                <div id="stat-h-pct" class="text-[10px] text-zinc-500 font-mono mt-0.5">+0 % arrondi</div>
-              </div>
-              <div class="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-3">
-                <div class="text-[9px] uppercase tracking-[0.15em] text-zinc-500 mb-1">Jours écoulés / Mois</div>
-                <div class="flex items-end justify-between gap-1">
-                  <span id="stat-days" class="font-mono text-base font-bold text-zinc-100 chip">0 / 31j</span>
-                </div>
-                <div id="stat-days-pace" class="text-[10px] text-zinc-500 font-mono mt-0.5">Rythme · 0,00 h/j</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
 
       <!-- BENTO #3 · QUICK ENTRY (12 cols) -->
       <section class="col-span-12 card rounded-2xl p-4 sm:p-5 card-hover">
@@ -738,10 +775,133 @@
         </div>
       </section>
 
+      <!-- ============================================================= -->
+      <!-- BENTO · KOPEK CITY · SIMCITY CARTOON PIXAR VIEW (tout en bas) -->
+      <!-- ============================================================= -->
+      <section id="kopek-city" class="col-span-12 relative rounded-3xl card-hover overflow-hidden select-none"
+        style="background:#0b1120; border:1px solid rgba(129,140,248,0.3);
+               box-shadow: 0 40px 120px -40px rgba(99,102,241,0.55), inset 0 1px 0 rgba(255,255,255,0.05);
+               min-height: 560px;">
+
+        <!-- Skylight (saturation cartoon : ciel Pixar) -->
+        <div class="k-sky-wrap absolute inset-0">
+          <!-- Soleil -->
+          <div class="k-sun" aria-hidden="true"></div>
+          <!-- Nuages animés -->
+          <div class="k-cloud" style="top:10%; left:12%; animation: sky-drift-x 72s linear infinite;">
+            <i style="width:58px; height:24px; margin-left:8px;"></i>
+          </div>
+          <div class="k-cloud" style="top:18%; left:40%; animation: sky-drift-x 96s linear infinite reverse; animation-delay:-30s;">
+            <i style="width:78px; height:30px;"></i>
+          </div>
+          <div class="k-cloud" style="top:7%; left:62%; animation: sky-drift-x 56s linear infinite; animation-delay:-12s;">
+            <i style="width:48px; height:20px;"></i>
+          </div>
+          <!-- Avion -->
+          <div class="k-plane trail" style="top:22%; animation-delay:-6s;">✈️</div>
+          <div class="k-plane trail" style="top:9%; animation-delay:-18s; animation-duration: 36s; transform: scaleX(-1);">🛩️</div>
+        </div>
+
+        <!-- Sol cartoon (pente 3D + herbe) -->
+        <div class="k-ground" aria-hidden="true"></div>
+
+        <!-- Route + voie gauche (camion/voitures) -->
+        <div class="k-road" aria-hidden="true"></div>
+        <!-- Vehicules (enfant JS va ajouter aussi des voitures dynamiques : bonus si >0) -->
+        <div class="k-car" style="bottom:22%; animation: k-car-right 10s linear infinite; animation-delay:-1s; --c1:#ef4444; --c2:#b91c1c;">
+          <div class="cb"></div><div class="cw"></div>
+        </div>
+        <div class="k-car" style="bottom:22%; animation: k-car-left 13s linear infinite; animation-delay:-4s; --c1:#60a5fa; --c2:#1d4ed8; transform: scaleX(-1);">
+          <div class="cb"></div><div class="cw"></div>
+        </div>
+        <div class="k-car" style="bottom:calc(22% + 26px); animation: k-car-right 16s linear infinite; animation-delay:-7s; --c1:#34d399; --c2:#047857;">
+          <div class="cb"></div><div class="cw"></div>
+        </div>
+        <div class="k-car" style="bottom:calc(22% + 26px); animation: k-car-left 19s linear infinite; animation-delay:-11s; --c1:#f472b6; --c2:#be185d; transform: scaleX(-1);">
+          <div class="cb"></div><div class="cw"></div>
+        </div>
+
+        <!-- Piétons -->
+        <div class="k-ped" style="animation-delay:-18s; --c1:#fde047; --c2:#ca8a04;"></div>
+        <div class="k-ped" style="animation-delay:-4s; --c1:#67e8f9; --c2:#0e7490;"></div>
+        <div class="k-ped" style="animation-delay:-30s; animation-duration: 52s; --c1:#f59e0b; --c2:#92400e;"></div>
+
+        <!-- Usine (quartier Socle - gaucho) → anime fumée à chaque log -->
+        <div id="k-factory" class="k-factory" aria-hidden="true">
+          <div class="chim"></div>
+        </div>
+        <div id="k-smoke" class="k-smoke" aria-hidden="true"></div>
+
+        <!-- ================= CONTENU JS-RENDER : VILLE ================= -->
+        <!-- 3 quartiers : Socle (25h) · Garantie (18,75h) · Bonus (Surplus infini) -->
+        <div id="city-buildings" class="absolute inset-0 pointer-events-none">
+          <!-- Remplissage JS : Villas/Shops/Immeubles/Tours + Arbres + Foulons -->
+        </div>
+
+        <!-- Panneaux indicateurs quartiers -->
+        <div class="absolute left-6  top-5 rounded-xl px-3 py-1.5 text-xs font-bold uppercase tracking-wider
+                    bg-red-500/15 border border-red-400/40 text-red-300 backdrop-blur">
+          🏘️ Quartier Socle · 25 h
+        </div>
+        <div class="absolute left-1/2 -translate-x-1/2 top-5 rounded-xl px-3 py-1.5 text-xs font-bold uppercase tracking-wider
+                    bg-fuchsia-500/15 border border-fuchsia-400/40 text-fuchsia-300 backdrop-blur">
+          🏢 Quartier Garantie · +18,75 h
+        </div>
+        <div class="absolute right-6 top-5 rounded-xl px-3 py-1.5 text-xs font-bold uppercase tracking-wider
+                    bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 backdrop-blur">
+          🗼 Quartier Bonus · Surplus €€€
+        </div>
+
+        <!-- ================= POP UP ACQUIS (info-bulle Pixar) ================= -->
+        <div id="city-pop" class="k-pop hidden" style="left:10%; animation: float 4s ease-in-out infinite;"></div>
+
+        <!-- ================= HUD SIMCITY (info-bulle droite) ================= -->
+        <div class="absolute right-4 bottom-4 w-72 rounded-2xl p-3.5 backdrop-blur-xl
+                    bg-zinc-950/70 border border-white/10 shadow-[0_30px_60px_-10px_rgba(0,0,0,0.7)]
+                    grid grid-cols-2 gap-2.5 text-[11px] leading-tight">
+          <div class="col-span-2 flex items-center gap-2 pb-2 mb-1 border-b border-white/10">
+            <i data-lucide="map" class="w-4 h-4 text-indigo-400"></i>
+            <div class="font-bold tracking-wider uppercase text-white text-[11px]">Kopek · City Board</div>
+          </div>
+          <div class="rounded-xl bg-red-500/10 border border-red-400/30 p-2">
+            <div class="text-[9px] uppercase tracking-wider text-red-300/90">🏛️ Socle</div>
+            <div id="hud-socle" class="font-mono font-bold text-red-300 text-[13px] mt-0.5">—</div>
+          </div>
+          <div class="rounded-xl bg-fuchsia-500/10 border border-fuchsia-400/30 p-2">
+            <div class="text-[9px] uppercase tracking-wider text-fuchsia-300/90">🔒 Garantie</div>
+            <div id="hud-garanti" class="font-mono font-bold text-fuchsia-300 text-[13px] mt-0.5">—</div>
+          </div>
+          <div class="rounded-xl bg-emerald-500/10 border border-emerald-400/30 p-2">
+            <div class="text-[9px] uppercase tracking-wider text-emerald-300/90">✨ Bonus</div>
+            <div id="hud-bonus" class="font-mono font-bold text-emerald-300 text-[13px] mt-0.5">—</div>
+          </div>
+          <div class="rounded-xl bg-indigo-500/10 border border-indigo-400/30 p-2">
+            <div class="text-[9px] uppercase tracking-wider text-indigo-300/90">👥 Population</div>
+            <div id="hud-pop" class="font-mono font-bold text-indigo-300 text-[13px] mt-0.5">—</div>
+          </div>
+          <div class="col-span-2 rounded-xl bg-amber-500/10 border border-amber-400/30 p-2.5">
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="text-[9px] uppercase tracking-wider text-amber-300/90">💼 Acquis contractuel (€ HT)</div>
+                <div id="hud-acquis" class="font-mono font-bold text-amber-300 text-[14px] mt-0.5">—</div>
+              </div>
+              <div class="text-right">
+                <div class="text-[9px] uppercase tracking-wider text-zinc-400">+ Bonus</div>
+                <div id="hud-ca-bonus" class="font-mono font-bold text-emerald-400 text-[14px] mt-0.5">—</div>
+              </div>
+            </div>
+            <div class="mt-2 h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+              <div id="hud-bar" class="h-full bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-emerald-400" style="width:0%"></div>
+            </div>
+            <div id="hud-label" class="mt-1 text-[10px] text-zinc-400 font-mono">—</div>
+          </div>
+        </div>
+      </section>
+
     </div>
 
     <footer class="mt-10 mb-6 text-center text-[10px] text-zinc-600 tracking-wider uppercase">
-      kopek · Cockpit Financier · v2.0 · Firebase Firestore · GitHub Pages
+      kopek · Cockpit Financier · v2.1 · Firebase Firestore · GitHub Pages
     </footer>
   </main>
 </div>

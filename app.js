@@ -424,22 +424,53 @@ function aggregateMonth() {
   }
 
   // ---- DÉCOMPOSITION PALIERS NESSY ----
+  // =========================================================================
+  // 🔑 RÈGLE MÉTIER (nouvelle logique utilisateur) :
+  //   SOCLE 2 000 € (25 h) + MIN GARANTI 3 500 € (43,75 h) = ACQUIS PROMIS
+  //   sur contrat, DÈS LE PREMIER JOUR DU MOIS, SANS ENCODAGE.
+  //
+  //   Les heures encodées servent DEUX CHOSES :
+  //   1. REMBOURSER l'heure acquise (crédit d'heures dûes au client Nessy)
+  //      → de 0 h → 43,75 h : comble la dette horaire contractuelle
+  //   2. AU-DELÀ : générer du SURPLUS BONUS (facturé en plus du Min Garanti)
+  //      → > 43,75 h = @ Taux horaire Nessy → ajouté DESSUS du Min Garanti
+  //
+  //   mainFinalCA = Max(Min Garanti, revenu réel) PAR CONSTRUCTION :
+  //   → on prend donc Le Min Garanti si pas assez travaillé (top-up acquis)
+  //   → on prend le réel si on dépasse le Min Garanti grâce au surplus.
+  // =========================================================================
   const hoursHourlyNessy = mainBilledMin / 60;
-  const t1h = Math.min(hoursHourlyNessy, NESSY.socleHours);
-  const t2h = Math.min(Math.max(hoursHourlyNessy - NESSY.socleHours, 0), NESSY.minHoursEq - NESSY.socleHours);
-  const t3h = Math.max(hoursHourlyNessy - NESSY.minHoursEq, 0);
-  const t1eur = mainHourlyLogs.length || mainFlatLogs.length ? NESSY.socleFlat : 0;
-  const t2eur = t2h * NESSY.regieRate;
-  // Pour T3 : € réel hourly Nessy − (socle + t2 @ 80€). Si custom rate (ex 95€) s'applique, on conserve l'excédent.
-  const t3eur = Math.max(0, mainHourlyRealEur - NESSY.socleFlat - t2eur);
+  // ---- Heures remboursement (dette 0 → 43,75 h) ----
+  const heuresDette = NESSY.minHoursEq;
+  const refundedH = Math.min(hoursHourlyNessy, heuresDette);            // 0 → 43,75
+  const debtRemainH = Math.max(0, heuresDette - hoursHourlyNessy);     // ce qu'il reste à faire pour le client
+  const t3h = Math.max(hoursHourlyNessy - heuresDette, 0);             // SURPLUS BONUS au-dessus du Min Garanti
 
-  const mainFlatEur = mainFlatLogs.reduce((a, l) => a + (l.custom_price || 0), 0);
-  const mainRevenusAvantMin = t1eur + t2eur + t3eur + mainFlatEur;
+  // Pour les cartes paliers 1/2/3 : on affiche le % D'ACQUITTEMENT DE LA DETTE
+  // (pas le % d'acquisition car l'argent est déjà acquis)
+  const socleHours = NESSY.socleHours;
+  const t1h = Math.min(refundedH, socleHours);                                         // Remboursement Socle
+  const t2h = Math.min(Math.max(refundedH - socleHours, 0), heuresDette - socleHours); // Remboursement Régie Garantie
+
+  // CA NESSY = MIN GARANTI (acquis) + SURPLUS RÉEL HORAIRE + FORFAITS
   const minG = getMinGaranti(monthIdx);
-  const minApplied = mainRevenusAvantMin < minG && mainHourlyLogs.length + mainFlatLogs.length > 0;
-  const mainFinalCA = (mainHourlyLogs.length + mainFlatLogs.length === 0)
-    ? 0
-    : Math.max(minG, mainRevenusAvantMin);
+  // Revenu hourly réel NESSY pour heures > minHoursEq (surplus) + forfaits
+  const hourlySurplusEur = Math.max(0, mainHourlyRealEur - (heuresDette * NESSY.regieRate));
+  const mainFlatEur = mainFlatLogs.reduce((a, l) => a + (l.custom_price || 0), 0);
+  const bonusEur = hourlySurplusEur + mainFlatEur;
+
+  // t1eur/t2eur = Ce qui a été "comptabilisé" comme Heures REMBOURSÉES (pas euros facturés — c'est déjà dans MinG)
+  const t1eur = t1h * NESSY.regieRate;              // 0 → 2000
+  const t2eur = t2h * NESSY.regieRate;              // 0 → 1500
+  const t3eur = hourlySurplusEur;
+
+  const mainRevenusAvantMin = (refundedH * NESSY.regieRate) + bonusEur;
+  // Si on a ne serait-ce qu'1 log Nessy → on active le contrat pour le mois → Min Garanti
+  const hasAnyNessy = (mainHourlyLogs.length + mainFlatLogs.length) > 0;
+  const mainFinalCA = hasAnyNessy
+    ? Math.max(minG, mainRevenusAvantMin)
+    : 0;
+  const minApplied = hasAnyNessy && mainRevenusAvantMin < minG;
 
   // Revenus clients secondaires (brut, sans min garanti)
   let secondaryEur = 0;
@@ -457,7 +488,10 @@ function aggregateMonth() {
   const avance = isAvanceMonth(monthIdx) ? NESSY.avanceDeduct : 0;
   const netPocket = globalCA + TRESORERIE.creditTVA - TOTAL_CHARGES - inasti - ipp - avance;
 
-  // Pour jauge · 0 → minHoursEq = 100% ; max 120% pour que ça déborde visuellement dans la zone surplus
+  // Pour jauge · base = heures DETTE (43,75 h). On clamp 0→120%
+  //   0%   = 0h encodées (dette ENTIÈRE)
+  //   100% = 43,75h remboursées (dette soldée)
+  //   > 100% = surplus bonus
   const gaugeBaseHours = NESSY.minHoursEq;
   const gaugePct = Math.min(120, (hoursHourlyNessy / gaugeBaseHours) * 100);
 
@@ -484,6 +518,10 @@ function aggregateMonth() {
     byClient,
     gaugePct,
     gaugeBaseHours,
+    bonusEur,                      // = surplus facturable en euros
+    refundedH,                     // heures de dette remboursées
+    debtRemainH,                   // il reste X heures avant de déclencher le bonus
+    hasAnyNessy,                   // contrat activé pour le mois ?
   };
 }
 
@@ -497,7 +535,7 @@ async function refreshPeriod() {
   populateClientSelects();
   renderHeader(agg);
   renderNessyGauge(agg);
-  renderMine(agg);
+  renderCity(agg);
   renderPocket(agg);
   renderMetrics(agg);
   renderWaterfall(agg);
@@ -544,101 +582,147 @@ function renderNessyGauge(agg) {
   $('#gauge-fill').style.width   = `${pct}%`;
   $('#gauge-cursor').style.left  = `${pct}%`;
 
-  // Titre header : HEURES ENCODÉES / BASE
+  // ------------------------------------------------------------------
+  // HEADER NESSY (à gauche du Hero)
+  //   Titre "CONTRAT PRINCIPAL · NESSY"
+  //   Sous-titre : on MET EN ÉVIDENCE l'ACQUIS CONTRACTUEL
+  //   + le surplus en bonus en plus
+  // ------------------------------------------------------------------
+  const acquisShow = EUR(agg.hasAnyNessy ? agg.minG : 0);
+  const bonusShow  = EUR(agg.bonusEur || 0);
   const hh = HHdecimal(hoursNessy * 60);           // heures decimal pour affichage
-  const beforeSocle = socleH - hoursNessy;
-  const beforeGarantie = garantieH - hoursNessy;
-  $('#nessy-sub').innerHTML = hoursNessy <= 0
-    ? `0 h · encodé sur <b class="text-indigo-300">${socleH.toFixed(2)} h Socle</b> → <b class="text-fuchsia-300">${garantieH.toFixed(2)} h Min Garanti</b>`
-    : `<b class="chip font-bold text-white">${hh} h</b> facturées sur le contrat · <span class="text-zinc-500">Base ${garantieH.toFixed(2)} h</span>`;
+  $('#nessy-sub').innerHTML = (agg.hasAnyNessy)
+    ? `<b>Acquis <span class="chip text-amber-300 font-bold">${acquisShow}</span> garanti</b> · ` +
+      `Réalisé <span class="chip text-white font-bold">${hh} h / ${garantieH.toFixed(2)} h</span> · ` +
+      `<span class="text-emerald-300 font-bold">+ ${bonusShow} bonus</span>`
+    : `Aucun encodage Nessy ce mois · Acquis contractuel non activé — Encode tes premières heures pour activer <b class="text-amber-300">${EUR(agg.minG)}</b> de Min Garanti.`;
 
   // Cards tiers (3 sous-cartes sous la jauge)
-  $('#tier1-h').textContent   = `${agg.tiers.t1.h.toFixed(2)} h`;
-  $('#tier1-eur').textContent = EUR(agg.tiers.t1.eur);
-  $('#tier2-h').textContent   = `${agg.tiers.t2.h.toFixed(2)} h`;
-  $('#tier2-eur').textContent = `${EUR(agg.tiers.t2.eur)} @ ${NESSY.regieRate} €/h`;
-  $('#tier3-h').textContent   = `${agg.tiers.t3.h.toFixed(2)} h`;
-  $('#tier3-eur').textContent = `+ ${EUR(agg.tiers.t3.eur + agg.mainFlatEur)}`;
+  // Puisque l'argent est acquis : montrer REMBOURSEMENT (pas € gagnés)
+  $('#tier1-h').textContent   = `${agg.tiers.t1.h.toFixed(2)} h / ${socleH.toFixed(2)} h`;
+  $('#tier1-eur').textContent = `~ ${EUR(agg.tiers.t1.eur)} remboursés`;
+  $('#tier2-h').textContent   = `${agg.tiers.t2.h.toFixed(2)} h / ${(garantieH - socleH).toFixed(2)} h`;
+  $('#tier2-eur').textContent = `~ ${EUR(agg.tiers.t2.eur)} remboursés @ ${NESSY.regieRate} €/h`;
+  $('#tier3-h').textContent   = `+ ${agg.tiers.t3.h.toFixed(2)} h`;
+  $('#tier3-eur').textContent = `+ ${EUR(agg.tiers.t3.eur + agg.mainFlatEur)} bonus`;
 
-  // ---- STATUS BAND : position EXPLICITE vs SOCLE puis vs GARANTIE ----
+  // ---- STATUS BAND : remplacements ACQUIS vs RÉALISÉ vs BONUS ----
   const st = $('#gauge-status');
-  const minGap = agg.minG - agg.mainRevenusAvantMin;
+  const refunded = agg.refundedH || 0;
+  const debt = agg.debtRemainH || 0;
 
-  // Cas 0 · Rien d'encodé
-  if (agg.mainFinalCA === 0) {
-    st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-zinc-800 bg-zinc-900/40';
-    st.innerHTML = `<i data-lucide="hash" class="w-5 h-5 text-zinc-500 flex-none mt-0.5"></i>
-      <div><strong class="text-zinc-200">Heures encodées NESSY · <span class="chip text-zinc-100">0,00 h</span> / ${garantieH.toFixed(2)} h</strong><br>
-      <div class="mt-1.5 grid grid-cols-3 gap-3 text-xs font-mono">
-        <div class="text-indigo-300/90"><b>0 / 25 h</b><br><span class="text-zinc-500 text-[11px]">Socle 2 000 €</span></div>
-        <div class="text-fuchsia-300/90"><b>0 / 18,75 h</b><br><span class="text-zinc-500 text-[11px]">Régie Garantie</span></div>
-        <div class="text-emerald-300/90"><b>0 h</b><br><span class="text-zinc-500 text-[11px]">Surplus facturable</span></div>
-      </div>
-      <span class="text-zinc-500 text-sm mt-2 block">Sélectionnez <b>${agg.mainClient?.name || 'NESSY'}</b> dans la saisie rapide pour activer le palier Socle.</span></div>`;
+  // Cas 0 · Rien d'encodé (hasAnyNessy false → pas top-up)
+  if (!agg.hasAnyNessy) {
+    st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-amber-500/30 bg-amber-500/[0.06]';
+    st.innerHTML = `<i data-lucide="scale" class="w-5 h-5 text-amber-300 flex-none mt-0.5"></i>
+      <div class="flex-1">
+        <div class="flex flex-wrap items-center gap-2 mb-1.5">
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/40 text-amber-200 text-[11px] font-semibold tracking-wider uppercase">⚜️ Acquis Contractuel</span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-zinc-800/80 border border-zinc-700 text-zinc-300 text-[11px] font-mono">💶 Min Garanti · ${EUR(agg.minG)}</span>
+        </div>
+        <strong class="text-zinc-100 block">0 h encodées Nessy · L'acquis <b class="text-amber-300">${EUR(agg.minG)}</b> est PROMIS par contrat, mais <b>pas encore activé</b> sur le mois.</strong>
+        <div class="mt-3 grid grid-cols-3 gap-3 text-xs font-mono">
+          <div class="rounded-lg p-2 bg-zinc-900/70 border border-zinc-800 text-indigo-300/90">
+            <div class="text-[9px] uppercase tracking-wider text-zinc-500 font-sans">Socle 2 000 €</div>
+            <b class="block mt-1 text-zinc-100">—</b>
+            <div class="text-[10px] text-zinc-500 mt-0.5">0 / ${socleH.toFixed(2)} h · dette</div>
+          </div>
+          <div class="rounded-lg p-2 bg-zinc-900/70 border border-zinc-800 text-fuchsia-300/90">
+            <div class="text-[9px] uppercase tracking-wider text-zinc-500 font-sans">Régie Garantie</div>
+            <b class="block mt-1 text-zinc-100">—</b>
+            <div class="text-[10px] text-zinc-500 mt-0.5">0 / ${(garantieH - socleH).toFixed(2)} h · dette</div>
+          </div>
+          <div class="rounded-lg p-2 bg-zinc-900/70 border border-zinc-800 text-emerald-300/90">
+            <div class="text-[9px] uppercase tracking-wider text-zinc-500 font-sans">Bonus Surplus</div>
+            <b class="block mt-1 text-zinc-100">0,00 €</b>
+            <div class="text-[10px] text-zinc-500 mt-0.5">seulement après ${garantieH.toFixed(2)} h</div>
+          </div>
+        </div>
+        <div class="mt-3 text-[12px] text-zinc-400">
+          Sélectionnez <b>${agg.mainClient?.name || 'NESSY'}</b> dans la saisie rapide ci-dessus, puis encodez vos heures · Le top-up Min Garanti s'appliquera en fin de mois si nécessaire.
+        </div>
+      </div>`;
   }
 
   // Cas 1 · Dans le SOCLE (0 → 25h)
-  else if (hoursNessy < socleH) {
-    const pctSocle = Math.min(100, (hoursNessy / socleH) * 100);
+  else if (refunded < socleH) {
+    const pctSocle = Math.min(100, (refunded / socleH) * 100);
     st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-indigo-500/40 bg-indigo-500/[0.07]';
     st.innerHTML = `<i data-lucide="move-up-right" class="w-5 h-5 text-indigo-300 flex-none mt-0.5"></i>
-      <div class="flex-1"><strong class="text-indigo-100">Zone Socle · <span class="chip">${agg.tiers.t1.h.toFixed(2)} h / 25,00 h</span> effectués</strong>
-      <div class="mt-2 h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-indigo-400/80 rounded-full" style="width:${pctSocle}%"></div></div>
-      <div class="flex justify-between text-[11px] font-mono mt-1.5 text-indigo-300/80">
-        <span>Avancement Socle · ${pctSocle.toFixed(0)}%</span>
-        <span>Il manque <b>${beforeSocle.toFixed(2)} h</b> pour remplir le socle</span>
-      </div>
-      <div class="text-zinc-400 text-[12px] mt-2">
-        Palier Socle <b class="text-indigo-300">${EUR(agg.tiers.t1.eur)}</b> · Forfaits ajoutés <b>${EUR(agg.mainFlatEur)}</b> ·
-        ${minGap > 0 ? `Pour dépasser le Min Garanti : encore <b class="text-fuchsia-300">${EUR(minGap)}</b> de prestations` : `Min Garanti atteint`}
-      </div></div>`;
+      <div class="flex-1">
+        <div class="flex flex-wrap items-center gap-2 mb-2">
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/40 text-amber-200 text-[11px] font-semibold tracking-wider uppercase">⚜️ ACQUIS ${EUR(agg.minG)} GARANTI</span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-400/50 text-indigo-200 text-[11px] font-semibold tracking-wider uppercase">🧱 SOCLE EN COURS</span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-400/40 text-emerald-200 text-[11px] font-mono">✨ BONUS <b class="ml-1">${EUR(agg.bonusEur || 0)}</b></span>
+        </div>
+        <strong class="text-indigo-100">Heures de dette · <span class="chip">${refunded.toFixed(2)} h / ${socleH.toFixed(2)} h</span> sur le Socle (25 h)</strong>
+        <div class="mt-2 h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-indigo-500 to-indigo-300 rounded-full" style="width:${pctSocle}%"></div></div>
+        <div class="flex justify-between text-[11px] font-mono mt-1.5 text-indigo-300/80">
+          <span>Remboursement Socle · ${pctSocle.toFixed(0)}%</span>
+          <span>Il manque <b>${debt.toFixed(2)} h</b> avant déclenchement du surplus</span>
+        </div>
+        <div class="text-zinc-400 text-[12px] mt-2">
+          Le contrat Nessy est activé · Tu gagnes <b class="text-amber-300">déjà ${EUR(agg.minG)}</b> d'office. Encode encore <b class="text-indigo-300">${(socleH - refunded).toFixed(2)} h</b> pour solder le socle.
+        </div>
+      </div>`;
   }
 
   // Cas 2 · Dans la RÉGIE GARANTIE (25h → 43,75h)
-  else if (hoursNessy < garantieH) {
-    const regieH = hoursNessy - socleH;
+  else if (refunded < garantieH) {
+    const regieH = refunded - socleH;
     const regieMax = garantieH - socleH; // 18,75 h
     const pctRegie = Math.min(100, (regieH / regieMax) * 100);
     st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-fuchsia-500/40 bg-fuchsia-500/[0.07]';
     st.innerHTML = `<i data-lucide="shield-check" class="w-5 h-5 text-fuchsia-300 flex-none mt-0.5"></i>
-      <div class="flex-1"><strong class="text-fuchsia-100">Socle <span class="text-emerald-300">✓</span> rempli · Zone Régie Garantie · <span class="chip">${regieH.toFixed(2)} h / 18,75 h</span></strong>
-      <div class="mt-2 grid grid-cols-2 gap-3">
-        <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-indigo-400 rounded-full" style="width:100%"></div></div>
-        <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-fuchsia-400/80 rounded-full" style="width:${pctRegie}%"></div></div>
-      </div>
-      <div class="flex justify-between text-[11px] font-mono mt-1.5 text-zinc-400">
-        <span class="text-indigo-300/80">Socle 100% · 25 h · 2 000 €</span>
-        <span class="text-fuchsia-300/80">Régie ${pctRegie.toFixed(0)}% · manque <b>${beforeGarantie.toFixed(2)} h</b></span>
-      </div>
-      <div class="text-zinc-400 text-[12px] mt-2">
-        Socle <b class="text-indigo-300">${EUR(agg.tiers.t1.eur)}</b> · Régie Garantie <b class="text-fuchsia-300">${EUR(agg.tiers.t2.eur)}</b> @ ${NESSY.regieRate} €/h · Forfaits <b>${EUR(agg.mainFlatEur)}</b>
-        ${agg.minApplied ? `<br><span class="text-amber-300">⚠ Minimum garanti <b>${EUR(agg.minG)}</b> sera appliqué en facturation</span>` : `<br><span class="text-emerald-300">✓ Min Garanti atteint sans top-up</span>`}
-      </div></div>`;
+      <div class="flex-1">
+        <div class="flex flex-wrap items-center gap-2 mb-2">
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/40 text-amber-200 text-[11px] font-semibold tracking-wider uppercase">⚜️ ACQUIS ${EUR(agg.minG)} GARANTI</span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-400/50 text-indigo-200 text-[11px] font-semibold tracking-wider uppercase">🧱 SOCLE ✓</span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-fuchsia-500/20 border border-fuchsia-400/50 text-fuchsia-200 text-[11px] font-semibold tracking-wider uppercase">🛡️ RÉGIE ${pctRegie.toFixed(0)}%</span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-400/40 text-emerald-200 text-[11px] font-mono">✨ BONUS <b class="ml-1">${EUR(agg.bonusEur || 0)}</b></span>
+        </div>
+        <strong class="text-fuchsia-100">Dette Régie Garantie · <span class="chip">${regieH.toFixed(2)} h / ${regieMax.toFixed(2)} h</span> · il reste <b>${debt.toFixed(2)} h</b></strong>
+        <div class="mt-2 grid grid-cols-2 gap-3">
+          <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-indigo-500 to-indigo-300 rounded-full" style="width:100%"></div></div>
+          <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-fuchsia-500 to-fuchsia-300 rounded-full" style="width:${pctRegie}%"></div></div>
+        </div>
+        <div class="flex justify-between text-[11px] font-mono mt-1.5 text-zinc-400">
+          <span class="text-indigo-300/80">Socle 100% · 25 h · dette remboursée</span>
+          <span class="text-fuchsia-300/80">Régie Garantie · manque <b>${(garantieH - refunded).toFixed(2)} h</b></span>
+        </div>
+        <div class="text-zinc-400 text-[12px] mt-2">
+          <b class="text-amber-300">${EUR(agg.minG)}</b> d'office · Dès que tu atteindras <b class="text-fuchsia-300">${garantieH.toFixed(2)} h</b>, tu passeras en <b class="text-emerald-300">Surplus Bonus</b>.
+        </div>
+      </div>`;
   }
 
-  // Cas 3 · SURPLUS (≥ 43,75h)
+  // Cas 3 · SURPLUS (≥ 43,75h)  — 🏆 ENGAGEMENT VALIDÉ
   else {
     const surplusH = agg.tiers.t3.h;
-    st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-emerald-500/40 bg-emerald-500/[0.07]';
-    st.innerHTML = `<i data-lucide="trending-up" class="w-5 h-5 text-emerald-300 flex-none mt-0.5"></i>
-      <div class="flex-1"><strong class="text-emerald-100">Socle ✓ · Min Garanti ✓ · Surplus facturable · <span class="chip">+${surplusH.toFixed(2)} h</span></strong>
-      <div class="mt-2 grid grid-cols-3 gap-3">
-        <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-indigo-400 rounded-full" style="width:100%"></div></div>
-        <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-fuchsia-400 rounded-full" style="width:100%"></div></div>
-        <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-emerald-400 to-lime-400 rounded-full" style="width:${Math.min(100,(surplusH/8.75)*100)}%"></div></div>
-      </div>
-      <div class="flex justify-between text-[11px] font-mono mt-1.5 text-zinc-400">
-        <span class="text-indigo-300/80">Socle 25 h · 2 000 €</span>
-        <span class="text-fuchsia-300/80">Régie 18,75 h · 1 500 €</span>
-        <span class="text-emerald-300/80">Surplus · ${surplusH.toFixed(2)} h × 80 €</span>
-      </div>
-      <div class="text-zinc-400 text-[12px] mt-2">
-        Palier Socle <b class="text-indigo-300">${agg.tiers.t1.h.toFixed(2)} h</b> ·
-        Palier Régie Garantie <b class="text-fuchsia-300">${agg.tiers.t2.h.toFixed(2)} h</b> ·
-        Palier Surplus <b class="text-emerald-300">${agg.tiers.t3.h.toFixed(2)} h</b> ·
-        CA principal total <b>${EUR(agg.mainFinalCA)}</b>
-        ${agg.tiers.t3.eur + agg.mainFlatEur > 0 ? ` · Surplus encaissé <b class="text-emerald-300">+${EUR(agg.tiers.t3.eur + agg.mainFlatEur)}</b>` : ''}
-      </div></div>`;
+    st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-emerald-500/50 bg-emerald-500/[0.08] shadow-[0_30px_80px_-40px_rgba(16,185,129,0.55)]';
+    st.innerHTML = `<i data-lucide="trophy" class="w-5 h-5 text-amber-300 flex-none mt-0.5"></i>
+      <div class="flex-1">
+        <div class="flex flex-wrap items-center gap-2 mb-2">
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-amber-500/20 border border-amber-400/50 text-amber-200 text-[11px] font-semibold tracking-wider uppercase">🏆 ENGAGEMENT VALIDÉ</span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-400/50 text-indigo-200 text-[11px] font-semibold tracking-wider uppercase">🧱 SOCLE ✓</span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-fuchsia-500/20 border border-fuchsia-400/50 text-fuchsia-200 text-[11px] font-semibold tracking-wider uppercase">🛡️ GARANTIE ✓</span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 text-[11px] font-mono">✨ BONUS +<b class="ml-1">${EUR(agg.bonusEur || 0)}</b></span>
+        </div>
+        <strong class="text-emerald-100">Tu as remboursé toutes tes heures · <span class="chip">+${surplusH.toFixed(2)} h</span> en bonus facturable en <b class="text-amber-300">plus de ${EUR(agg.minG)}</b></strong>
+        <div class="mt-2 grid grid-cols-3 gap-3">
+          <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-indigo-500 to-indigo-300 rounded-full" style="width:100%"></div></div>
+          <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-fuchsia-500 to-fuchsia-300 rounded-full" style="width:100%"></div></div>
+          <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-emerald-400 via-lime-400 to-amber-300 rounded-full" style="width:${Math.min(100,(surplusH/8.75)*100)}%"></div></div>
+        </div>
+        <div class="flex justify-between text-[11px] font-mono mt-1.5 text-zinc-400">
+          <span class="text-indigo-300/80">Socle 25 h · ${EUR(NESSY.socleFlat)}</span>
+          <span class="text-fuchsia-300/80">Régie 18,75 h · ${EUR(1500)}</span>
+          <span class="text-emerald-300/80">Surplus · +${surplusH.toFixed(2)} h × ${NESSY.regieRate} €</span>
+        </div>
+        <div class="text-zinc-400 text-[12px] mt-2">
+          CA principal · <b class="text-white">${EUR(agg.mainFinalCA)}</b> dont acquis <b class="text-amber-300">${EUR(agg.minG)}</b> + bonus <b class="text-emerald-300">${EUR(agg.bonusEur || 0)}</b> · Chaque heure en plus = c'est <b class="text-emerald-300">directement dans la poche</b>.
+        </div>
+      </div>`;
   }
   if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
 }
@@ -646,181 +730,259 @@ function renderNessyGauge(agg) {
 // =================================================================
 // 🎮 GAMIFIED · MINE KOPEK 3D + SCOREBOARD
 // =================================================================
-function renderMine(agg) {
-  // ---- DONNÉES NÉCESSAIRES ----
-  const socleMaxH = NESSY.socleHours;                            // 25 h
-  const garantieMaxH = NESSY.minHoursEq;                         // 43,75 h
-  const hoursNessy = agg.mainHoursHourly;                        // h facturées NESSY
-  const t1h = agg.tiers.t1.h;
-  const t2h = agg.tiers.t2.h;
-  const t3h = agg.tiers.t3.h;
-  const pctL1 = Math.min(100, (t1h / socleMaxH) * 100);          // 0→25h => 0→100% L1
-  const pctL2 = t1h >= socleMaxH ? Math.min(100, (t2h / (garantieMaxH - socleMaxH)) * 100) : 0;
-  const pctL3 = hoursNessy >= garantieMaxH ? Math.min(100, Math.min(100, (t3h / 8.75) * 100)) : 0;
+function renderCity(agg) {
+  // ==========================================================================
+  // 🎬 RENDU · KOPEK CITY (simcity-like cartoon pixar)
+  //  — Socle (0→25h) : villas + shops → quartier rouge
+  //  — Garantie (25→43,75h) : immeubles moyens → quartier fuchsia
+  //  — Bonus (>43,75h) : gratte-ciels + tours → quartier emerald
+  //
+  // Logique métier · ACQUIS PAR CONTRAT :
+  //   → Les QUARTIERS Socle + Garantie sont LÉGÈREMENT "chantier" (en cours
+  //     d'achèvement) tant que les heures remboursées < heures du contrat.
+  //   → Arriver à 43,75 h en remboursement → ville 100% terminée + feux.
+  //   → À partir de là : BONUS → quartier emerald (droite) s'active avec des
+  //     bâtiments hauts dorés, ballons, hélicos etc.
+  // ==========================================================================
+  const root = document.getElementById('city-buildings');
+  if (!root) return;
 
-  // ---- FILLS HEIGHTS (chaque niveau se remplit depuis le bas) ----
-  $('#mine-l1-fill').style.height = `${pctL1}%`;
-  $('#mine-l2-fill').style.height = `${pctL2}%`;
-  $('#mine-l3-fill').style.height = `${pctL3}%`;
+  const socleH = NESSY.socleHours;                 // 25 h
+  const fullH  = NESSY.minHoursEq;                 // 43,75 h
+  const refunded = agg.refundedH || 0;             // 0 → fullH
+  const bonusH   = agg.tiers?.t3?.h || 0;          // 0 → infini
+  const soclePct = Math.min(100, (refunded / socleH) * 100);
+  const garantiPct = refunded >= socleH
+    ? Math.min(100, ((refunded - socleH) / (fullH - socleH)) * 100)
+    : 0;
+  // Pct du quartier bonus : on prend bonusH / 12 h → 100% (on laisse déborder après)
+  const bonusPct = Math.min(150, (bonusH / 12) * 100);
 
-  // ---- SPRITES GÉNÉRATEUR : créer N emojis selon % pour chaque niveau ----
-  function fillSprites(containerId, pct, palette, countMax) {
-    const wrap = document.getElementById(containerId);
-    if (!wrap) return;
-    // Combien d'items afficher (proportionnel au pct, mini 0, max countMax)
-    const target = Math.round((pct / 100) * countMax);
-    const existing = wrap.children.length;
-    if (target === existing && target > 0) return; // déjà bon
-    wrap.innerHTML = '';
-    for (let i = 0; i < target; i++) {
-      const span = document.createElement('span');
-      const emoji = palette[i % palette.length];
-      span.textContent = emoji;
-      // rotations / offsets random pour un look "entassé cartoon"
-      const rot = (Math.random() * 40 - 20).toFixed(1);
-      const ty = (Math.random() * 4).toFixed(1);
-      const scale = (0.85 + Math.random() * 0.35).toFixed(2);
-      span.style.display = 'inline-block';
-      span.style.transform = `rotate(${rot}deg) translateY(${ty}px) scale(${scale})`;
-      span.style.filter = `drop-shadow(0 2px 2px rgba(0,0,0,0.35))`;
-      wrap.appendChild(span);
+  // Effet "usine en marche" dès qu'on encode des heures ce mois
+  const factory = document.getElementById('k-factory');
+  if (factory) {
+    if (agg.mainHoursHourly > 0.01) factory.classList.add('lit');
+    else factory.classList.remove('lit');
+  }
+
+  // ---------------------------------------------------------------------------
+  // HELPERS · construction des quartiers
+  // ---------------------------------------------------------------------------
+  // Générer N bâtiments d'un type donné dans un range X% donné,
+  // se construisant progressivement selon pctBuild.
+  function buildingsForQuarter(opts) {
+    const {
+      minX, maxX, minY, maxY,     // % range dans city-buildings
+      types,                      // ex. ['t-villa','t-villa','t-shop']
+      count,
+      startX,                     // pct avant d'aligner les premiers
+      pctBuild                    // 0→100 : nb bâtiments terminés
+    } = opts;
+    const built = Math.round(count * (pctBuild / 100));
+    const leftBase = minX; const leftRange = maxX - minX;
+    const rowA_y = maxY; const rowB_y = Math.max(minY, maxY - 12);
+    let html = '';
+    for (let i = 0; i < count; i++) {
+      const t = types[i % types.length];
+      // Alternance lignes A/B pour donnée profondeur
+      const isRowB = (i % 2) === 1;
+      const y = isRowB ? rowB_y : rowA_y;
+      const xLeftish = (i / Math.max(1, count - 1));
+      const x = leftBase + xLeftish * leftRange + (isRowB ? -1 : 1) * 1.2;
+      const isDone = i < built;
+      const isCurrent = !isDone && i === built && pctBuild < 100;
+      const twinkle = Math.random() < 0.35 ? ' k-twinkle' : '';
+      const clsBuild = `k-b ${t} ${isDone ? `on${twinkle}` : (isCurrent ? 'chantier' : '')}`;
+      html += `<div class="${clsBuild}" style="left:${x.toFixed(1)}%; bottom:${y.toFixed(1)}%;">
+        ${!isDone && isCurrent ? `<div class="scaf"></div>` : ''}
+      </div>`;
     }
+    return html;
   }
 
-  fillSprites('mine-l1-sprites', pctL1, ['🪙','🟠','🟫','🟡','🏺','⚱️'], 24);
-  fillSprites('mine-l2-sprites', pctL2, ['🟨','🟧','🥇','🏆','💰','🪙','🪙'], 22);
-  fillSprites('mine-l3-sprites', pctL3, ['💎','💠','💚','🟢','👑','💵','🪙'], 24);
-
-  // ---- POSITION DU PERSONNAGE MINER : il se déplace le long du "chemin" de remplissage ----
-  // On calcule un "score de progression global" 0..120 (socle 0-57, garantie 57-100, surplus 100-120)
-  const globalPct = Math.min(120, (hoursNessy / garantieMaxH) * 100);
-  // Position x (-100 → +150), y (0 → -180)
-  const minerX = -100 + (globalPct / 120) * 220;
-  const minerY = 10 - Math.min(180, (globalPct / 120) * 180);
-  const zOffset = 200 + Math.min(40, (globalPct / 120) * 60);
-  const minerEl = $('#miner-char');
-  const cartEl = $('#miner-cart');
-  if (minerEl) minerEl.style.transform = `translate(${minerX}px, ${minerY}px) translateZ(${zOffset}px)`;
-  if (cartEl) cartEl.style.transform = `translate(${minerX + 40}px, ${minerY + 20}px) translateZ(${zOffset + 5}px)`;
-
-  // ---- BADGE NIVEAU ----
-  let level = 0; let levelName = 'Débutant'; let badgeColor = 'indigo';
-  if (hoursNessy >= 0.01) { level = 1; levelName = 'Apprenti Mineur'; badgeColor = 'indigo'; }
-  if (hoursNessy >= socleMaxH) { level = 2; levelName = 'Socle Atteint'; badgeColor = 'sky'; }
-  if (hoursNessy >= garantieMaxH * 0.9) { level = 3; levelName = 'Bientôt Garanti'; badgeColor = 'fuchsia'; }
-  if (hoursNessy >= garantieMaxH) { level = 4; levelName = 'Garanti Validé'; badgeColor = 'amber'; }
-  if (t3h >= 5) { level = 5; levelName = 'Surplus Pro'; badgeColor = 'emerald'; }
-  if (t3h >= 15) { level = 6; levelName = 'Kopek Magnat'; badgeColor = 'lime'; }
-  const badge = $('#mine-level-badge');
-  if (badge) {
-    const cls = {indigo: 'bg-indigo-500/20 text-indigo-200 border-indigo-400/40', sky:'bg-sky-500/20 text-sky-200 border-sky-400/40', fuchsia:'bg-fuchsia-500/20 text-fuchsia-200 border-fuchsia-400/40', amber:'bg-amber-500/20 text-amber-200 border-amber-400/40', emerald:'bg-emerald-500/20 text-emerald-200 border-emerald-400/40', lime:'bg-lime-500/20 text-lime-200 border-lime-400/40'}[badgeColor];
-    badge.className = `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold tracking-wider uppercase border ${cls}`;
-    badge.innerHTML = `<i data-lucide="flame" class="w-3 h-3 text-orange-300"></i> Niveau ${level} · ${levelName}`;
+  // Foulons population (petits points colorés = habitants qui viennent d'arriver)
+  function crowdDots(count, xmin, xmax, ybottom) {
+    const palette = ['#f472b6','#60a5fa','#34d399','#facc15','#f59e0b','#a78bfa'];
+    let s = '';
+    for (let i = 0; i < count; i++) {
+      const x = xmin + Math.random() * (xmax - xmin);
+      const y = ybottom + Math.random() * 3;
+      const c = palette[i % palette.length];
+      s += `<div class="k-crowd-dot" style="left:${x.toFixed(1)}%; bottom:${y.toFixed(1)}%; background:${c}; animation: sky-pulse-y ${2 + Math.random() * 2}s ease-in-out infinite; animation-delay: ${-Math.random()*3}s;"></div>`;
+    }
+    return s;
   }
 
-  // ---- XP BAR (0 → garantieMaxH) ----
-  const xpPct = Math.min(100, (hoursNessy / garantieMaxH) * 100);
-  if ($('#mine-xp-fill'))  $('#mine-xp-fill').style.width = `${xpPct}%`;
-  if ($('#mine-xp-label')) $('#mine-xp-label').textContent = `XP · ${hoursNessy.toFixed(2).replace('.',',')} / ${garantieMaxH.toFixed(2).replace('.',',')} h`;
-  if ($('#mine-xp-pct'))   $('#mine-xp-pct').textContent = `${xpPct.toFixed(0)}%`;
+  // ---------------------------------------------------------------------------
+  // CONSTRUISONS LA VILLE !
+  // ---------------------------------------------------------------------------
+  let html = '';
+  // 1) Quartier SOCLE (gauche) → villas + petits commerces
+  //    Plage X : 4 % → 30 %   |  Plage Y : 2 % (petit) à 14 %
+  html += buildingsForQuarter({
+    minX: 5, maxX: 30, minY: 3, maxY: 13,
+    types: ['t-villa','t-villa','t-shop','t-villa','t-shop','t-villa'],
+    count: 6,
+    startX: 5,
+    pctBuild: soclePct
+  });
+  // Foule dans Socle
+  html += crowdDots(Math.round(soclePct / 100 * 18), 5, 30, 0.5);
 
-  // ---- BOSS DU MOIS (HP bar = mainFinalCA / minG) ----
-  const minG = agg.minG;
-  const bossTitle = $('#boss-title');
-  const bossHpLabel = $('#boss-hp-label');
-  const bossHpFill = $('#boss-hp-fill');
-  const bossSummary = $('#boss-summary');
-  if (bossTitle) {
-    if (hoursNessy <= 0) {
-      bossTitle.textContent = 'Réveiller la Machine · Premier Encodage';
-    } else if (t1h < socleMaxH) {
-      bossTitle.textContent = 'Creuser le Socle · 2 000 €';
-    } else if (agg.mainFinalCA < minG) {
-      bossTitle.textContent = 'Valider le Min Garanti · 3 500 €';
+  // 2) Quartier GARANTIE (centre) → immeubles violets + un shop
+  //    Plage X : 32 % → 63 %   |  Plage Y : 6 % → 22 % (un peu plus haut)
+  html += buildingsForQuarter({
+    minX: 32, maxX: 62, minY: 7, maxY: 22,
+    types: ['t-shop','t-immeuble','t-shop','t-immeuble','t-immeuble','t-shop'],
+    count: 6,
+    startX: 32,
+    pctBuild: garantiPct
+  });
+  html += crowdDots(Math.round(garantiPct / 100 * 22), 32, 62, 0.8);
+
+  // 3) Quartier BONUS (droite) → gratte-ciels dorés + tours cyan
+  //    Plage X : 65 % → 96 %   |  Plage Y : 10 % → 42 %
+  html += buildingsForQuarter({
+    minX: 65, maxX: 95, minY: 10, maxY: 42,
+    types: ['t-gratte','t-tour','t-gratte','t-tour','t-gratte'],
+    count: 5,
+    startX: 65,
+    pctBuild: bonusPct
+  });
+  html += crowdDots(Math.round(bonusPct / 100 * 28), 65, 95, 1);
+
+  // 4) Arbres éparpillés (Cartoon Pixar) — indépendants du pct
+  const trees = [
+    [31, 1.2],[46, 1.2],[63.5, 1.2],[80.5, 1.2],[94, 1.2],
+    [36, 0.5],[51, 0.5],[71, 0.5],[88, 0.5]
+  ];
+  trees.forEach(([x,y], i) => {
+    html += `<div class="k-tree ${i % 3 === 0 ? 'big' : ''}" style="left:${x}%; bottom:${y}%;"></div>`;
+  });
+
+  root.innerHTML = html;
+
+  // ---------------------------------------------------------------------------
+  // HUD · City Board (infobulle en bas à droite)
+  // ---------------------------------------------------------------------------
+  const pctForBar = Math.min(120,
+    (refunded / fullH) * 100 + Math.min(30, (bonusH / 24) * 30)
+  );
+  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  setText('hud-socle',  `${soclePct.toFixed(0)} %`);
+  setText('hud-garanti', `${garantiPct.toFixed(0)} %`);
+  setText('hud-bonus',  `+${bonusH.toFixed(1).replace('.',',')} h`);
+  const population = Math.round(150 + refunded * 28 + bonusH * 60 + agg.secondaryEur / 8);
+  setText('hud-pop',    population.toLocaleString('fr-BE') + ' hab.');
+  setText('hud-acquis', EUR(agg.hasAnyNessy ? agg.minG : 0));
+  setText('hud-ca-bonus', EUR(agg.bonusEur || 0));
+  const bar = document.getElementById('hud-bar');
+  if (bar) bar.style.width = `${pctForBar}%`;
+  const label = document.getElementById('hud-label');
+  if (label) {
+    if (!agg.hasAnyNessy) label.textContent = `Aucun encodage Nessy ce mois · Acquis non activé`;
+    else if (refunded < fullH) label.textContent = `🔜 Engagement · ${refunded.toFixed(2).replace('.',',')} / ${fullH.toFixed(2).replace('.',',')} h (reste ${agg.debtRemainH.toFixed(2).replace('.',',')} h)`;
+    else label.textContent = `✅ Engagement tenu · Surplus : ${EUR(agg.bonusEur || 0)} (${bonusH.toFixed(1).replace('.',',')} h · + clients ${EUR(agg.secondaryEur || 0)})`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // POP-UP BULLE (info-bulle flottante comme Pixar)
+  // ---------------------------------------------------------------------------
+  const pop = document.getElementById('city-pop');
+  if (pop) {
+    pop.classList.remove('hidden');
+    let popHtml = '';
+    if (!agg.hasAnyNessy) {
+      popHtml = `<span class="text-white font-bold">📋 Contrat en attente</span><br><span class="text-zinc-400">Encode tes premières heures pour activer l'acquis ${EUR(agg.minG)}.</span>`;
+      pop.classList.remove('gain','loss');
+    } else if (refunded < socleH) {
+      popHtml = `<span class="text-white font-bold">🧱 Chantier en cours</span><br><span class="text-zinc-400">Tu remplis le <b>Socle</b> (${soclePct.toFixed(0)}%). Reste <b>${(socleH - refunded).toFixed(2).replace('.',',')} h</b>.</span>`;
+      pop.classList.remove('gain','loss');
+    } else if (refunded < fullH) {
+      popHtml = `<span class="text-white font-bold">🏗️ Garantie en construction</span><br><span class="text-zinc-400">${garantiPct.toFixed(0)}% · Reste <b>${agg.debtRemainH.toFixed(2).replace('.',',')} h</b> pour solder l'engagement.</span>`;
+      pop.classList.remove('gain','loss');
+    } else if (agg.bonusEur > 50) {
+      popHtml = `<span class="text-emerald-300 font-bold">🎉 BONUS 🎉</span><br><span class="text-zinc-300">${bonusH.toFixed(1).replace('.',',')} h facturables en plus → <b>+${EUR(agg.bonusEur)}</b> nets.</span>`;
+      pop.classList.add('gain'); pop.classList.remove('loss');
     } else {
-      bossTitle.textContent = '🎊 Boss Battu · Surplus illimité activé';
+      popHtml = `<span class="text-emerald-300 font-bold">✅ Engagement TENU</span><br><span class="text-zinc-300">La ville est prête · Continue pour déclencher le surplus bonus.</span>`;
+      pop.classList.add('gain'); pop.classList.remove('loss');
     }
-  }
-  if (bossHpLabel) bossHpLabel.textContent = `CA · ${EUR(agg.mainFinalCA)} / ${EUR(minG)}${agg.minApplied ? ' · ⚠ Top-up Min Garanti' : ''}`;
-  let bossPct = minG > 0 ? Math.min(100, (agg.mainFinalCA / minG) * 100) : 0;
-  // Inversement logique "PV" remplis par boss : on commence à 0%, on attaque le boss (HP 100%) → l'UI sera progress fill : 0% = boss full HP
-  // Ici on veut plus : 100% = boss vaincu. Donc notre % = bossPct tel quel.
-  if (bossHpFill) {
-    bossHpFill.style.width = `${bossPct}%`;
-    // Gradient selon phase
-    if (bossPct < 40) bossHpFill.style.background = 'linear-gradient(90deg,#f87171,#fb923c)';
-    else if (bossPct < 80) bossHpFill.style.background = 'linear-gradient(90deg,#fb923c,#facc15)';
-    else bossHpFill.style.background = 'linear-gradient(90deg,#facc15,#34d399,#a3e635)';
-  }
-  if (bossSummary) {
-    if (hoursNessy < socleMaxH) {
-      bossSummary.innerHTML = `🔵 Focus : remplir le Socle 25 h. Il manque <b class="text-indigo-300">${(socleMaxH - hoursNessy).toFixed(2)} h</b> (soit ~${Math.max(0, Math.ceil((socleMaxH - hoursNessy) * 4))} quarts d'heure).`;
-    } else if (agg.mainFinalCA < minG) {
-      const gap = minG - agg.mainFinalCA;
-      bossSummary.innerHTML = `🟣 Objectif Min Garanti <b>${EUR(minG)}</b>. Encore <b class="text-fuchsia-300">${EUR(gap)}</b> de prestations à encoder pour éviter le top-up.`;
-    } else if (agg.tiers.t3.h > 0) {
-      bossSummary.innerHTML = `🟢 <b>Mission réussie !</b> Tu es en Surplus. Chaque heure supplémentaire = <b class="text-emerald-300">${Math.round(agg.tiers.t3.h > 0 ? (agg.tiers.t3.eur / Math.max(0.01, agg.tiers.t3.h)) : NESSY.regieRate)} € nets</b> en plus.`;
-    } else {
-      bossSummary.innerHTML = `🟢 <b>Min Garanti validé</b>. Le mois est safe. Continue pour déclencher le Surplus !`;
-    }
+    pop.innerHTML = popHtml;
   }
 
-  // ---- SUCCÈS / ACHIEVEMENTS ----
-  function setAchievement(key, unlocked, icon, reward) {
-    const row = document.querySelector(`#achievements-list [data-ach="${key}"]`);
-    if (!row) return;
-    const badge = row.children[3] || row.lastElementChild;
-    const iconBox = row.children[0];
-    if (unlocked) {
-      row.classList.remove('opacity-60','bg-zinc-950/40','border-zinc-800');
-      row.classList.add('bg-emerald-500/[0.08]','border-emerald-500/40','shadow-[0_0_30px_-10px_rgba(16,185,129,0.5)]');
-      if (iconBox) { iconBox.classList.remove('grayscale'); iconBox.classList.add('bg-emerald-500/15','border-emerald-500/40'); iconBox.textContent = icon || iconBox.textContent; }
-      if (badge) { badge.textContent = `✓ ${reward || 'Débloqué'}`; badge.className = 'text-[10px] font-mono text-emerald-300 font-bold'; }
+  // ---------------------------------------------------------------------------
+  // VÉHICULE SUPPLÉMENTAIRE (camion-citerne d'or) qui apparaît quand BONUS > 0
+  // ---------------------------------------------------------------------------
+  let truckEl = document.getElementById('bonus-truck');
+  if (bonusH > 0.1) {
+    if (!truckEl) {
+      const section = document.getElementById('kopek-city');
+      if (section) {
+        truckEl = document.createElement('div');
+        truckEl.id = 'bonus-truck';
+        truckEl.className = 'k-car';
+        truckEl.style.cssText = `bottom: calc(22% + 52px);
+          --c1: linear-gradient(180deg,#facc15,#ca8a04); --c2: linear-gradient(180deg,#a16207,#713f12);
+          animation: k-car-right 11s linear infinite;
+          transform: scale(1.15);
+          filter: drop-shadow(0 6px 8px rgba(234,179,8,0.45));`;
+        truckEl.innerHTML = `<div class="cb" style="width: 92px; background: linear-gradient(180deg, #fde047 0%, #ca8a04 100%);
+          box-shadow: inset 0 -6px 0 rgba(0,0,0,0.2), inset 0 8px 0 rgba(255,255,255,0.28), 0 0 24px rgba(250,204,21,0.35);">
+          <div style="position:absolute; inset: 25% 8% 12% 38%;
+            background: repeating-linear-gradient(45deg,#0ea5e9 0 6px,#082f49 6px 12px);
+            border-radius: 8px; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.2);"></div>
+          </div><div class="cw"></div>`;
+        section.appendChild(truckEl);
+      }
     }
-  }
-  setAchievement('socle',     hoursNessy >= socleMaxH, '🟦', `Socle 25h`);
-  setAchievement('garantie',  hoursNessy >= garantieMaxH, '🟨', `Min Garanti OK`);
-  setAchievement('surplus',   t3h > 0, '💎', `+${t3h.toFixed(1)} h surplus`);
-  setAchievement('secondary', agg.secondaryEur >= 500, '🚀', `${EUR(agg.secondaryEur)} secondaire`);
-
-  // ---- STATS RAPIDES ----
-  if ($('#stat-h-rf')) {
-    $('#stat-h-rf').textContent = `${HH(agg.mainRealMinutes)} / ${HH(agg.mainBilledMinutes)}`;
-    const pctRounded = agg.mainRealMinutes > 0
-      ? (((agg.mainBilledMinutes - agg.mainRealMinutes) / agg.mainRealMinutes) * 100)
-      : 0;
-    const badgeEl = $('#stat-h-pct');
-    if (badgeEl) {
-      badgeEl.textContent = pctRounded > 0
-        ? `+${pctRounded.toFixed(1)} % arrondi auto`
-        : `0 % d'arrondi`;
-      badgeEl.className = `text-[10px] font-mono mt-0.5 ${pctRounded >= 5 ? 'text-emerald-400 font-bold' : 'text-zinc-500'}`;
-    }
-  }
-  if ($('#stat-days')) {
-    const now = new Date();
-    const y = STATE.selectedYear, m = STATE.selectedMonth;
-    const daysInMonth = new Date(y, m + 1, 0).getDate();
-    let dayElapsed;
-    if (now.getFullYear() === y && now.getMonth() === m) dayElapsed = now.getDate();
-    else if (y < now.getFullYear() || (y === now.getFullYear() && m < now.getMonth())) dayElapsed = daysInMonth;
-    else dayElapsed = 0;
-    $('#stat-days').textContent = `${dayElapsed} / ${daysInMonth}j`;
-    const pace = dayElapsed > 0 ? hoursNessy / dayElapsed : 0;
-    const rythmeEl = $('#stat-days-pace');
-    if (rythmeEl) {
-      const required = garantieMaxH / daysInMonth;
-      const delta = pace - required;
-      let color = 'text-zinc-500', arrow = '';
-      if (delta > 0.1) { color = 'text-emerald-400 font-bold'; arrow = '▲ en avance '; }
-      else if (delta < -0.1) { color = 'text-amber-400 font-bold'; arrow = '▼ en retard '; }
-      rythmeEl.className = `text-[10px] font-mono mt-0.5 ${color}`;
-      rythmeEl.textContent = `Rythme ${pace.toFixed(2)} h/j · ${arrow}${Math.abs(delta).toFixed(2)} h/j vs ${required.toFixed(2)} h/j requis`;
-    }
+  } else if (truckEl) {
+    truckEl.remove();
   }
 
-  // Re-render les icônes lucide car on a modifié innerHTML
+  // ---------------------------------------------------------------------------
+  // HÉLICOPTÈRE BONUS qui survole quand bonus > 2h
+  // ---------------------------------------------------------------------------
+  let heliEl = document.getElementById('bonus-heli');
+  if (bonusH > 2) {
+    if (!heliEl) {
+      const sky = document.querySelector('.k-sky-wrap');
+      if (sky) {
+        heliEl = document.createElement('div');
+        heliEl.id = 'bonus-heli';
+        heliEl.style.cssText = `position:absolute; top:15%; left:-10%;
+          font-size: 40px; filter: drop-shadow(0 8px 10px rgba(15,23,42,0.35));
+          animation: sky-drift-x 22s linear infinite reverse; animation-delay:-4s;`;
+        heliEl.textContent = '🚁';
+        sky.appendChild(heliEl);
+      }
+    }
+  } else if (heliEl) {
+    heliEl.remove();
+  }
+
+  // ---------------------------------------------------------------------------
+  // PETIT EFFET FUMÉE RÉGULIER (si on encode du temps cette heure-ci)
+  // ---------------------------------------------------------------------------
+  maybePuffSmoke(agg.mainHoursHourly > 0.01);
+
+  // Re-render icônes lucide (le HUD City Board en utilise)
   if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
+}
+
+// Déclencher un (ou 2) puits de fumée si usine allumée (pas d'accumulation)
+let puffCooldown = 0;
+function maybePuffSmoke(shouldRun) {
+  if (!shouldRun) return;
+  const smoke = document.getElementById('k-smoke');
+  if (!smoke) return;
+  if (puffCooldown > 0) return;
+  smoke.style.animation = 'none';
+  // reflow
+  void smoke.offsetWidth;
+  smoke.style.animation = `puf ${(2.6 + Math.random() * 0.8).toFixed(2)}s ease-out forwards`;
+  puffCooldown = 1;
+  setTimeout(() => { puffCooldown = 0; }, 2400);
 }
 
 function renderPocket(agg) {
@@ -1061,6 +1223,9 @@ function bindQuickForm() {
       updateQuickRoundInfo();
       syncQuickRateFromClient();
       refreshPeriod();
+      // Petit effet bonus : usine en ébullition + bonus confetti si la somme nous fait passer en bonus
+      maybePuffSmoke(true);
+      setTimeout(maybePuffSmoke, 800, true);
     } catch (ex) {
       console.warn(ex);
       toast('Erreur d\'enregistrement · index Firestore requis ?', 'alert-circle', 'danger');
