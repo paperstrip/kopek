@@ -3,8 +3,8 @@
 // Pilotée par la progression des 3 paliers du contrat (Socle / Garantie / Bonus).
 // La composition (palette, formes, jitter) change chaque mois via un seed.
 // =============================================================================
-import * as THREE from './vendor/three/three.module.js';
-import { OrbitControls } from './vendor/three/OrbitControls.js';
+import * as THREE from './vendor/three/three.module.js?v=2026-09-03-5';
+import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-03-5';
 
 // ---- PRNG déterministe (mulberry32) — même seed = même ville ----
 function mulberry32(seed) {
@@ -18,20 +18,35 @@ function mulberry32(seed) {
 function pick(rng, arr) { return arr[Math.floor(rng() * arr.length)]; }
 function lerp(a, b, t) { return a + (b - a) * t; }
 
-// ---- Palettes pastel (une par "thème du mois") ----
+// ---- Palettes nocturnes, alignées sur l'UI sombre du cockpit ----
+// Le ciel/sol changent chaque mois, mais la couleur d'un quartier ne change
+// JAMAIS : elle reprend celle de son palier dans la jauge (indigo = Socle,
+// fuchsia = Garantie, émeraude = Bonus) pour qu'on relie les deux d'un coup d'œil.
 const THEMES = [
-  { name: 'Aurore',   sky: ['#fde2ff', '#c9e7ff'], sun: '#ffe08a', ground: '#bff0c9', accents: ['#ff9ecb', '#7dd3fc', '#a78bfa', '#fca5a5'] },
-  { name: 'Menthe',   sky: ['#e0fff4', '#bae6fd'], sun: '#fef08a', ground: '#a7f3d0', accents: ['#34d399', '#38bdf8', '#fbbf24', '#f472b6'] },
-  { name: 'Agrume',   sky: ['#fff7cd', '#ffd6a5'], sun: '#fde68a', ground: '#d9f99d', accents: ['#fb923c', '#facc15', '#4ade80', '#38bdf8'] },
-  { name: 'Lagon',    sky: ['#dff9ff', '#a5d8ff'], sun: '#fff3b0', ground: '#8fe3c7', accents: ['#22d3ee', '#818cf8', '#fca5a5', '#fde047'] },
-  { name: 'Lavande',  sky: ['#f1e8ff', '#d8c7ff'], sun: '#ffe6a7', ground: '#c9e8c0', accents: ['#a78bfa', '#f0abfc', '#fbbf24', '#60a5fa'] },
-  { name: 'Corail',   sky: ['#ffe8e0', '#ffd0e0'], sun: '#ffd166', ground: '#b8ebc9', accents: ['#fb7185', '#fdba74', '#a3e635', '#67e8f9'] },
+  { name: 'Nuit indigo',  sky: ['#141c3a', '#0a0f22'], ground: '#1b2440', trees: '#2f6f57' },
+  { name: 'Nuit violette', sky: ['#1b1636', '#0b0a1e'], ground: '#221c40', trees: '#356a5e' },
+  { name: 'Nuit océan',   sky: ['#0f2138', '#070f1f'], ground: '#152a42', trees: '#2a6f66' },
+  { name: 'Nuit prune',   sky: ['#231733', '#0d0918'], ground: '#271b3d', trees: '#3a6b52' },
+  { name: 'Nuit ardoise', sky: ['#16203a', '#090d1c'], ground: '#1e2942', trees: '#2d6b5b' },
+  { name: 'Nuit sapin',   sky: ['#11253a', '#060e1c'], ground: '#173049', trees: '#2f7360' },
 ];
 
+// Couleurs de palier, identiques à celles de la jauge et des badges.
+const TIER_COLORS = {
+  socle:    { plate: '#4f46e5', roof: '#818cf8' },  // indigo
+  garantie: { plate: '#a21caf', roof: '#e879f9' },  // fuchsia
+  bonus:    { plate: '#047857', roof: '#34d399' },  // émeraude
+};
+
+// Corps de bâtiments : ardoises sombres, pour que ce soit la couleur du palier
+// (toit) et les fenêtres allumées qui ressortent.
+const BODY_COLORS = ['#334155', '#3b4a63', '#2c3a52', '#41506b'];
+
+// Un quartier par palier de la jauge, dans l'ordre où on les remplit.
 const DISTRICTS = [
-  { key: 'socle',    label: 'Socle',    cx: -6.4, colorRole: 0, shapes: ['villa', 'shop'] },
-  { key: 'garantie', label: 'Garantie', cx: 0,     colorRole: 1, shapes: ['shop', 'midrise'] },
-  { key: 'bonus',    label: 'Bonus',    cx: 6.4,   colorRole: 2, shapes: ['tower', 'spire'] },
+  { key: 'socle',    label: 'Socle',    shapes: ['villa', 'shop'] },
+  { key: 'garantie', label: 'Garantie', shapes: ['shop', 'midrise'] },
+  { key: 'bonus',    label: 'Bonus',    shapes: ['tower', 'spire'] },
 ];
 
 let renderer, scene, camera, controls, clock;
@@ -180,9 +195,9 @@ export function initCity(canvas) {
   controls.autoRotate = true;
   controls.autoRotateSpeed = 0.35;
 
-  const hemi = new THREE.HemisphereLight('#bfe3ff', '#3f7a4e', 1.0);
+  const hemi = new THREE.HemisphereLight('#5b6fa8', '#0f172a', 0.75);
   scene.add(hemi);
-  sunLight = new THREE.DirectionalLight('#fff3d6', 1.35);
+  sunLight = new THREE.DirectionalLight('#aebde8', 1.05);
   sunLight.position.set(7, 11, 5);
   sunLight.castShadow = true;
   sunLight.shadow.mapSize.set(1024, 1024);
@@ -460,7 +475,7 @@ function buildCity(rng, theme, progress, layout) {
     measurePlateTop(plateGeo);
     const plate = new THREE.Mesh(
       plateGeo,
-      new THREE.MeshStandardMaterial({ color: theme.accents[d.colorRole], roughness: 0.85, metalness: 0.02 })
+      new THREE.MeshStandardMaterial({ color: TIER_COLORS[d.key].plate, roughness: 0.85, metalness: 0.02 })
     );
     plate.position.set(C.x, 0, C.z);
     plate.receiveShadow = true;
@@ -497,7 +512,7 @@ function buildCity(rng, theme, progress, layout) {
         // pas une simple dalle vide — on voit ce qu'il reste à construire.
         const pad = new THREE.Mesh(
           new THREE.BoxGeometry(0.86, 0.05, 0.74),
-          new THREE.MeshStandardMaterial({ color: '#3f3f46', roughness: 1 })
+          new THREE.MeshStandardMaterial({ color: '#0f172a', roughness: 1 })
         );
         pad.position.set(slot.x, PLATE_TOP + 0.025, slot.z);
         pad.receiveShadow = true;
@@ -506,11 +521,11 @@ function buildCity(rng, theme, progress, layout) {
       }
       const type = pick(rng, d.shapes);
       const winMat = new THREE.MeshStandardMaterial({
-        color: '#fef9c3', emissive: '#facc15', emissiveIntensity: 0.7, roughness: 0.4,
+        color: '#fde68a', emissive: '#fbbf24', emissiveIntensity: 1.25, roughness: 0.4,
       });
       winMat.userData.blink = lerp(1.2, 2.6, rng());
       winMat.userData.phase = rng() * Math.PI * 2;
-      const bld = buildingGeometryWithMat(type, winMat, theme.accents[(d.colorRole + 1) % theme.accents.length]);
+      const bld = buildingGeometryWithMat(type, winMat, TIER_COLORS[d.key].roof, pick(rng, BODY_COLORS));
       bld.position.set(slot.x, PLATE_TOP, slot.z);
       bld.rotation.y = (rng() - 0.5) * 0.3;
       const scale = lerp(0.95, 1.1, rng());
@@ -530,7 +545,7 @@ function buildCity(rng, theme, progress, layout) {
     // arbres décoratifs autour de la plaque
     const treeCount = 3 + Math.floor(rng() * 3);
     for (let i = 0; i < treeCount; i++) {
-      const tree = makeTree(rng, theme.accents[(d.colorRole + 2) % theme.accents.length]);
+      const tree = makeTree(rng, theme.trees);
       const angle = rng() * Math.PI * 2;
       const rad = 3.1 + rng() * 0.6;
       tree.position.set(C.x + Math.cos(angle) * rad, 0, C.z + Math.sin(angle) * rad);
@@ -542,7 +557,7 @@ function buildCity(rng, theme, progress, layout) {
   const path = centers.map((c) => new THREE.Vector3(c.x, 0.05, c.z));
   const backAndForth = path.concat(path.slice(0, -1).reverse());
   for (let i = 0; i < 3; i++) {
-    const car = makeCar(theme.accents[i % theme.accents.length]);
+    const car = makeCar(['#f8fafc', '#fca5a5', '#93c5fd'][i % 3]);
     car.castShadow = true;
     carsGroup.add(car);
     const curve = new THREE.CatmullRomCurve3(backAndForth, true, 'catmullrom', 0.2);
@@ -550,7 +565,7 @@ function buildCity(rng, theme, progress, layout) {
   }
 }
 
-function buildingGeometryWithMat(type, winMat, roofColorHex) {
+function buildingGeometryWithMat(type, winMat, roofColorHex, bodyColorHex) {
   const group = new THREE.Group();
   const specs = {
     villa:   { w: 0.9, h: 0.75, roof: 'hip',   roofH: 0.4,  body: '#fecaca' },
@@ -559,7 +574,7 @@ function buildingGeometryWithMat(type, winMat, roofColorHex) {
     tower:   { w: 0.85, h: 3.1, roof: 'cone',  roofH: 0.55, body: '#a7f3d0' },
     spire:   { w: 0.72, h: 3.9, roof: 'spire', roofH: 0.9,  body: '#fef08a' },
   }[type];
-  const bodyMat = new THREE.MeshStandardMaterial({ color: specs.body, roughness: 0.7 });
+  const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColorHex || specs.body, roughness: 0.75 });
   const roofMat = new THREE.MeshStandardMaterial({ color: roofColorHex, roughness: 0.6 });
   const body = new THREE.Mesh(new THREE.BoxGeometry(specs.w, specs.h, specs.w), bodyMat);
   body.position.y = specs.h / 2;
