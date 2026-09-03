@@ -107,10 +107,45 @@ function toast(msg, icon = 'check-circle', variant = 'success') {
   const t = $('#toast');
   const iconCls = variant === 'danger' ? 'text-red-400' : variant === 'warn' ? 'text-amber-400' : 'text-emerald-400';
   t.innerHTML = `<i data-lucide="${icon}" class="w-4 h-4 ${iconCls}"></i><span>${msg}</span>`;
-  lucide.createIcons();
+  if (window.lucide) lucide.createIcons();
   t.classList.remove('hidden');
   clearTimeout(t._t);
   t._t = setTimeout(() => t.classList.add('hidden'), 2800);
+}
+
+// =============================================================
+// 🚨 DIAGNOSTIC · erreurs Firestore visibles à l'écran
+// Un toast de 3 secondes ne suffit pas quand rien ne s'enregistre : on affiche
+// un bandeau persistant avec le code d'erreur exact et la marche à suivre.
+// =============================================================
+function explainFirebaseError(err) {
+  const code = (err && err.code) || '';
+  const map = {
+    'permission-denied': "Firestore refuse l'écriture. Les règles de sécurité du projet doivent autoriser l'utilisateur connecté à écrire dans les collections « clients » et « time_logs » (voir README.md).",
+    'unauthenticated': 'Session expirée · reconnectez-vous.',
+    'unavailable': 'Firestore est injoignable (réseau ou hors ligne).',
+    'failed-precondition': "Firestore réclame un index. Normalement l'app n'en a plus besoin — signalez ce message.",
+    'invalid-argument': 'Donnée refusée par Firestore (champ inattendu ou format invalide).',
+    'resource-exhausted': 'Quota Firestore dépassé pour ce projet.',
+  };
+  return map[code] || (err && err.message) || String(err);
+}
+
+function showErrorBanner(action, err) {
+  const el = document.getElementById('error-banner');
+  const code = (err && err.code) ? err.code : 'inconnu';
+  console.error(`[kopek] ${action}`, err);
+  if (!el) { toast(`${action} · ${code}`, 'alert-circle', 'danger'); return; }
+  const detail = document.getElementById('error-banner-text');
+  const codeEl = document.getElementById('error-banner-code');
+  if (detail) detail.textContent = `${action} — ${explainFirebaseError(err)}`;
+  if (codeEl) codeEl.textContent = `code : ${code}`;
+  el.classList.remove('hidden');
+}
+
+function hideErrorBanner() {
+  const el = document.getElementById('error-banner');
+  if (el) el.classList.add('hidden');
 }
 
 // =============================================================
@@ -252,13 +287,12 @@ function subscribeData() {
     STATE.clients = list;
     if (list.length === 0 && !seedingDefaultProject) {
       seedingDefaultProject = true;
-      ensureDefaultProject().catch((ex) => console.warn('ensureDefaultProject', ex)).finally(() => { seedingDefaultProject = false; });
+      ensureDefaultProject()
+        .catch((ex) => showErrorBanner('Création du projet par défaut impossible', ex))
+        .finally(() => { seedingDefaultProject = false; });
     }
     renderAll();
-  }, (err) => {
-    console.error('subscribeClients', err);
-    toast('Sync projets impossible · ' + (err.code || err.message), 'alert-circle', 'danger');
-  });
+  }, (err) => showErrorBanner('Lecture des projets impossible', err));
 
   const qLogs = query(colTimeLogs(), where('userId', '==', uid));
   unsubLogs = onSnapshot(qLogs, (snap) => {
@@ -267,10 +301,7 @@ function subscribeData() {
     list.sort((a, b) => toMillisSafe(a.date) - toMillisSafe(b.date));
     STATE.allLogs = list;
     renderAll();
-  }, (err) => {
-    console.error('subscribeLogs', err);
-    toast('Sync encodages impossible · ' + (err.code || err.message), 'alert-circle', 'danger');
-  });
+  }, (err) => showErrorBanner('Lecture des encodages impossible', err));
 }
 
 async function ensureDefaultProject() {
@@ -1004,7 +1035,7 @@ function renderLogs(agg) {
         await deleteLog(id);
         toast('Encodage supprimé', 'trash-2', 'warn');
         refreshPeriod();
-      } catch { toast('Erreur suppression', 'alert-circle', 'danger'); }
+      } catch (ex) { showErrorBanner('Suppression impossible', ex); }
     });
     tr.querySelector('[data-edit]').addEventListener('click', () => openEditLog(log));
     tr.querySelector('[data-dup]').addEventListener('click', () => duplicateLogIntoQuickForm(log));
@@ -1044,10 +1075,14 @@ function bindQuickForm() {
     const mins = parseInt($('#q-min').value, 10);
     const type = $('#q-type').value;
     const rateVal = parseFloat($('#q-rate').value || '0');
-    if (!client_id || !description || !mins || mins <= 0 || isNaN(mins)) {
-      toast('Veuillez renseigner Client, Description et Durée', 'alert-circle', 'warn');
+    // Messages séparés : « il manque un champ » n'aide pas quand la vraie cause
+    // est qu'aucun projet n'existe encore.
+    if (!client_id) {
+      toast("Aucun projet sélectionné · créez-en un via « Nouveau Projet »", 'alert-circle', 'warn');
       return;
     }
+    if (!description) { toast('Description manquante', 'alert-circle', 'warn'); return; }
+    if (!mins || mins <= 0 || isNaN(mins)) { toast('Durée manquante ou invalide', 'alert-circle', 'warn'); return; }
     if (type === 'hourly' && (!rateVal || rateVal <= 0)) {
       toast('Taux horaire invalide', 'alert-circle', 'warn');
       return;
@@ -1067,6 +1102,7 @@ function bindQuickForm() {
     };
     try {
       await createLog(payload);
+      hideErrorBanner();
       toast('Encodage ajouté', 'check-circle');
       // reset quick form (garde le projet + le tarif sélectionnés pour enchaîner vite)
       $('#q-desc').value = ''; $('#q-min').value = '';
@@ -1078,8 +1114,8 @@ function bindQuickForm() {
       // NB: le feu d'artifice de confettis 3D se déclenche automatiquement dans
       // renderCity() dès que ce nouvel encodage fait franchir le seuil du Bonus.
     } catch (ex) {
-      console.warn(ex);
-      toast('Erreur d\'enregistrement · index Firestore requis ?', 'alert-circle', 'danger');
+      showErrorBanner("Enregistrement de l'encodage impossible", ex);
+      toast('Encodage NON enregistré · voir le bandeau rouge', 'alert-circle', 'danger');
     }
   });
 }
@@ -1174,6 +1210,14 @@ function populateClientSelects() {
   // à chaque mise à jour temps réel (onSnapshot) pendant que l'utilisateur tape.
   const qSel = $('#q-client');
   const prevVal = qSel.value;
+  if (list.length === 0) {
+    // Sans projet, l'encodage est impossible : on le dit dans le sélecteur
+    // plutôt que de laisser une liste vide inexplicable.
+    qSel.innerHTML = '<option value="">Aucun projet — cliquez sur « Nouveau Projet »</option>';
+    $('#e-client').innerHTML = '';
+    STATE.lastPopulatedClientId = null;
+    return;
+  }
   qSel.innerHTML = list.map((c) => `<option value="${c.id}">${c.name}${c.is_external ? ' · Externe' : ''} · ${c.default_rate ?? 0}€/h</option>`).join('');
   let nextVal = prevVal;
   if (!list.some((c) => c.id === prevVal)) {
@@ -1249,9 +1293,9 @@ async function handleClientFormSubmit(e) {
     }
     $('#client-modal').classList.add('hidden');
   } catch (ex) {
-    console.warn(ex);
-    err.textContent = 'Erreur · vérifiez les règles Firestore (l\'utilisateur doit pouvoir écrire dans "clients").';
+    err.textContent = explainFirebaseError(ex) + ` (code : ${ex.code || 'inconnu'})`;
     err.classList.remove('hidden');
+    showErrorBanner('Enregistrement du projet impossible', ex);
   }
 }
 
@@ -1307,7 +1351,7 @@ function openManageClients() {
       await updateClient(id, { is_external: !c.is_external });
       toast(c.name + (c.is_external ? ' · Projet Nessy' : ' · Client externe'), 'check');
       openManageClients();
-    } catch { toast('Erreur mise à jour', 'alert-circle', 'danger'); }
+    } catch (ex) { showErrorBanner('Mise à jour impossible', ex); }
   }));
 }
 
@@ -1353,7 +1397,7 @@ async function handleEditLogSubmit(e) {
     toast('Encodage mis à jour', 'check');
     $('#edit-modal').classList.add('hidden');
     refreshPeriod();
-  } catch { toast('Erreur mise à jour', 'alert-circle', 'danger'); }
+  } catch (ex) { showErrorBanner('Mise à jour impossible', ex); }
 }
 
 // =============================================================
