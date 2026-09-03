@@ -14,7 +14,7 @@ import {
   Timestamp,
   serverTimestamp,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-03-6';
+} from './firebase-config.js?v=2026-09-03-7';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -532,7 +532,6 @@ function renderAll() {
   section('jauge', renderNessyGauge, agg);
   section('ville', renderCity, agg);
   section('métriques', renderMetrics, agg);
-  section('synthèse projets', renderClientsList, agg);
   section('encodages', renderLogs, agg);
   if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
 }
@@ -699,8 +698,7 @@ function renderNessyGauge(agg) {
 
   // Cas 3 · SURPLUS (≥ 43,75h)  — 🏆 ENGAGEMENT VALIDÉ
   else {
-    const surplusH = agg.tiers.t3.h;
-    st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-emerald-500/50 bg-emerald-500/[0.08] shadow-[0_30px_80px_-40px_rgba(16,185,129,0.55)]';
+      st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-emerald-500/50 bg-emerald-500/[0.08] shadow-[0_30px_80px_-40px_rgba(16,185,129,0.55)]';
     st.innerHTML = `<i data-lucide="trophy" class="w-5 h-5 text-amber-300 flex-none mt-0.5"></i>
       <div class="flex-1">
         <div class="flex flex-wrap items-center gap-2 mb-2">
@@ -752,7 +750,7 @@ async function ensureCityLoaded() {
   if (cityStatus === 'ready' || cityStatus === 'loading' || cityStatus === 'failed') return;
   cityStatus = 'loading';
   try {
-    cityMod = await import('./city3d.js?v=2026-09-03-6');
+    cityMod = await import('./city3d.js?v=2026-09-03-7');
     const canvas = document.getElementById('city-canvas');
     if (!canvas) throw new Error('canvas #city-canvas introuvable');
     cityMod.initCity(canvas);
@@ -817,7 +815,6 @@ function renderCity(agg) {
 
 function renderMetrics(agg) {
   const restH = Math.max(0, agg.debtRemainH);
-  const surplusH = agg.tiers.t3.h;
 
   $('#m-ca').textContent = EUR(agg.globalCA);
   $('#m-ca-detail').textContent = agg.secondaryEur > 0
@@ -825,55 +822,12 @@ function renderMetrics(agg) {
     : `Minimum garanti ${EUR(agg.minG)}`;
 
   $('#m-hours').textContent = `${FR(agg.mainBilledMinutes / 60)} h`;
-  $('#m-hours-detail').textContent = `sur ${FR(NESSY.minHoursEq)} h · réel ${HH(agg.globalRealMin)}`;
+  $('#m-hours-detail').textContent = `sur ${FR(NESSY.minHoursEq)} h · ${HH(agg.mainRealMinutes)} réellement prestées`;
 
   $('#m-reste').textContent = restH > 0 ? `${FR(restH)} h` : 'Atteint';
   $('#m-reste-detail').textContent = restH > 0
     ? `avant d'atteindre ${EUR(agg.minG)}`
     : `minimum garanti couvert`;
-
-  $('#m-bonus').textContent = `+ ${EUR(agg.bonusEur || 0)}`;
-  $('#m-bonus-detail').textContent = surplusH > 0.001
-    ? `${FR(surplusH)} h au-delà du garanti`
-    : `au-delà de ${FR(NESSY.minHoursEq)} h`;
-}
-
-function renderClientsList(agg) {
-  const entries = Array.from(agg.byClient.entries());
-  if (entries.length === 0) {
-    $('#clients-list').innerHTML = `<div class="text-xs text-zinc-500 p-4 border border-dashed border-zinc-800 rounded-xl text-center">Aucun encodage ce mois-ci.<br>Créez un projet via le bouton <b>"+ Nouveau Projet"</b>.</div>`;
-    return;
-  }
-  entries.sort((a, b) => b[1].eur - a[1].eur);
-  const totalEur = entries.reduce((s, [, v]) => s + v.eur, 0) || 1;
-  const html = entries.map(([cid, v]) => {
-    const isExternal = !!v.client?.is_external;
-    const pct = Math.max(6, (v.eur / totalEur) * 100);
-    const grad = isExternal
-      ? 'from-zinc-500/60 via-zinc-400/60 to-zinc-300/50'
-      : 'from-indigo-500/80 via-fuchsia-500/70 to-emerald-400/70';
-    return `<div class="rounded-xl p-3 border border-zinc-800 bg-zinc-900/30 hover:bg-zinc-900/60 transition">
-      <div class="flex items-start justify-between gap-3 mb-2">
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2 mb-0.5">
-            <div class="font-semibold text-sm truncate">${v.client?.name || 'N/A'}</div>
-            ${isExternal
-              ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase bg-zinc-800 text-zinc-400 border border-zinc-700"><i data-lucide="building" class="w-2.5 h-2.5"></i> Externe</span>`
-              : `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase bg-gradient-to-r from-indigo-500/20 to-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-500/30"><i data-lucide="crown" class="w-2.5 h-2.5"></i> Nessy</span>`}
-          </div>
-          <div class="text-[11px] text-zinc-500">${v.count} entrée${v.count > 1 ? 's' : ''} · ${HH(v.realMin)} réel · ${HHdecimal(v.billedMin)} h facturé</div>
-        </div>
-        <div class="text-right flex-none">
-          <div class="font-mono font-bold chip">${EUR(v.eur)}</div>
-          ${v.flat > 0 ? `<div class="text-[10px] text-amber-300/80 font-mono mt-0.5">incl. forfait ${EUR(v.flat)}</div>` : ''}
-        </div>
-      </div>
-      <div class="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-        <div class="h-full bg-gradient-to-r ${grad}" style="width:${pct}%;"></div>
-      </div>
-    </div>`;
-  }).join('');
-  $('#clients-list').innerHTML = html;
 }
 
 // =============================================================

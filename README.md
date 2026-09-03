@@ -31,7 +31,7 @@ Deux protections :
 fichiers** (une simple date suffit) :
 
 ```bash
-OLD=2026-09-03-6; NEW=2026-09-04-1
+OLD=2026-09-03-7; NEW=2026-09-04-1
 grep -rl "$OLD" index.html app.js city3d.js vendor/ version.json \
   | xargs sed -i "s/$OLD/$NEW/g"
 ```

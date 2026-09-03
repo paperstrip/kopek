@@ -10,7 +10,7 @@
   // se retrouve avec un vieux HTML qui charge du vieux JS. On compare donc la
   // version embarquée à celle publiée dans version.json (jamais mise en cache),
   // et on recharge une seule fois sur une URL différente si ça diffère.
-  window.KOPEK_VERSION = '2026-09-03-6';
+  window.KOPEK_VERSION = '2026-09-03-7';
   (function () {
     try {
       fetch('./version.json?t=' + Date.now(), { cache: 'no-store' })
@@ -34,7 +34,7 @@
 <!-- Feuille Tailwind compilée et commitée (styles.css) : le CDN cdn.tailwindcss.com
      est un outil de DEV qui recompile le CSS dans le navigateur à chaque chargement.
      Pour régénérer après avoir ajouté des classes : voir README.md -->
-<link rel="stylesheet" href="./styles.css?v=2026-09-03-6">
+<link rel="stylesheet" href="./styles.css?v=2026-09-03-7">
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 </head>
 <body class="min-h-screen text-zinc-100 font-sans relative overflow-x-hidden">
@@ -124,6 +124,9 @@
             <i data-lucide="chevron-right" class="w-4 h-4"></i>
           </button>
         </div>
+        <button id="btn-manage-clients" title="Gérer les projets" class="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 border border-zinc-800 bg-zinc-900/60 transition">
+          <i data-lucide="settings-2" class="w-4 h-4"></i>
+        </button>
         <button id="btn-new-client" title="Nouveau projet" class="group relative inline-flex items-center gap-1.5 px-2.5 sm:px-3.5 py-2 rounded-lg text-sm font-medium overflow-hidden border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-900 transition">
           <i data-lucide="user-plus" class="w-4 h-4 text-indigo-400"></i>
           <span class="hidden sm:inline">Nouveau Projet</span>
@@ -158,27 +161,6 @@
 
     <!-- ===== BENTO GRID ===== -->
     <div class="grid grid-cols-12 auto-rows-min gap-4 lg:gap-5">
-
-      <!-- BENTO · ACTION PRINCIPALE : ajouter des heures -->
-      <section class="col-span-12 card rounded-2xl p-4 sm:p-5 card-hover flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-        <div class="flex items-center gap-3 flex-1 min-w-0">
-          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500/20 to-fuchsia-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300 flex-none">
-            <i data-lucide="timer" class="w-5 h-5"></i>
-          </div>
-          <div class="min-w-0">
-            <h2 class="text-sm font-bold tracking-tight">Encoder du temps</h2>
-            <p class="text-[11px] text-zinc-500">Arrondi automatique au quart d'heure supérieur.</p>
-          </div>
-        </div>
-        <button id="btn-add-hours" type="button"
-          class="group relative w-full sm:w-auto px-5 py-3 rounded-xl font-semibold text-white overflow-hidden transition flex-none">
-          <span class="absolute inset-0 bg-gradient-to-r from-indigo-600 via-fuchsia-500 to-emerald-500 bg-[length:200%_100%] animate-shimmer"></span>
-          <span class="relative flex items-center justify-center gap-2 text-sm">
-            <i data-lucide="plus" class="w-4 h-4"></i> Ajouter des heures
-          </span>
-        </button>
-      </section>
-
       <!-- BENTO #1 · HERO JAUGE NESSY (8 cols) -->
       <section class="col-span-12 card rounded-2xl p-5 sm:p-7 card-hover relative overflow-hidden">
         <div class="absolute -right-20 -top-20 w-80 h-80 rounded-full bg-gradient-to-br from-indigo-600/20 via-fuchsia-500/10 to-emerald-400/10 blur-3xl pointer-events-none"></div>
@@ -293,15 +275,15 @@
       </section>
 
       <!-- BENTO · CHIFFRES CLÉS DU MOIS -->
-      <section class="col-span-12 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <section class="col-span-12 grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <div class="card rounded-2xl p-4 sm:p-5 card-hover">
           <div class="flex items-center justify-between mb-3">
-            <span class="text-[10px] uppercase tracking-[0.15em] text-zinc-500 font-semibold">À facturer</span>
+            <span class="text-[10px] uppercase tracking-[0.15em] text-indigo-300 font-semibold">À facturer ce mois</span>
             <div class="w-8 h-8 rounded-lg bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-300">
               <i data-lucide="receipt" class="w-4 h-4"></i>
             </div>
           </div>
-          <div id="m-ca" class="font-mono text-2xl font-bold chip">0 €</div>
+          <div id="m-ca" class="font-mono text-3xl font-bold chip">0 €</div>
           <div id="m-ca-detail" class="text-[11px] text-zinc-500 mt-1"></div>
         </div>
         <div class="card rounded-2xl p-4 sm:p-5 card-hover">
@@ -324,33 +306,29 @@
           <div id="m-reste" class="font-mono text-2xl font-bold chip text-amber-300">0 h</div>
           <div id="m-reste-detail" class="text-[11px] text-zinc-500 mt-1"></div>
         </div>
-        <div class="card rounded-2xl p-4 sm:p-5 card-hover">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-[10px] uppercase tracking-[0.15em] text-zinc-500 font-semibold">Surplus</span>
-            <div class="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-300">
-              <i data-lucide="trending-up" class="w-4 h-4"></i>
-            </div>
+</section>
+
+
+      <!-- BENTO · ACTION PRINCIPALE : ajouter des heures -->
+      <section class="col-span-12 card rounded-2xl p-4 sm:p-5 card-hover flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+        <div class="flex items-center gap-3 flex-1 min-w-0">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500/20 to-fuchsia-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300 flex-none">
+            <i data-lucide="timer" class="w-5 h-5"></i>
           </div>
-          <div id="m-bonus" class="font-mono text-2xl font-bold chip text-emerald-300">+ 0 €</div>
-          <div id="m-bonus-detail" class="text-[11px] text-zinc-500 mt-1"></div>
+          <div class="min-w-0">
+            <h2 class="text-sm font-bold tracking-tight">Encoder du temps</h2>
+            <p class="text-[11px] text-zinc-500">Arrondi automatique au quart d'heure supérieur.</p>
+          </div>
         </div>
+        <button id="btn-add-hours" type="button"
+          class="group relative w-full sm:w-auto px-5 py-3 rounded-xl font-semibold text-white overflow-hidden transition flex-none">
+          <span class="absolute inset-0 bg-gradient-to-r from-indigo-600 via-fuchsia-500 to-emerald-500 bg-[length:200%_100%] animate-shimmer"></span>
+          <span class="relative flex items-center justify-center gap-2 text-sm">
+            <i data-lucide="plus" class="w-4 h-4"></i> Ajouter des heures
+          </span>
+        </button>
       </section>
 
-      <!-- BENTO #6 · CLIENTS SYNTHESIS (5 cols) -->
-      <section class="col-span-12 card rounded-2xl p-4 sm:p-5 card-hover">
-        <div class="flex items-center justify-between mb-4">
-          <div class="flex items-center gap-2">
-            <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-fuchsia-500/20 to-amber-500/20 border border-zinc-800 flex items-center justify-center">
-              <i data-lucide="users" class="w-4 h-4 text-zinc-300"></i>
-            </div>
-            <h2 class="font-bold tracking-tight">Synthèse Projets</h2>
-          </div>
-          <button id="btn-manage-clients" class="text-[11px] text-zinc-400 hover:text-white inline-flex items-center gap-1 px-2 py-1 rounded-md hover:bg-zinc-800 transition">
-            <i data-lucide="settings-2" class="w-3 h-3"></i> Gérer
-          </button>
-        </div>
-        <div id="clients-list" class="space-y-2"></div>
-      </section>
       <!-- BENTO #7 · LOGS TABLE (12 cols) -->
       <section class="col-span-12 card rounded-2xl overflow-hidden card-hover">
         <div class="flex items-center justify-between px-4 sm:px-5 py-4 border-b border-zinc-800/80 flex-wrap gap-3">
@@ -725,7 +703,7 @@
 <!-- ===== TOAST ===== -->
 <div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] px-4 py-2.5 bg-zinc-900/95 border border-zinc-700 text-sm rounded-xl shadow-2xl flex items-center gap-2 fade-in"></div>
 
-<script type="module" src="./firebase-config.js?v=2026-09-03-6"></script>
-<script type="module" src="./app.js?v=2026-09-03-6"></script>
+<script type="module" src="./firebase-config.js?v=2026-09-03-7"></script>
+<script type="module" src="./app.js?v=2026-09-03-7"></script>
 </body>
 </html>
