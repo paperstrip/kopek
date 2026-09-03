@@ -14,7 +14,7 @@ import {
   serverTimestamp,
   setDoc,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-03-9';
+} from './firebase-config.js?v=2026-09-03-10';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -44,6 +44,7 @@ const STATE = {
   contractStart: firstDayOfMonth(new Date().getFullYear(), 0), // À override : ex. new Date('2025-01-01')
   editingClientId: null,
   clientsLoaded: false,   // les projets ont-ils été reçus au moins une fois ?
+  dataTimeout: false,     // Firestore n'a jamais répondu · on débloque quand même l'interface
   lastPopulatedClientId: null,
 };
 
@@ -122,6 +123,16 @@ function toast(msg, icon = 'check-circle', variant = 'success') {
 // Un toast de 3 secondes ne suffit pas quand rien ne s'enregistre : on affiche
 // un bandeau persistant avec le code d'erreur exact et la marche à suivre.
 // =============================================================
+// Vérifié le 03/09/2026 par un appel direct à l'API Firestore REST sur le projet
+// kopek-4ffe6 : « The database (default) does not exist for project kopek-4ffe6 ».
+// Le projet Firebase existe et l'authentification fonctionne, mais aucune base
+// Firestore n'y est provisionnée : toute lecture et toute écriture échouent.
+const FIRESTORE_MISSING_MSG =
+  "Aucune base Firestore n'existe dans le projet kopek-4ffe6. Ouvrez la console "
+  + 'Firebase → Firestore Database → « Créer une base de données » (région europe-west, '
+  + 'mode production), puis rechargez cette page. Tant que la base est absente, aucune '
+  + "donnée ne peut être lue ni enregistrée.";
+
 function explainFirebaseError(err) {
   const code = (err && err.code) || '';
   const map = {
@@ -131,8 +142,11 @@ function explainFirebaseError(err) {
     'failed-precondition': "Firestore réclame un index. Normalement l'app n'en a plus besoin — signalez ce message.",
     'invalid-argument': 'Donnée refusée par Firestore (champ inattendu ou format invalide).',
     'resource-exhausted': 'Quota Firestore dépassé pour ce projet.',
+    'not-found': FIRESTORE_MISSING_MSG,
   };
-  return map[code] || (err && err.message) || String(err);
+  const msg = (err && err.message) || String(err);
+  if (/database .* does not exist|NOT_FOUND/i.test(msg)) return FIRESTORE_MISSING_MSG;
+  return map[code] || msg;
 }
 
 function showErrorBanner(action, err) {
@@ -276,11 +290,27 @@ function teardownData() {
   if (unsubLogs) { unsubLogs(); unsubLogs = null; }
   STATE.clients = []; STATE.allLogs = []; STATE.logs = [];
   STATE.clientsLoaded = false;
+  STATE.dataTimeout = false;
+  if (readWatchdog) { clearTimeout(readWatchdog); readWatchdog = null; }
 }
+
+// Firestore ne signale pas toujours une lecture impossible par le callback
+// d'erreur : quand la base n'existe pas, le flux temps réel est relancé
+// indéfiniment et l'interface resterait bloquée sur « chargement » sans le
+// moindre message. On borne donc l'attente.
+const READ_TIMEOUT_MS = 8000;
+let readWatchdog = null;
 
 function subscribeData() {
   teardownData();
   const uid = STATE.user.uid;
+
+  readWatchdog = setTimeout(() => {
+    if (STATE.clientsLoaded) return;
+    STATE.dataTimeout = true;
+    showErrorBanner('Firestore ne répond pas', { code: 'not-found', message: FIRESTORE_MISSING_MSG });
+    renderAll();   // on débloque l'interface plutôt que de laisser un bouton mort
+  }, READ_TIMEOUT_MS);
 
   const qClients = query(colClients(), where('userId', '==', uid));
   unsubClients = onSnapshot(qClients, (snap) => {
@@ -289,6 +319,9 @@ function subscribeData() {
     list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     STATE.clients = list;
     STATE.clientsLoaded = true;
+    STATE.dataTimeout = false;
+    if (readWatchdog) { clearTimeout(readWatchdog); readWatchdog = null; }
+    hideErrorBanner();
     if (list.length === 0 && !seedingDefaultProject) {
       seedingDefaultProject = true;
       ensureDefaultProject()
@@ -545,10 +578,12 @@ function renderAll() {
   if (!STATE.user) return;
   recomputeMonthLogs();
   const agg = aggregateMonth();
-  // Le bouton reste inactif tant que Firestore n'a pas répondu, sinon un clic
-  // trop tôt tombait sur une liste de projets vide.
+  // Le bouton n'est inactif que pendant les toutes premières secondes, le temps
+  // que la liste des projets arrive. Passé le délai de garde il redevient
+  // cliquable même si Firestore n'a pas répondu : un bouton définitivement mort
+  // est le pire des symptômes, il ne laisse aucune prise à l'utilisateur.
   const addBtn = document.getElementById('btn-add-hours');
-  if (addBtn) addBtn.disabled = !STATE.clientsLoaded;
+  if (addBtn) addBtn.disabled = !(STATE.clientsLoaded || STATE.dataTimeout);
   section('projets', populateClientSelects, agg);
   section('entête', renderHeader, agg);
   section('jauge', renderNessyGauge, agg);
@@ -772,7 +807,7 @@ async function ensureCityLoaded() {
   if (cityStatus === 'ready' || cityStatus === 'loading' || cityStatus === 'failed') return;
   cityStatus = 'loading';
   try {
-    cityMod = await import('./city3d.js?v=2026-09-03-9');
+    cityMod = await import('./city3d.js?v=2026-09-03-10');
     const canvas = document.getElementById('city-canvas');
     if (!canvas) throw new Error('canvas #city-canvas introuvable');
     cityMod.initCity(canvas);
@@ -963,7 +998,7 @@ function openHoursWizard(prefill) {
   // Avant, un clic pendant le chargement des projets ouvrait la modale « Nouveau
   // projet » à la place de l'assistant : la liste était vide simplement parce que
   // Firestore n'avait pas encore répondu. On attend, on ne détourne plus.
-  if (!STATE.clientsLoaded) {
+  if (!STATE.clientsLoaded && !STATE.dataTimeout) {
     toast('Chargement des projets…', 'loader', 'warn');
     return;
   }
