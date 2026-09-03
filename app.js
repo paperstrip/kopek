@@ -5,7 +5,6 @@ import {
   signOut,
   onAuthStateChanged,
   collection,
-  addDoc,
   doc,
   updateDoc,
   deleteDoc,
@@ -13,8 +12,9 @@ import {
   where,
   Timestamp,
   serverTimestamp,
+  setDoc,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-03-8';
+} from './firebase-config.js?v=2026-09-03-9';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -308,8 +308,9 @@ function subscribeData() {
   }, (err) => showErrorBanner('Lecture des encodages impossible', err));
 }
 
-async function ensureDefaultProject() {
-  await addDoc(colClients(), {
+function ensureDefaultProject() {
+  const ref = doc(colClients());
+  return setDoc(ref, {
     userId: STATE.user.uid,
     name: 'Nessy · Général',
     default_rate: NESSY.regieRate,
@@ -318,51 +319,65 @@ async function ensureDefaultProject() {
   });
 }
 
-async function createLog(payload) {
+// ---------------------------------------------------------------------------
+// ⚠️ AUCUNE de ces fonctions n'attend l'accusé de réception du serveur.
+// La promesse renvoyée par addDoc/setDoc ne se résout QUE lorsque Firestore a
+// confirmé côté serveur : sur une connexion instable elle reste en attente
+// indéfiniment — sans jamais échouer. Un `await` dessus fige donc l'interface
+// (bouton désactivé, rien ne se passe, aucune erreur), ce qui est exactement le
+// symptôme observé. Firestore écrit dans son cache local immédiatement et
+// synchronise ensuite ; les écouteurs temps réel affichent la donnée aussitôt.
+// On génère donc l'identifiant côté client et on surveille l'échec en arrière-plan.
+// ---------------------------------------------------------------------------
+function writeInBackground(promise, label) {
+  promise.catch((ex) => showErrorBanner(label, ex));
+}
+
+function createLog(payload) {
   if (!STATE.user) return null;
-  const d = {
+  const ref = doc(colTimeLogs());          // identifiant généré localement
+  writeInBackground(setDoc(ref, {
     userId: STATE.user.uid,
     custom_price: null,
     project_name: '',
     createdAt: serverTimestamp(),
     ...payload,
     date: Timestamp.fromDate(toDateSafe(payload.date) || new Date()),
-  };
-  const ref = await addDoc(colTimeLogs(), d);
+  }), "Enregistrement de l'encodage impossible");
   return ref.id;
 }
-async function updateLog(id, patch) {
+function updateLog(id, patch) {
   if (!STATE.user) return;
   const norm = { ...patch };
   if (norm.date) norm.date = Timestamp.fromDate(toDateSafe(norm.date) || new Date());
-  await updateDoc(doc(db, 'time_logs', id), norm);
+  writeInBackground(updateDoc(doc(db, 'time_logs', id), norm), 'Mise à jour impossible');
 }
-async function deleteLog(id) {
+function deleteLog(id) {
   if (!STATE.user) return;
-  await deleteDoc(doc(db, 'time_logs', id));
+  writeInBackground(deleteDoc(doc(db, 'time_logs', id)), 'Suppression impossible');
 }
-async function createClient(data) {
+function createClient(data) {
   if (!STATE.user) return null;
-  const payload = {
+  const ref = doc(colClients());
+  writeInBackground(setDoc(ref, {
     userId: STATE.user.uid,
     createdAt: serverTimestamp(),
     ...data,
-  };
-  const ref = await addDoc(colClients(), payload);
+  }), 'Enregistrement du projet impossible');
   return ref.id;
 }
-async function updateClient(id, patch) {
+function updateClient(id, patch) {
   if (!STATE.user) return;
-  await updateDoc(doc(db, 'clients', id), patch);
+  writeInBackground(updateDoc(doc(db, 'clients', id), patch), 'Mise à jour du projet impossible');
 }
-async function deleteClient(id) {
+function deleteClient(id) {
   if (!STATE.user) return;
   // Vérifie qu'il ne reste pas que ce projet
   if (STATE.clients.length <= 1) {
     toast('Impossible de supprimer le dernier projet', 'alert-circle', 'danger');
     throw new Error('last_client');
   }
-  await deleteDoc(doc(db, 'clients', id));
+  writeInBackground(deleteDoc(doc(db, 'clients', id)), 'Suppression du projet impossible');
 }
 function getClient(id) {
   return STATE.clients.find((c) => c.id === id);
@@ -757,7 +772,7 @@ async function ensureCityLoaded() {
   if (cityStatus === 'ready' || cityStatus === 'loading' || cityStatus === 'failed') return;
   cityStatus = 'loading';
   try {
-    cityMod = await import('./city3d.js?v=2026-09-03-8');
+    cityMod = await import('./city3d.js?v=2026-09-03-9');
     const canvas = document.getElementById('city-canvas');
     if (!canvas) throw new Error('canvas #city-canvas introuvable');
     cityMod.initCity(canvas);
@@ -927,7 +942,7 @@ function renderLogs(agg) {
     tr.querySelector('[data-del]').addEventListener('click', async () => {
       if (!confirm('Supprimer cet encodage ?')) return;
       try {
-        await deleteLog(id);
+        deleteLog(id);
         toast('Encodage supprimé', 'trash-2', 'warn');
         refreshPeriod();
       } catch (ex) { showErrorBanner('Suppression impossible', ex); }
@@ -1118,7 +1133,7 @@ async function onWizardNext() {
       const btn = $('#w-next');
       btn.disabled = true;
       try {
-        const id = await createClient({ name, default_rate: NESSY.regieRate, is_external: false });
+        const id = createClient({ name, default_rate: NESSY.regieRate, is_external: false });
         populateWizardClients();
         $('#w-client').value = id;
         syncNewClientField();
@@ -1150,7 +1165,7 @@ async function onWizardNext() {
   btn.disabled = true;
   label.textContent = 'Enregistrement…';
   try {
-    await createLog({
+    createLog({
       client_id: $('#w-client').value,
       description: $('#w-desc').value.trim(),
       real_minutes: WIZ.minutes,
@@ -1261,10 +1276,10 @@ async function handleClientFormSubmit(e) {
   if (submitLabel) submitLabel.textContent = 'Enregistrement…';
   try {
     if (STATE.editingClientId) {
-      await updateClient(STATE.editingClientId, { name, default_rate: rate, is_external: isExternal });
+      updateClient(STATE.editingClientId, { name, default_rate: rate, is_external: isExternal });
       toast('Projet mis à jour', 'check');
     } else {
-      await createClient({ name, default_rate: rate, is_external: isExternal });
+      createClient({ name, default_rate: rate, is_external: isExternal });
       toast('Projet créé', 'check');
     }
     $('#client-modal').classList.add('hidden');
@@ -1319,7 +1334,7 @@ function openManageClients() {
   $$('#manage-body [data-delc]').forEach((b) => b.addEventListener('click', async () => {
     const id = b.getAttribute('data-delc');
     if (!confirm('Supprimer ce projet ? Les encodages liés deviendront orphelins.')) return;
-    try { await deleteClient(id); toast('Projet supprimé', 'trash', 'warn'); openManageClients(); }
+    try { deleteClient(id); toast('Projet supprimé', 'trash', 'warn'); openManageClients(); }
     catch { /* handled toast */ }
   }));
   $$('#manage-body [data-toggleext]').forEach((b) => b.addEventListener('click', async () => {
@@ -1327,7 +1342,7 @@ function openManageClients() {
     const c = STATE.clients.find((x) => x.id === id);
     if (!c) return;
     try {
-      await updateClient(id, { is_external: !c.is_external });
+      updateClient(id, { is_external: !c.is_external });
       toast(c.name + (c.is_external ? ' · Projet Nessy' : ' · Client externe'), 'check');
       openManageClients();
     } catch (ex) { showErrorBanner('Mise à jour impossible', ex); }
@@ -1374,7 +1389,7 @@ async function handleEditLogSubmit(e) {
   const editBtn = $('#edit-form button[type=submit]');
   if (editBtn) editBtn.disabled = true;
   try {
-    await updateLog(id, patch);
+    updateLog(id, patch);
     toast('Encodage mis à jour', 'check');
     $('#edit-modal').classList.add('hidden');
     refreshPeriod();
