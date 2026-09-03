@@ -75,527 +75,6 @@
     color: transparent;
   }
   .gauge-seg { transition: width .6s cubic-bezier(.22,1,.36,1); }
-  /* ============================================================================
-     🎬 KOPEK · SIMCITY-LIKE CARTOON VIEW (Pixar-ish) — Keyframes / Animations
-     ============================================================================ */
-  /* ---------- CIEL : Soleil, nuages, avions ---------- */
-  @keyframes sky-drift-x { from { transform: translateX(-10%); } to { transform: translateX(110%); } }
-  @keyframes sky-pulse-y { 0%,100% { transform: translateY(0);} 50% { transform: translateY(-6px);} }
-  .k-sky-wrap::before {
-    content:""; position:absolute; inset:0;
-    background:
-      radial-gradient(ellipse 60% 55% at 80% 10%, rgba(255,231,153,0.35), transparent 60%),
-      radial-gradient(ellipse 55% 65% at 15% 20%, rgba(191,219,254,0.30), transparent 65%),
-      linear-gradient(180deg, #60a5fa 0%, #7dd3fc 30%, #99f6e4 65%, #86efac 100%);
-  }
-  .k-cloud { position:absolute; filter: drop-shadow(0 8px 14px rgba(30,64,175,0.22)); will-change: transform; }
-  .k-cloud > i { display:block; border-radius:9999px; background:#fff; box-shadow: 22px 10px 0 -6px #fff, 50px 6px 0 -10px #fff, -18px 12px 0 -8px #fff; }
-  .k-sun {
-    position:absolute; top:5%; right:8%; width:110px; height:110px; border-radius:9999px;
-    background: radial-gradient(circle at 30% 30%, #fff7cc 0%, #fde68a 45%, #fbbf24 100%);
-    box-shadow: 0 0 120px 20px rgba(251,191,36,0.55), inset -8px -10px 0 -6px rgba(249,115,22,0.25);
-    animation: sky-pulse-y 5s ease-in-out infinite;
-  }
-  .k-plane {
-    position:absolute; font-size:24px; filter:drop-shadow(0 4px 6px rgba(15,23,42,0.3));
-    animation: sky-drift-x 28s linear infinite;
-  }
-  .k-plane.trail::after {
-    content:""; position:absolute; top:50%; right:100%; width:90px; height:3px; transform: translateY(-50%);
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.75)); border-radius:9999px; opacity:0.75;
-  }
-  /* ---------- SOL & PENTE 3D CARTOON (perspective basse comme Pixar) ---------- */
-  .k-ground {
-    position:absolute; left:-10%; right:-10%; bottom:0; height:60%;
-    background: linear-gradient(180deg, #4ade80 0%, #22c55e 35%, #16a34a 65%, #166534 100%);
-    border-top-left-radius: 60% 45%; border-top-right-radius: 60% 45%;
-    transform: perspective(1400px) rotateX(58deg) translateY(18%);
-    transform-origin: top center;
-    box-shadow: inset 0 30px 60px rgba(22,163,74,0.35), 0 -10px 0 -2px rgba(250,204,21,0.18);
-  }
-  .k-ground::before {
-    content:""; position:absolute; inset:8% 8% 12% 8%; border-radius:45%;
-    background-image:
-      radial-gradient(circle at 20% 30%, rgba(250,204,21,0.22) 0 4px, transparent 6px),
-      radial-gradient(circle at 65% 70%, rgba(250,204,21,0.18) 0 3px, transparent 5px),
-      radial-gradient(circle at 80% 25%, rgba(250,204,21,0.18) 0 3px, transparent 5px),
-      radial-gradient(circle at 35% 80%, rgba(250,204,21,0.16) 0 2px, transparent 4px);
-    background-size: 80px 80px, 120px 120px, 90px 90px, 100px 100px;
-  }
-  /* ---------- ROUTE & VOITURES CARTOON ---------- */
-  .k-road {
-    position:absolute; left:0; right:0; bottom:22%; height:56px;
-    background: linear-gradient(180deg, #3f3f46, #18181b);
-    box-shadow: 0 6px 0 -2px rgba(0,0,0,0.25), inset 0 4px 0 rgba(255,255,255,0.05);
-    border-top: 3px solid #71717a; border-bottom: 3px solid #52525b;
-    transform: perspective(1200px) rotateX(46deg) translateY(20%);
-    transform-origin: top center;
-  }
-  .k-road::before {
-    content:""; position:absolute; top:50%; left:0; right:0; height:4px; transform:translateY(-50%);
-    background-image: repeating-linear-gradient(90deg, #fde047 0 28px, transparent 28px 54px);
-  }
-  .k-road::after {
-    content:""; position:absolute; inset:-8px -8px -8px -8px; border-radius: 8px; pointer-events:none;
-    box-shadow: inset 0 0 0 4px rgba(0,0,0,0.05);
-  }
-  .k-car {
-    position:absolute; left:-15%; display:flex; align-items:flex-end; gap:2px; will-change:transform;
-    filter: drop-shadow(0 6px 6px rgba(0,0,0,0.28));
-  }
-  .k-car .cb {
-    position:relative; width:64px; height:34px; border-radius:10px 14px 8px 8px;
-    background: linear-gradient(180deg, var(--c1,#ef4444) 0%, var(--c2,#b91c1c) 100%);
-    box-shadow: inset 0 -5px 0 rgba(0,0,0,0.18), inset 0 6px 0 rgba(255,255,255,0.22);
-  }
-  .k-car .cb::before {
-    content:""; position:absolute; left:12px; right:12px; top:4px; height:14px; border-radius:8px 12px 4px 4px;
-    background: linear-gradient(180deg, #bae6fd 0%, #7dd3fc 100%);
-    box-shadow: inset 0 -2px 0 rgba(14,116,144,0.25), inset 0 1px 0 rgba(255,255,255,0.6);
-  }
-  .k-car .cb::after {
-    content:""; position:absolute; left:4px; right:4px; top:50%; transform: translateY(-50%);
-    display:flex; justify-content:space-between;
-  }
-  .k-car .cw {
-    position:absolute; bottom:-7px; left:8px; right:8px; display:flex; justify-content:space-between;
-  }
-  .k-car .cw::before, .k-car .cw::after {
-    content:""; width:14px; height:14px; border-radius:9999px;
-    background: radial-gradient(circle at 30% 30%, #a3a3a3, #27272a 65%);
-    box-shadow: inset 0 -2px 0 rgba(0,0,0,0.55);
-  }
-  .k-car .cw::after { opacity: 1; }
-  @keyframes k-car-right { from { transform: translateX(-10vw);} to { transform: translateX(120vw);} }
-  @keyframes k-car-left  { from { transform: translateX(120vw);} to { transform: translateX(-10vw);} }
-
-  /* ---------- PIETONS (petits personnages en mousse) ---------- */
-  .k-ped {
-    position:absolute; bottom:calc(22% + 58px); left:-8%; width:22px; height:36px;
-    display:flex; flex-direction:column; align-items:center; justify-content:flex-end;
-    filter: drop-shadow(0 3px 2px rgba(0,0,0,0.25));
-    animation: sky-drift-x 42s linear infinite;
-  }
-  .k-ped::before {
-    content:""; width:14px; height:14px; border-radius:9999px; background: radial-gradient(circle at 30% 30%, #fde68a, #f59e0b);
-    box-shadow: inset -2px -3px 0 rgba(180,83,9,0.4);
-  }
-  .k-ped::after {
-    content:""; margin-top:-2px; width:18px; height:22px; border-radius:8px 8px 6px 6px;
-    background: linear-gradient(180deg, var(--c1,#fb7185) 0%, var(--c2,#e11d48) 100%);
-    box-shadow: inset 0 -4px 0 rgba(0,0,0,0.2);
-  }
-
-  /* ---------- BÂTIMENTS STYLE CARTOON (coins ronds + ombres cartoon) ---------- */
-  .k-b {
-    position:absolute; bottom: calc(22% + 56px);
-    border-radius: 10px 10px 6px 6px;
-    box-shadow:
-      inset 0 -10px 0 rgba(0,0,0,0.18),
-      inset 0 6px 0 rgba(255,255,255,0.18),
-      10px 12px 0 -4px rgba(15,23,42,0.18),
-      18px 28px 0 -10px rgba(15,23,42,0.10);
-    transform-origin: bottom center;
-  }
-  /* Toit cartoon */
-  .k-b::before {
-    content:""; position:absolute; left:-6%; right:-6%; top:-20px; height:28px; border-radius: 8px 8px 4px 4px;
-    background: linear-gradient(180deg, var(--tc1,#991b1b) 0%, var(--tc2,#7f1d1d) 100%);
-    box-shadow: inset 0 -6px 0 rgba(0,0,0,0.25), 0 3px 0 rgba(0,0,0,0.12);
-  }
-  /* Fenêtres (réseau) */
-  .k-b::after {
-    content:""; position:absolute; left:10%; right:10%; top:14px; bottom:10%;
-    background-image:
-      linear-gradient(90deg, rgba(253,224,71,0.0) 0 10px, rgba(253,224,71,0.55) 10px 16px, transparent 16px),
-      linear-gradient(0deg,  rgba(253,224,71,0.0) 0 10px, rgba(253,224,71,0.55) 10px 16px, transparent 16px);
-    background-size: 18px 22px, 18px 22px;
-    background-repeat: repeat;
-    mix-blend-mode: screen;
-    opacity: 0.9;
-  }
-  /* Villas "quartier Socle" petites maisons */
-  .k-b.t-villa { width:72px; height:76px;
-    background: linear-gradient(180deg, #fecaca 0%, #f87171 100%); }
-  .k-b.t-villa::before { top:-22px; height:28px; --tc1:#7c2d12; --tc2:#431407; }
-  .k-b.t-shop  { width:96px; height:96px; background: linear-gradient(180deg, #bae6fd 0%, #0ea5e9 100%); }
-  .k-b.t-shop::before  { top:-18px; height:26px; --tc1:#155e75; --tc2:#083344; }
-  .k-b.t-immeuble { width:92px; height:140px; background: linear-gradient(180deg, #ddd6fe 0%, #8b5cf6 100%); }
-  .k-b.t-immeuble::before { top:-16px; height:22px; --tc1:#581c87; --tc2:#3b0764; }
-  .k-b.t-gratte  { width:108px; height:210px; background: linear-gradient(180deg, #fef9c3 0%, #ca8a04 100%); }
-  .k-b.t-gratte::before  { top:-14px; height:22px; --tc1:#713f12; --tc2:#422006; }
-  .k-b.t-tour   { width:96px; height:250px; background: linear-gradient(180deg, #cffafe 0%, #06b6d4 55%, #0e7490 100%); }
-  .k-b.t-tour::before    { top:-12px; height:22px; --tc1:#164e63; --tc2:#083344; }
-
-  /* Lumieres allumées (ajoutées via classe .on) */
-  .k-b.on::after { background-image:
-      linear-gradient(90deg, transparent 0 10px, #fde047 10px 16px, transparent 16px),
-      linear-gradient(0deg,  transparent 0 10px, #fde047 10px 16px, transparent 16px);
-    filter: drop-shadow(0 0 6px rgba(253,224,71,0.6));
-  }
-  .k-b.chantier { filter: saturate(0.5) brightness(0.85); }
-  .k-b.chantier::after { opacity: 0.15; }
-  .k-b.chantier::before {
-    background: repeating-linear-gradient(45deg, #facc15 0 8px, #111827 8px 16px);
-    box-shadow: inset 0 -4px 0 rgba(0,0,0,0.25);
-    animation: shimmer 1.8s linear infinite;
-    background-size: 200% 100%;
-  }
-  /* Échafaudage */
-  .k-b.chantier .scaf {
-    position:absolute; inset: 6% 6% 0 6%; border-radius: 6px; pointer-events:none;
-    background-image:
-      repeating-linear-gradient(0deg, rgba(15,23,42,0.55) 0 2px, transparent 2px 16px),
-      repeating-linear-gradient(90deg, rgba(15,23,42,0.55) 0 2px, transparent 2px 28px);
-    mix-blend-mode: multiply;
-  }
-
-  /* ---------- USINE QUI FUME (quand on encode du temps) ---------- */
-  .k-factory {
-    position:absolute; bottom:calc(22% + 56px); left:6%; width:150px; height:120px;
-    border-radius: 10px;
-    background: linear-gradient(180deg, #9ca3af 0%, #4b5563 100%);
-    box-shadow: inset 0 -10px 0 rgba(0,0,0,0.25), inset 0 6px 0 rgba(255,255,255,0.15),
-      10px 12px 0 -4px rgba(15,23,42,0.18);
-  }
-  .k-factory .chim {
-    position:absolute; top:-58px; left:22%; width:24px; height:72px; border-radius: 4px 4px 0 0;
-    background: linear-gradient(90deg, #52525b, #3f3f46);
-    box-shadow: inset 4px 0 0 rgba(0,0,0,0.2);
-  }
-  .k-factory .chim::before,
-  .k-factory .chim::after {
-    content:""; position:absolute; left:0; right:0; top:-6px; height:6px; border-radius: 2px;
-    background: repeating-linear-gradient(90deg, #ef4444 0 6px, #f8fafc 6px 12px);
-  }
-  .k-factory .chim::after { top:-16px; }
-  .k-smoke {
-    position:absolute; left:calc(6% + 22px + 12px); bottom:calc(22% + 56px + 150px - 20px);
-    width:40px; height:40px; border-radius: 9999px;
-    background: radial-gradient(circle, rgba(255,255,255,0.9), rgba(161,161,170,0.1) 70%, transparent 75%);
-    filter: blur(2px);
-    opacity: 0;
-  }
-  @keyframes puf {
-    0%   { opacity: 0; transform: translate(0,0) scale(0.6); }
-    20%  { opacity: 0.9; }
-    100% { opacity: 0; transform: translate(20px,-160px) scale(2.6); }
-  }
-  .k-factory.lit .chim { background: linear-gradient(90deg, #f97316, #b91c1c); }
-  .k-factory.lit::before {
-    content:""; position:absolute; inset: 24% 10% 10% 10%;
-    background:
-      radial-gradient(circle at 20% 20%, #fde047 0 5px, transparent 7px),
-      radial-gradient(circle at 60% 40%, #fb923c 0 5px, transparent 7px),
-      radial-gradient(circle at 30% 80%, #f59e0b 0 5px, transparent 7px);
-    filter: blur(0.3px);
-    mix-blend-mode: screen;
-  }
-
-  /* ---------- ARBRES & VÉGÉTATION CARTOON ---------- */
-  .k-tree { position:absolute; bottom:calc(22% + 56px); width:36px; height:56px;
-    display:flex; align-items:flex-end; justify-content:center; filter: drop-shadow(0 6px 2px rgba(0,0,0,0.2)); }
-  .k-tree::before {
-    content:""; position:absolute; bottom:0; width:8px; height:18px; border-radius: 2px;
-    background: linear-gradient(180deg, #92400e, #78350f);
-  }
-  .k-tree::after {
-    content:""; position:absolute; bottom:14px; width:36px; height:42px; border-radius: 50% 50% 45% 45%;
-    background: radial-gradient(circle at 30% 30%, #86efac, #16a34a 70%);
-    box-shadow: inset -6px -8px 0 rgba(22,101,52,0.4);
-  }
-  .k-tree.big::after { width:48px; height:56px; }
-
-  /* ---------- FOULE / PUBLIC (petits points colorés = population) ---------- */
-  .k-crowd-dot {
-    position:absolute; width:7px; height:7px; border-radius: 9999px;
-    box-shadow: 0 2px 0 rgba(0,0,0,0.2);
-  }
-  /* ---------- FENÊTRES QUI CLIGNOTENT (mode nuisettes animées) ---------- */
-  @keyframes twinkle { 0%,100%{opacity:1;} 30%{opacity:0.3;} 55%{opacity:1;} 78%{opacity:0.5;} }
-  .k-twinkle { animation: twinkle 2.6s ease-in-out infinite; }
-
-  /* ---------- STAT POP-UP BULLE ---------- */
-  .k-pop {
-    position:absolute; bottom: calc(22% + 56px + 240px);
-    padding: 10px 12px; border-radius: 16px; background: rgba(15,23,42,0.85);
-    border:1px solid rgba(250,204,21,0.35); color:#facc15;
-    font-family: ui-monospace, monospace; font-size: 12px; font-weight:700;
-    box-shadow: 0 20px 40px -10px rgba(0,0,0,0.6);
-  }
-  .k-pop::after {
-    content:""; position:absolute; left:20px; bottom:-7px; width:12px; height:12px; background:inherit;
-    border-right:1px solid rgba(250,204,21,0.35); border-bottom:1px solid rgba(250,204,21,0.35);
-    transform: rotate(45deg);
-  }
-  .k-pop.gain { color:#86efac; border-color:rgba(52,211,153,0.45); background: rgba(6,78,59,0.75); }
-  .k-pop.loss { color:#fda4af; border-color:rgba(244,63,94,0.4);   background: rgba(88,28,135,0.45); }
-  /* ---------- PLATEAU 2,5D / CITY-BUILDER ---------- */
-  .k-stage {
-    position:absolute; inset: 10% 23% 14% 4%;
-    pointer-events:none;
-  }
-  @media (max-width: 1024px) {
-    .k-stage { inset: 12% 4% 26% 4%; }
-    .k-district-tag { font-size: 9px; letter-spacing: .10em; }
-  }
-  .k-stage::before {
-    content:""; position:absolute; inset:0;
-    background:
-      radial-gradient(circle at 18% 82%, rgba(190,242,100,0.12), transparent 20%),
-      radial-gradient(circle at 70% 18%, rgba(125,211,252,0.10), transparent 22%);
-  }
-  .k-district-band {
-    position:absolute; inset:0;
-    background:
-      linear-gradient(90deg,
-        rgba(239,68,68,0.08) 0% 31%,
-        rgba(217,70,239,0.09) 31% 64%,
-        rgba(16,185,129,0.08) 64% 100%);
-    border-radius: 36px;
-    filter: blur(6px);
-    opacity: .8;
-  }
-  .k-avenue {
-    position:absolute; height:30px; border-radius: 16px;
-    background: linear-gradient(180deg, rgba(63,63,70,0.96), rgba(24,24,27,0.96));
-    box-shadow: 0 10px 24px rgba(15,23,42,0.3), inset 0 2px 0 rgba(255,255,255,0.06);
-    overflow:hidden;
-  }
-  .k-avenue::before {
-    content:""; position:absolute; inset: 50% 8px auto 8px; height:3px; transform: translateY(-50%);
-    background: repeating-linear-gradient(90deg, rgba(250,204,21,0.95) 0 26px, transparent 26px 54px);
-  }
-  .k-avenue.a1 { left:4%; right:12%; bottom:16%; transform: skewX(-28deg); }
-  .k-avenue.a2 { left:26%; right:8%; bottom:33%; transform: skewX(28deg); opacity:.95; }
-  .k-cross {
-    position:absolute; left:45%; bottom:22%; width:18%; height:16%;
-    transform: rotate(45deg);
-    background: radial-gradient(circle, rgba(63,63,70,0.96), rgba(24,24,27,0.96) 70%);
-    border:1px solid rgba(255,255,255,0.06);
-    box-shadow: 0 18px 32px rgba(15,23,42,0.28);
-  }
-  .k-rail {
-    position:absolute; left:8%; right:10%; bottom:44%; height:16px;
-    transform: skewX(-28deg);
-    background:
-      repeating-linear-gradient(90deg, rgba(161,161,170,0.9) 0 6px, transparent 6px 28px),
-      linear-gradient(180deg, rgba(82,82,91,0.9), rgba(39,39,42,0.9));
-    border-radius:10px;
-    opacity:.7;
-  }
-  .k-canal {
-    position:absolute; left:61%; right:2%; bottom:39%; height:18%;
-    transform: skewX(-28deg);
-    border-radius: 18px;
-    background:
-      linear-gradient(180deg, rgba(125,211,252,0.95), rgba(14,116,144,0.95)),
-      repeating-linear-gradient(90deg, rgba(255,255,255,0.18) 0 40px, transparent 40px 74px);
-    box-shadow: 0 14px 40px rgba(14,165,233,0.2), inset 0 2px 0 rgba(255,255,255,0.2);
-    opacity:.85;
-  }
-  .k-plaza {
-    position:absolute; left:42%; bottom:30%; width:12%; height:12%;
-    transform: rotate(45deg);
-    background:
-      radial-gradient(circle at 50% 50%, rgba(250,250,249,0.28) 0 12%, transparent 12%),
-      repeating-linear-gradient(90deg, rgba(255,255,255,0.08) 0 8px, transparent 8px 16px),
-      linear-gradient(180deg, rgba(212,212,216,0.75), rgba(82,82,91,0.75));
-    border:1px solid rgba(255,255,255,0.08);
-    box-shadow: 0 12px 20px rgba(15,23,42,0.22);
-  }
-  .k-lot {
-    position:absolute; width:124px; height:64px;
-    transform-style: preserve-3d;
-  }
-  .k-lot::before {
-    content:""; position:absolute; inset:0;
-    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-    background: linear-gradient(180deg, var(--lot1, rgba(34,197,94,0.95)), var(--lot2, rgba(22,163,74,0.96)));
-    border:1px solid rgba(255,255,255,0.08);
-    box-shadow: 0 12px 24px rgba(15,23,42,0.22), inset 0 1px 0 rgba(255,255,255,0.12);
-  }
-  .k-lot::after {
-    content:""; position:absolute; inset:9px;
-    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-    border:1px dashed rgba(255,255,255,0.08);
-    opacity:.7;
-  }
-  .k-lot.socle { --lot1: rgba(252,165,165,0.95); --lot2: rgba(239,68,68,0.95); }
-  .k-lot.garantie { --lot1: rgba(240,171,252,0.95); --lot2: rgba(192,38,211,0.96); }
-  .k-lot.bonus { --lot1: rgba(110,231,183,0.95); --lot2: rgba(5,150,105,0.96); }
-  .k-lot.road::before {
-    background: linear-gradient(180deg, rgba(82,82,91,0.95), rgba(24,24,27,0.98));
-  }
-  .k-lot.road::after {
-    inset: 28px 18px;
-    clip-path: none;
-    border:0;
-    background: repeating-linear-gradient(90deg, rgba(250,204,21,0.9) 0 16px, transparent 16px 30px);
-    opacity:.9;
-  }
-  .k-iso {
-    position:absolute; left:50%; bottom:20px;
-    width:var(--bw,78px); height:var(--bh,96px);
-    transform: translateX(-50%);
-    filter: drop-shadow(0 18px 18px rgba(15,23,42,0.28));
-  }
-  .k-iso .front,
-  .k-iso .left,
-  .k-iso .right,
-  .k-iso .top {
-    position:absolute;
-  }
-  .k-iso .front {
-    left:0; bottom:0; width:var(--bw,78px); height:var(--bh,96px);
-    background: linear-gradient(180deg, var(--front1), var(--front2));
-    border-radius: 8px 8px 4px 4px;
-    box-shadow: inset 0 10px 0 rgba(255,255,255,0.14), inset 0 -10px 0 rgba(0,0,0,0.18);
-    overflow:hidden;
-  }
-  .k-iso .front::after {
-    content:""; position:absolute; inset:10px 12px 10px 12px;
-    background:
-      repeating-linear-gradient(90deg, rgba(253,224,71,0.0) 0 8px, rgba(253,224,71,0.52) 8px 14px, transparent 14px 22px),
-      repeating-linear-gradient(180deg, rgba(253,224,71,0.0) 0 10px, rgba(253,224,71,0.52) 10px 16px, transparent 16px 24px);
-    opacity: var(--windows, .4);
-    mix-blend-mode: screen;
-  }
-  .k-iso .left {
-    left: calc(var(--depth,18px) * -1); bottom: 0;
-    width:var(--depth,18px); height:var(--bh,96px);
-    background: linear-gradient(180deg, var(--left1), var(--left2));
-    transform: skewY(38deg);
-    transform-origin: right bottom;
-    border-radius: 6px 0 0 3px;
-    box-shadow: inset -4px 0 0 rgba(0,0,0,0.15);
-  }
-  .k-iso .right {
-    right: calc(var(--depth,18px) * -1); bottom: 0;
-    width:var(--depth,18px); height:var(--bh,96px);
-    background: linear-gradient(180deg, var(--right1), var(--right2));
-    transform: skewY(-38deg);
-    transform-origin: left bottom;
-    border-radius: 0 6px 3px 0;
-    box-shadow: inset 4px 0 0 rgba(255,255,255,0.08);
-  }
-  .k-iso .top {
-    left:0; top:-26px; width:var(--bw,78px); height:52px;
-    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-    background: linear-gradient(180deg, var(--top1), var(--top2));
-    box-shadow: 0 4px 0 rgba(0,0,0,0.10), inset 0 2px 0 rgba(255,255,255,0.18);
-  }
-  .k-iso.villa {
-    --bw:72px; --bh:54px; --depth:16px;
-    --front1:#fecaca; --front2:#f87171; --left1:#fca5a5; --left2:#dc2626; --right1:#fb7185; --right2:#be123c; --top1:#7c2d12; --top2:#431407;
-  }
-  .k-iso.shop {
-    --bw:78px; --bh:74px; --depth:18px;
-    --front1:#bae6fd; --front2:#0ea5e9; --left1:#7dd3fc; --left2:#0284c7; --right1:#38bdf8; --right2:#0369a1; --top1:#155e75; --top2:#083344;
-  }
-  .k-iso.midrise {
-    --bw:82px; --bh:120px; --depth:20px;
-    --front1:#ddd6fe; --front2:#8b5cf6; --left1:#c4b5fd; --left2:#7c3aed; --right1:#a78bfa; --right2:#6d28d9; --top1:#581c87; --top2:#3b0764;
-  }
-  .k-iso.tower {
-    --bw:88px; --bh:178px; --depth:22px;
-    --front1:#e0f2fe; --front2:#06b6d4; --left1:#bae6fd; --left2:#0891b2; --right1:#67e8f9; --right2:#0e7490; --top1:#164e63; --top2:#083344;
-  }
-  .k-iso.spire {
-    --bw:96px; --bh:230px; --depth:24px;
-    --front1:#fef3c7; --front2:#d97706; --left1:#fde68a; --left2:#a16207; --right1:#fcd34d; --right2:#92400e; --top1:#78350f; --top2:#451a03;
-  }
-  .k-iso.lit .front::after { --windows: .92; filter: drop-shadow(0 0 7px rgba(253,224,71,0.55)); }
-  .k-iso.construction .front,
-  .k-iso.construction .left,
-  .k-iso.construction .right { filter: saturate(.55) brightness(.85); }
-  .k-iso.construction .top {
-    background: repeating-linear-gradient(45deg, #facc15 0 8px, #111827 8px 16px);
-    animation: shimmer 1.7s linear infinite;
-    background-size: 200% 100%;
-  }
-  .k-iso.construction .front::after { --windows: .08; }
-  .k-crane {
-    position:absolute; left:50%; bottom: calc(100% - 6px); width:70px; height:92px;
-    transform: translateX(-50%);
-    transform-origin: bottom center;
-    animation: craneSwing 4.8s ease-in-out infinite;
-  }
-  .k-crane::before {
-    content:""; position:absolute; left:34px; bottom:0; width:6px; height:100%;
-    background: linear-gradient(180deg, #facc15, #ca8a04);
-    box-shadow: inset 0 -4px 0 rgba(0,0,0,0.18);
-  }
-  .k-crane::after {
-    content:""; position:absolute; left:34px; top:10px; width:44px; height:6px;
-    background: linear-gradient(90deg, #facc15, #eab308);
-    box-shadow: inset 0 -2px 0 rgba(0,0,0,0.16);
-  }
-  .k-crane .hook {
-    position:absolute; left:72px; top:16px; width:2px; height:34px;
-    background: linear-gradient(180deg, #e5e7eb, #71717a);
-  }
-  .k-crane .hook::after {
-    content:""; position:absolute; left:-3px; bottom:-6px; width:8px; height:8px;
-    border:2px solid #eab308; border-top:none; border-radius:0 0 8px 8px;
-  }
-  @keyframes craneSwing {
-    0%,100% { transform: translateX(-50%) rotate(-2deg); }
-    50% { transform: translateX(-50%) rotate(3deg); }
-  }
-  .k-van {
-    position:absolute; width:38px; height:20px;
-    background: linear-gradient(180deg, var(--v1,#60a5fa), var(--v2,#1d4ed8));
-    border-radius: 7px 9px 6px 6px;
-    box-shadow: inset 0 4px 0 rgba(255,255,255,0.18), inset 0 -4px 0 rgba(0,0,0,0.18), 0 6px 14px rgba(15,23,42,0.24);
-  }
-  .k-van::before {
-    content:""; position:absolute; left:8px; right:8px; top:3px; height:7px;
-    background: linear-gradient(180deg, #dbeafe, #7dd3fc);
-    border-radius: 5px 7px 3px 3px;
-  }
-  .k-van::after {
-    content:""; position:absolute; left:5px; right:5px; bottom:-5px; height:10px;
-    background:
-      radial-gradient(circle, #d4d4d8 0 4px, #18181b 4px 5px, transparent 5px) left center / 10px 10px no-repeat,
-      radial-gradient(circle, #d4d4d8 0 4px, #18181b 4px 5px, transparent 5px) right center / 10px 10px no-repeat;
-  }
-  @keyframes diagDriveA {
-    from { transform: translate(-8%, 8%) rotate(-28deg); opacity:0; }
-    10%,90% { opacity:1; }
-    to { transform: translate(88%, -26%) rotate(-28deg); opacity:0; }
-  }
-  @keyframes diagDriveB {
-    from { transform: translate(90%, 10%) rotate(28deg); opacity:0; }
-    10%,90% { opacity:1; }
-    to { transform: translate(-14%, -28%) rotate(28deg); opacity:0; }
-  }
-  .k-district-tag {
-    position:absolute; padding:7px 10px; border-radius: 999px;
-    font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase;
-    background: rgba(15,23,42,0.82);
-    border:1px solid rgba(255,255,255,0.10);
-    box-shadow: 0 8px 18px rgba(15,23,42,0.24);
-    backdrop-filter: blur(10px);
-  }
-  .k-district-tag.socle { color:#fca5a5; border-color: rgba(248,113,113,0.30); }
-  .k-district-tag.garantie { color:#f0abfc; border-color: rgba(217,70,239,0.30); }
-  .k-district-tag.bonus { color:#6ee7b7; border-color: rgba(16,185,129,0.30); }
-  .k-stage-tree {
-    position:absolute; width:30px; height:42px;
-    filter: drop-shadow(0 8px 8px rgba(15,23,42,0.18));
-  }
-  .k-stage-tree::before {
-    content:""; position:absolute; left:50%; bottom:0; width:7px; height:14px; transform: translateX(-50%);
-    border-radius: 3px;
-    background: linear-gradient(180deg, #92400e, #78350f);
-  }
-  .k-stage-tree::after {
-    content:""; position:absolute; left:50%; bottom:9px; width:28px; height:28px; transform: translateX(-50%);
-    border-radius: 50% 50% 44% 44%;
-    background: radial-gradient(circle at 30% 30%, #86efac, #16a34a 70%);
-    box-shadow: inset -5px -6px 0 rgba(22,101,52,0.35);
-  }
 </style>
 </head>
 <body class="min-h-screen text-zinc-100 font-sans relative overflow-x-hidden">
@@ -687,7 +166,7 @@
         </div>
         <button id="btn-new-client" class="group relative inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium overflow-hidden border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-900 transition">
           <i data-lucide="user-plus" class="w-4 h-4 text-indigo-400"></i>
-          <span>Nouveau Client</span>
+          <span>Nouveau Projet</span>
         </button>
         <div id="auth-status" class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-900/60 border border-zinc-800 text-[11px] text-zinc-400 max-w-[200px]">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 badge-pulse"></span>
@@ -724,6 +203,7 @@
             <div id="nessy-ca" class="font-mono text-3xl sm:text-4xl font-bold tracking-tight chip">0 €</div>
           </div>
         </div>
+        <p id="nessy-sub" class="text-sm text-zinc-400 mt-3 relative leading-relaxed"></p>
 
         <!-- Gauge -->
         <div class="mt-8 sm:mt-10 relative">
@@ -883,7 +363,7 @@
               class="w-full px-3 py-2.5 bg-zinc-950/80 border border-zinc-800 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition text-zinc-200" />
           </div>
           <div class="col-span-12 sm:col-span-4 lg:col-span-3">
-            <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-1 font-semibold">Client</label>
+            <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-1 font-semibold">Projet</label>
             <div class="flex gap-1.5">
               <select id="q-client" required
                 class="flex-1 px-3 py-2.5 bg-zinc-950/80 border border-zinc-800 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition">
@@ -892,8 +372,9 @@
           </div>
           <div class="col-span-12 lg:col-span-3">
             <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-1 font-semibold">Description</label>
-            <input id="q-desc" type="text" required placeholder="Tâche effectuée…"
+            <input id="q-desc" type="text" required placeholder="Tâche effectuée…" list="q-desc-list" autocomplete="off"
               class="w-full px-3 py-2.5 bg-zinc-950/80 border border-zinc-800 rounded-lg text-sm placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition" />
+            <datalist id="q-desc-list"></datalist>
           </div>
           <div class="col-span-6 sm:col-span-4 lg:col-span-1">
             <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-1 font-semibold">Minutes</label>
@@ -923,6 +404,16 @@
                 <i data-lucide="send" class="w-4 h-4"></i> Ajouter
               </span>
             </button>
+          </div>
+          <div class="col-span-12 flex items-center flex-wrap gap-1.5 -mt-1">
+            <span class="text-[10px] uppercase tracking-[0.15em] text-zinc-600 font-semibold mr-1">Presets</span>
+            <button type="button" data-preset-min="15" class="q-preset px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:border-indigo-500/50 hover:text-indigo-300 transition">15 min</button>
+            <button type="button" data-preset-min="30" class="q-preset px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:border-indigo-500/50 hover:text-indigo-300 transition">30 min</button>
+            <button type="button" data-preset-min="45" class="q-preset px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:border-indigo-500/50 hover:text-indigo-300 transition">45 min</button>
+            <button type="button" data-preset-min="60" class="q-preset px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:border-indigo-500/50 hover:text-indigo-300 transition">1 h</button>
+            <button type="button" data-preset-min="90" class="q-preset px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:border-indigo-500/50 hover:text-indigo-300 transition">1 h 30</button>
+            <button type="button" data-preset-min="120" class="q-preset px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:border-indigo-500/50 hover:text-indigo-300 transition">2 h</button>
+            <button type="button" data-preset-min="240" class="q-preset px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:border-indigo-500/50 hover:text-indigo-300 transition">4 h</button>
           </div>
           <div id="q-round-info" class="col-span-12 mt-0.5 text-xs h-5 flex items-center gap-2 text-zinc-500">
             <i data-lucide="info" class="w-3.5 h-3.5 text-zinc-600"></i>
@@ -996,7 +487,7 @@
             <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-fuchsia-500/20 to-amber-500/20 border border-zinc-800 flex items-center justify-center">
               <i data-lucide="users" class="w-4 h-4 text-zinc-300"></i>
             </div>
-            <h2 class="font-bold tracking-tight">Synthèse Clients</h2>
+            <h2 class="font-bold tracking-tight">Synthèse Projets</h2>
           </div>
           <button id="btn-manage-clients" class="text-[11px] text-zinc-400 hover:text-white inline-flex items-center gap-1 px-2 py-1 rounded-md hover:bg-zinc-800 transition">
             <i data-lucide="settings-2" class="w-3 h-3"></i> Gérer
@@ -1028,12 +519,12 @@
             <thead class="bg-zinc-900/40 text-[10px] uppercase tracking-[0.15em] text-zinc-500">
               <tr>
                 <th class="text-left px-4 sm:px-5 py-3 font-semibold">Date</th>
-                <th class="text-left px-4 sm:px-5 py-3 font-semibold">Client</th>
+                <th class="text-left px-4 sm:px-5 py-3 font-semibold">Projet</th>
                 <th class="text-left px-4 sm:px-5 py-3 font-semibold">Description</th>
                 <th class="text-right px-4 sm:px-5 py-3 font-semibold">Réel / Facturé</th>
                 <th class="text-right px-4 sm:px-5 py-3 font-semibold">Tarif</th>
                 <th class="text-right px-4 sm:px-5 py-3 font-semibold hidden sm:table-cell">€ HTVA</th>
-                <th class="text-right px-4 sm:px-5 py-3 font-semibold w-16"></th>
+                <th class="text-right px-4 sm:px-5 py-3 font-semibold w-24"></th>
               </tr>
             </thead>
             <tbody id="log-tbody" class="divide-y divide-zinc-800/60"></tbody>
@@ -1048,87 +539,31 @@
       </section>
 
       <!-- ============================================================= -->
-      <!-- BENTO · KOPEK CITY · SIMCITY CARTOON PIXAR VIEW (tout en bas) -->
+      <!-- BENTO · KOPEK CITY · vraie ville 3D low-poly (Three.js, vendorée en local) -->
+      <!-- Générée chaque mois avec un thème/agencement différent (seed = année×12+mois). -->
       <!-- ============================================================= -->
-      <section id="kopek-city" class="col-span-12 relative rounded-3xl card-hover overflow-hidden select-none"
+      <section id="kopek-city" class="col-span-12 relative rounded-3xl card-hover overflow-hidden select-none h-[340px] sm:h-[440px] lg:h-[560px]"
         style="background:#0b1120; border:1px solid rgba(129,140,248,0.3);
-               box-shadow: 0 40px 120px -40px rgba(99,102,241,0.55), inset 0 1px 0 rgba(255,255,255,0.05);
-               min-height: 680px;">
+               box-shadow: 0 40px 120px -40px rgba(99,102,241,0.55), inset 0 1px 0 rgba(255,255,255,0.05);">
 
-        <!-- Skylight (saturation cartoon : ciel Pixar) -->
-        <div class="k-sky-wrap absolute inset-0">
-          <!-- Soleil -->
-          <div class="k-sun" aria-hidden="true"></div>
-          <!-- Nuages animés -->
-          <div class="k-cloud" style="top:10%; left:12%; animation: sky-drift-x 72s linear infinite;">
-            <i style="width:58px; height:24px; margin-left:8px;"></i>
-          </div>
-          <div class="k-cloud" style="top:18%; left:40%; animation: sky-drift-x 96s linear infinite reverse; animation-delay:-30s;">
-            <i style="width:78px; height:30px;"></i>
-          </div>
-          <div class="k-cloud" style="top:7%; left:62%; animation: sky-drift-x 56s linear infinite; animation-delay:-12s;">
-            <i style="width:48px; height:20px;"></i>
-          </div>
-          <!-- Avion -->
-          <div class="k-plane trail" style="top:22%; animation-delay:-6s;">✈️</div>
-          <div class="k-plane trail" style="top:9%; animation-delay:-18s; animation-duration: 36s; transform: scaleX(-1);">🛩️</div>
-        </div>
-
-        <!-- Sol cartoon (pente 3D + herbe) -->
-        <div class="k-ground" aria-hidden="true"></div>
-
-        <!-- Route + voie gauche (camion/voitures) -->
-        <div class="k-road" aria-hidden="true"></div>
-        <!-- Vehicules (enfant JS va ajouter aussi des voitures dynamiques : bonus si >0) -->
-        <div class="k-car" style="bottom:22%; animation: k-car-right 10s linear infinite; animation-delay:-1s; --c1:#ef4444; --c2:#b91c1c;">
-          <div class="cb"></div><div class="cw"></div>
-        </div>
-        <div class="k-car" style="bottom:22%; animation: k-car-left 13s linear infinite; animation-delay:-4s; --c1:#60a5fa; --c2:#1d4ed8; transform: scaleX(-1);">
-          <div class="cb"></div><div class="cw"></div>
-        </div>
-        <div class="k-car" style="bottom:calc(22% + 26px); animation: k-car-right 16s linear infinite; animation-delay:-7s; --c1:#34d399; --c2:#047857;">
-          <div class="cb"></div><div class="cw"></div>
-        </div>
-        <div class="k-car" style="bottom:calc(22% + 26px); animation: k-car-left 19s linear infinite; animation-delay:-11s; --c1:#f472b6; --c2:#be185d; transform: scaleX(-1);">
-          <div class="cb"></div><div class="cw"></div>
-        </div>
-
-        <!-- Piétons -->
-        <div class="k-ped" style="animation-delay:-18s; --c1:#fde047; --c2:#ca8a04;"></div>
-        <div class="k-ped" style="animation-delay:-4s; --c1:#67e8f9; --c2:#0e7490;"></div>
-        <div class="k-ped" style="animation-delay:-30s; animation-duration: 52s; --c1:#f59e0b; --c2:#92400e;"></div>
-
-        <!-- Usine (quartier Socle - gaucho) → anime fumée à chaque log -->
-        <div id="k-factory" class="k-factory" aria-hidden="true">
-          <div class="chim"></div>
-        </div>
-        <div id="k-smoke" class="k-smoke" aria-hidden="true"></div>
-
-        <!-- ================= CONTENU JS-RENDER : VILLE ================= -->
-        <!-- 3 quartiers : Socle (25h) · Garantie (18,75h) · Bonus (Surplus infini) -->
-        <div id="city-buildings" class="absolute inset-0 pointer-events-none">
-          <!-- Remplissage JS : Villas/Shops/Immeubles/Tours + Arbres + Foulons -->
-        </div>
+        <canvas id="city-canvas" class="absolute inset-0 w-full h-full block" aria-label="Ville Kopek 3D · avancement du contrat Nessy"></canvas>
 
         <!-- Panneaux indicateurs quartiers -->
-        <div class="absolute left-6  top-5 rounded-xl px-3 py-1.5 text-xs font-bold uppercase tracking-wider
-                    bg-red-500/15 border border-red-400/40 text-red-300 backdrop-blur">
-          District Socle · 25 h
+        <div class="absolute left-3 sm:left-6 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
+                    bg-red-500/15 border border-red-400/40 text-red-300 backdrop-blur pointer-events-none">
+          Socle · 25 h
         </div>
-        <div class="absolute left-1/2 -translate-x-1/2 top-5 rounded-xl px-3 py-1.5 text-xs font-bold uppercase tracking-wider
-                    bg-fuchsia-500/15 border border-fuchsia-400/40 text-fuchsia-300 backdrop-blur">
-          District Garantie · +18,75 h
+        <div class="absolute left-1/2 -translate-x-1/2 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
+                    bg-fuchsia-500/15 border border-fuchsia-400/40 text-fuchsia-300 backdrop-blur pointer-events-none">
+          Garantie · +18,75 h
         </div>
-        <div class="absolute right-6 top-5 rounded-xl px-3 py-1.5 text-xs font-bold uppercase tracking-wider
-                    bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 backdrop-blur">
-          District Bonus · Surplus
+        <div class="absolute right-3 sm:right-6 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
+                    bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 backdrop-blur pointer-events-none">
+          Bonus · Surplus
         </div>
-
-        <!-- ================= POP UP ACQUIS (info-bulle Pixar) ================= -->
-        <div id="city-pop" class="k-pop hidden" style="left:10%; animation: float 4s ease-in-out infinite;"></div>
 
         <!-- ================= HUD SIMCITY (info-bulle droite) ================= -->
-        <div class="absolute right-4 bottom-4 w-[20rem] max-w-[calc(100%-2rem)] rounded-2xl p-3.5 backdrop-blur-xl
+        <div class="absolute right-2 sm:right-4 bottom-2 sm:bottom-4 w-[15rem] sm:w-[20rem] max-w-[calc(100%-1rem)] rounded-2xl p-2.5 sm:p-3.5 backdrop-blur-xl pointer-events-none
                     bg-zinc-950/70 border border-white/10 shadow-[0_30px_60px_-10px_rgba(0,0,0,0.7)]
                     grid grid-cols-2 gap-2.5 text-[11px] leading-tight">
           <div class="col-span-2 flex items-center gap-2 pb-2 mb-1 border-b border-white/10">
@@ -1189,8 +624,8 @@
           <i data-lucide="user-plus" class="w-4 h-4 text-indigo-300"></i>
         </div>
         <div>
-          <h3 class="font-bold" id="client-modal-title">Nouveau Client</h3>
-          <p class="text-[11px] text-zinc-500">Ajoutez un client avec son taux horaire par défaut.</p>
+          <h3 class="font-bold" id="client-modal-title">Nouveau Projet</h3>
+          <p class="text-[11px] text-zinc-500">Un projet = une étiquette pour vos tâches. Ses heures comptent dans la jauge Nessy, sauf si vous le marquez "client externe".</p>
         </div>
       </div>
       <button data-close-modal class="p-2 hover:bg-zinc-800 rounded-lg transition text-zinc-400">
@@ -1199,8 +634,8 @@
     </div>
     <form id="client-form" class="p-5 space-y-4">
       <div>
-        <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-400 mb-1.5 font-semibold">Nom du Client</label>
-        <input id="c-name" type="text" required placeholder="NESSY, Client X, Projet Y…"
+        <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-400 mb-1.5 font-semibold">Nom du Projet</label>
+        <input id="c-name" type="text" required placeholder="Nessy · Client X, Projet Y…"
           class="w-full px-3.5 py-2.5 bg-zinc-950 border border-zinc-800 rounded-lg text-sm placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition" />
       </div>
       <div class="grid grid-cols-2 gap-3">
@@ -1212,7 +647,7 @@
         <div class="flex items-end">
           <label class="flex items-center gap-2.5 px-3.5 py-2.5 bg-zinc-900 border border-zinc-800 rounded-lg w-full cursor-pointer hover:bg-zinc-900/80 transition">
             <input id="c-main" type="checkbox" class="w-4 h-4 rounded bg-zinc-950 border-zinc-700 text-indigo-500 focus:ring-indigo-500/50">
-            <span class="text-sm text-zinc-300">Contrat principal (NESSY)</span>
+            <span class="text-sm text-zinc-300">Client externe indépendant (hors Nessy)</span>
           </label>
         </div>
       </div>
@@ -1233,7 +668,7 @@
   <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" data-close-modal></div>
   <div class="relative card rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col fade-in overflow-hidden">
     <div class="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
-      <h3 class="font-bold flex items-center gap-2"><i data-lucide="users" class="w-4 h-4 text-fuchsia-400"></i> Gestion des Clients</h3>
+      <h3 class="font-bold flex items-center gap-2"><i data-lucide="users" class="w-4 h-4 text-fuchsia-400"></i> Gestion des Projets</h3>
       <button data-close-modal class="p-2 hover:bg-zinc-800 rounded-lg transition text-zinc-400"><i data-lucide="x" class="w-5 h-5"></i></button>
     </div>
     <div id="manage-body" class="overflow-auto scrollbar-thin p-5 space-y-2"></div>
@@ -1256,7 +691,7 @@
           <input id="e-date" type="date" required class="w-full px-3 py-2.5 bg-zinc-950 border border-zinc-800 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/50" />
         </div>
         <div>
-          <label class="block text-[10px] uppercase tracking-wider text-zinc-400 mb-1 font-semibold">Client</label>
+          <label class="block text-[10px] uppercase tracking-wider text-zinc-400 mb-1 font-semibold">Projet</label>
           <select id="e-client" required class="w-full px-3 py-2.5 bg-zinc-950 border border-zinc-800 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/50"></select>
         </div>
       </div>

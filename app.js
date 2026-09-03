@@ -6,18 +6,16 @@ import {
   onAuthStateChanged,
   collection,
   addDoc,
-  getDocs,
-  getDoc,
   doc,
   updateDoc,
   deleteDoc,
   query,
   where,
-  orderBy,
   Timestamp,
   serverTimestamp,
-  setDoc,
+  onSnapshot,
 } from './firebase-config.js';
+import { initCity, renderCityScene, celebrate } from './city3d.js';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -55,12 +53,14 @@ const TOTAL_CHARGES = Object.values(TRESORERIE.charges).reduce((a, b) => a + b, 
 // =============================================================
 const STATE = {
   user: null,
-  clients: [],          // {id, name, default_rate, is_main_contract}
-  logs: [],             // time_logs du mois courant
+  clients: [],           // Projets · {id, name, default_rate, is_external}
+  allLogs: [],           // TOUS les time_logs du user (cache local, sync temps réel)
+  logs: [],              // time_logs filtrés sur le mois affiché (dérivé de allLogs)
   selectedMonth: new Date().getMonth(),
   selectedYear: new Date().getFullYear(),
   contractStart: firstDayOfMonth(new Date().getFullYear(), 0), // À override : ex. new Date('2025-01-01')
   editingClientId: null,
+  lastPopulatedClientId: null,
 };
 
 // =============================================================
@@ -135,6 +135,7 @@ $('#btn-logout').addEventListener('click', async () => {
   try { await signOut(auth); toast('Déconnecté', 'log-out', 'warn'); } catch { /* ignore */ }
 });
 
+let appBound = false;
 onAuthStateChanged(auth, (user) => {
   STATE.user = user;
   if (user) {
@@ -147,6 +148,7 @@ onAuthStateChanged(auth, (user) => {
   } else {
     $('#dashboard-screen').classList.add('hidden');
     $('#login-screen').classList.remove('hidden');
+    teardownData();
   }
   if (window.lucide) lucide.createIcons();
 });
@@ -155,11 +157,14 @@ onAuthStateChanged(auth, (user) => {
 // 🚀 INIT APP (après auth)
 // =============================================================
 function initApp() {
-  buildPeriodSelectors();
-  bindTopBar();
-  bindQuickForm();
-  bindModals();
-  refreshPeriod();
+  if (!appBound) {
+    buildPeriodSelectors();
+    bindTopBar();
+    bindQuickForm();
+    bindModals();
+    appBound = true;
+  }
+  subscribeData();
   lucide.createIcons();
 }
 
@@ -204,61 +209,76 @@ function navigateMonth(delta) {
 const colClients   = () => collection(db, 'clients');
 const colTimeLogs  = () => collection(db, 'time_logs');
 
-async function ensureDefaultClient() {
-  // Charge les clients du user
-  const q = query(colClients(), where('userId', '==', STATE.user.uid), orderBy('name', 'asc'));
-  const snap = await getDocs(q);
-  const list = [];
-  snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-  STATE.clients = list;
-  if (list.length === 0) {
-    const nessy = await addDoc(colClients(), {
-      userId: STATE.user.uid,
-      name: 'NESSY · Contrat Principal',
-      default_rate: NESSY.regieRate,
-      is_main_contract: true,
-      createdAt: serverTimestamp(),
-    });
-    STATE.clients.push({
-      id: nessy.id,
-      userId: STATE.user.uid,
-      name: 'NESSY · Contrat Principal',
-      default_rate: NESSY.regieRate,
-      is_main_contract: true,
-    });
-  }
+// -------------------------------------------------------------------------
+// ⚠️ Toutes les requêtes ci-dessous n'utilisent QU'UN SEUL filtre d'égalité
+// (userId ==) et AUCUN orderBy Firestore. C'est volontaire : dès qu'on
+// combine une égalité avec un orderBy sur un autre champ (ou un 2e where),
+// Firestore exige un index composite créé manuellement dans la console.
+// Sans cet index, la requête échoue silencieusement (catch avalé) et rien
+// ne s'affiche. On trie/filtre donc côté JS, ce qui ne nécessite AUCUN
+// index et fonctionne immédiatement sur un projet Firebase tout neuf.
+// -------------------------------------------------------------------------
+
+let unsubClients = null;
+let unsubLogs = null;
+let seedingDefaultProject = false;
+
+function toMillisSafe(tsOrDate) {
+  if (!tsOrDate) return 0;
+  if (tsOrDate instanceof Timestamp) return tsOrDate.toMillis();
+  const d = new Date(tsOrDate);
+  return isNaN(d.getTime()) ? 0 : d.getTime();
 }
-async function loadClients() {
-  const q = query(colClients(), where('userId', '==', STATE.user.uid), orderBy('name', 'asc'));
-  const snap = await getDocs(q);
-  const list = [];
-  snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-  STATE.clients = list;
-  if (list.length === 0) await ensureDefaultClient();
+
+function teardownData() {
+  if (unsubClients) { unsubClients(); unsubClients = null; }
+  if (unsubLogs) { unsubLogs(); unsubLogs = null; }
+  STATE.clients = []; STATE.allLogs = []; STATE.logs = [];
 }
-async function loadLogsForMonth() {
-  if (!STATE.user) return [];
-  const start = firstDayOfMonth(STATE.selectedYear, STATE.selectedMonth);
-  const end   = lastDayOfMonth(STATE.selectedYear, STATE.selectedMonth);
-  const q = query(
-    colTimeLogs(),
-    where('userId', '==', STATE.user.uid),
-    where('date', '>=', Timestamp.fromDate(start)),
-    where('date', '<=', Timestamp.fromDate(end)),
-    orderBy('date', 'asc')
-  );
-  try {
-    const snap = await getDocs(q);
-    const arr = [];
-    snap.forEach((d) => arr.push({ id: d.id, ...d.data() }));
-    STATE.logs = arr;
-    return arr;
-  } catch (ex) {
-    console.warn('loadLogsForMonth', ex);
-    STATE.logs = [];
-    return [];
-  }
+
+function subscribeData() {
+  teardownData();
+  const uid = STATE.user.uid;
+
+  const qClients = query(colClients(), where('userId', '==', uid));
+  unsubClients = onSnapshot(qClients, (snap) => {
+    const list = [];
+    snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+    list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    STATE.clients = list;
+    if (list.length === 0 && !seedingDefaultProject) {
+      seedingDefaultProject = true;
+      ensureDefaultProject().catch((ex) => console.warn('ensureDefaultProject', ex)).finally(() => { seedingDefaultProject = false; });
+    }
+    renderAll();
+  }, (err) => {
+    console.error('subscribeClients', err);
+    toast('Sync projets impossible · ' + (err.code || err.message), 'alert-circle', 'danger');
+  });
+
+  const qLogs = query(colTimeLogs(), where('userId', '==', uid));
+  unsubLogs = onSnapshot(qLogs, (snap) => {
+    const list = [];
+    snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+    list.sort((a, b) => toMillisSafe(a.date) - toMillisSafe(b.date));
+    STATE.allLogs = list;
+    renderAll();
+  }, (err) => {
+    console.error('subscribeLogs', err);
+    toast('Sync encodages impossible · ' + (err.code || err.message), 'alert-circle', 'danger');
+  });
 }
+
+async function ensureDefaultProject() {
+  await addDoc(colClients(), {
+    userId: STATE.user.uid,
+    name: 'Nessy · Général',
+    default_rate: NESSY.regieRate,
+    is_external: false,
+    createdAt: serverTimestamp(),
+  });
+}
+
 async function createLog(payload) {
   if (!STATE.user) return null;
   const d = {
@@ -289,36 +309,21 @@ async function createClient(data) {
     createdAt: serverTimestamp(),
     ...data,
   };
-  // Si is_main_contract, reset les autres
-  if (payload.is_main_contract) {
-    for (const c of STATE.clients) {
-      if (c.is_main_contract) await updateDoc(doc(db, 'clients', c.id), { is_main_contract: false });
-    }
-  }
   const ref = await addDoc(colClients(), payload);
   return ref.id;
 }
 async function updateClient(id, patch) {
   if (!STATE.user) return;
-  if (patch.is_main_contract) {
-    for (const c of STATE.clients) {
-      if (c.is_main_contract && c.id !== id)
-        await updateDoc(doc(db, 'clients', c.id), { is_main_contract: false });
-    }
-  }
   await updateDoc(doc(db, 'clients', id), patch);
 }
 async function deleteClient(id) {
   if (!STATE.user) return;
-  // Vérifie qu'il ne reste pas que ce client
+  // Vérifie qu'il ne reste pas que ce projet
   if (STATE.clients.length <= 1) {
-    toast('Impossible de supprimer le dernier client', 'alert-circle', 'danger');
+    toast('Impossible de supprimer le dernier projet', 'alert-circle', 'danger');
     throw new Error('last_client');
   }
   await deleteDoc(doc(db, 'clients', id));
-}
-function getMainClient() {
-  return STATE.clients.find((c) => c.is_main_contract) || STATE.clients[0];
 }
 function getClient(id) {
   return STATE.clients.find((c) => c.id === id);
@@ -335,74 +340,58 @@ function getMinGaranti(monthIdx) { return monthIdx >= NESSY.phase2StartMonth ? N
 function getMinHoursEq(monthIdx) { return monthIdx >= NESSY.phase2StartMonth ? NESSY.phase2HoursEq : NESSY.minHoursEq; }
 function isAvanceMonth(monthIdx)   { return monthIdx >= NESSY.avanceFrom && monthIdx <= NESSY.avanceTo; }
 
-/**
- * Décompose les heures NESSY en 3 paliers et le CA associé
- * @returns {{tier1:{h:number,eur:number}, tier2:{h:number,eur:number}, tier3:{h:number,eur:number}, rawEur:number, minApplied:boolean, finalCA:number, mainClient:object, mainTotalHours:number}}
+/** Calcule tout le mois · objet agrégat
+ * =========================================================================
+ * 🔑 MODÈLE MÉTIER :
+ *   Les "clients" créés dans l'app sont en réalité des PROJETS internes à
+ *   Nessy (étiquettes pour savoir pour qui/quoi on a bossé). Quel que soit
+ *   le projet sélectionné, les heures alimentent LA MÊME jauge Nessy
+ *   (Socle → Régie Garantie → Bonus), car c'est Nessy qui facture au bout
+ *   du compte. Un projet peut être marqué `is_external: true` pour un
+ *   vrai client indépendant hors-Nessy : son CA s'ajoute au total mais ne
+ *   touche pas la jauge/les paliers.
+ *
+ *   SOCLE 2 000 € (25 h) + MIN GARANTI 3 500 € (43,75 h) = ACQUIS PROMIS
+ *   sur contrat, DÈS LE PREMIER JOUR DU MOIS, SANS ENCODAGE.
+ *   Les heures encodées servent à REMBOURSER cet acquis (0 → 43,75 h),
+ *   puis au-delà génèrent du SURPLUS BONUS facturé en plus du Min Garanti.
+ * =========================================================================
  */
-function nessyTierBreakdown(mainBilledMinutes, extraMainHourlyEur, flatEntriesFromMain) {
-  // Heures facturées totales du client principal (forfaits exclus du décompte paliers → ils s'ajoutent au brut)
-  const minutesHourly = mainBilledMinutes; // ne contient déjà que les logs hourly, pas flat
-  const hoursHourly = minutesHourly / 60;
-  // flat → on ajoute leur € au revenu brut, ils ne participent pas aux paliers
-  const flatEur = flatEntriesFromMain.reduce((a, l) => a + (l.custom_price || 0), 0);
-
-  // Palier 1 : Socle 25h · forfait 2000 €
-  const t1h = Math.min(hoursHourly, NESSY.socleHours);
-  // Palier 2 : Régie Garantie 25h → 43,75h · 80 €/h
-  const t2h = Math.min(Math.max(hoursHourly - NESSY.socleHours, 0), getMinHoursEq(0) - NESSY.socleHours);
-  // Palier 3 : Surplus · 80 €/h (ou taux custom s'il est précisé)
-  const t3h = Math.max(hoursHourly - getMinHoursEq(0), 0);
-
-  const t1eur = hoursHourly > 0 ? NESSY.socleFlat : 0;
-  const t2eur = t2h * NESSY.regieRate;
-  // T3 utilise le rate moyen (80 €/h en général, mais si certains logs NESSY ont un taux custom on utilise leur € réel)
-  const t3eur = extraMainHourlyEur; // taux horaire réel * heures t3 précalculés
-  // Note: précision — pour la simplicité, on calcule via le revenu réel ci-dessous :
-  // rawHourlyEur depuis les logs hourly :
-  return {
-    t1: { h: t1h, eur: t1eur },
-    t2: { h: t2h, eur: t2eur },
-    t3: { h: t3h, eur: t3eur },
-    flatEur,
-    hours: hoursHourly,
-  };
-}
-
-/** Calcule tout le mois · objet agrégat */
 function aggregateMonth() {
   const monthIdx = computeContractMonthIdx();
-  const mainClient = getMainClient();
-  const mainClientId = mainClient ? mainClient.id : null;
 
-  // Regroupements par client
+  // Regroupements par projet
   const byClient = new Map(); // id -> { client, realMin, billedMin, eur, count }
 
-  let mainRealMin = 0, mainBilledMin = 0;     // hourly NESSY uniquement
-  let mainHourlyLogs = [];                    // logs hourly du client principal
-  let mainFlatLogs = [];                      // logs flat du client principal
-  let mainHourlyRealEur = 0;                  // (minutes facturées/60) × rate appliqué pour les logs hourly NESSY
+  let nessyRealMin = 0, nessyBilledMin = 0;   // hourly, projets Nessy (non externes)
+  let nessyHourlyEur = 0;                     // (minutes facturées/60) × rate appliqué, projets Nessy hourly
+  let nessyFlatEur = 0;                       // somme des forfaits sur projets Nessy
+  let nessyLogCount = 0;                      // nb d'encodages sur projets Nessy (active le contrat du mois)
+
+  let externalEur = 0;                        // CA des vrais clients externes (hors jauge)
 
   let globalRealMin = 0;
   let globalBilledMin = 0;
-  let globalRawEur = 0; // somme brute tous clients (avant application min garanti NESSY)
+  let globalRawEur = 0; // somme brute tous projets (avant application min garanti NESSY)
 
   for (const l of STATE.logs) {
     const realMin = l.real_minutes || 0;
     const billedMin = l.billed_minutes || 0;
     const rate = l.rate_applied || 0;
     const isFlat = l.custom_price != null && l.custom_price > 0;
-    let eur = 0;
-    if (isFlat) eur = l.custom_price;
-    else eur = (billedMin / 60) * rate;
+    const eur = isFlat ? l.custom_price : (billedMin / 60) * rate;
 
     globalRealMin += realMin;
     globalBilledMin += billedMin;
     globalRawEur += eur;
 
-    // bucket client
+    const client = getClient(l.client_id);
+    const isExternal = !!client?.is_external;
+
+    // bucket projet
     if (!byClient.has(l.client_id)) {
       byClient.set(l.client_id, {
-        client: getClient(l.client_id) || { name: 'Client supprimé', id: l.client_id },
+        client: client || { name: 'Projet supprimé', id: l.client_id },
         realMin: 0, billedMin: 0, eur: 0, count: 0, flat: 0, hourly: 0,
       });
     }
@@ -410,73 +399,50 @@ function aggregateMonth() {
     b.realMin += realMin; b.billedMin += billedMin; b.eur += eur; b.count++;
     if (isFlat) b.flat += eur; else b.hourly += eur;
 
-    // NESSY
-    if (l.client_id === mainClientId) {
+    if (isExternal) {
+      externalEur += eur;
+    } else {
+      nessyLogCount++;
       if (isFlat) {
-        mainFlatLogs.push(l);
+        nessyFlatEur += eur;
       } else {
-        mainRealMin += realMin;
-        mainBilledMin += billedMin;
-        mainHourlyLogs.push(l);
-        mainHourlyRealEur += eur;
+        nessyRealMin += realMin;
+        nessyBilledMin += billedMin;
+        nessyHourlyEur += eur;
       }
     }
   }
 
-  // ---- DÉCOMPOSITION PALIERS NESSY ----
-  // =========================================================================
-  // 🔑 RÈGLE MÉTIER (nouvelle logique utilisateur) :
-  //   SOCLE 2 000 € (25 h) + MIN GARANTI 3 500 € (43,75 h) = ACQUIS PROMIS
-  //   sur contrat, DÈS LE PREMIER JOUR DU MOIS, SANS ENCODAGE.
-  //
-  //   Les heures encodées servent DEUX CHOSES :
-  //   1. REMBOURSER l'heure acquise (crédit d'heures dûes au client Nessy)
-  //      → de 0 h → 43,75 h : comble la dette horaire contractuelle
-  //   2. AU-DELÀ : générer du SURPLUS BONUS (facturé en plus du Min Garanti)
-  //      → > 43,75 h = @ Taux horaire Nessy → ajouté DESSUS du Min Garanti
-  //
-  //   mainFinalCA = Max(Min Garanti, revenu réel) PAR CONSTRUCTION :
-  //   → on prend donc Le Min Garanti si pas assez travaillé (top-up acquis)
-  //   → on prend le réel si on dépasse le Min Garanti grâce au surplus.
-  // =========================================================================
-  const hoursHourlyNessy = mainBilledMin / 60;
-  // ---- Heures remboursement (dette 0 → 43,75 h) ----
+  // ---- DÉCOMPOSITION PALIERS NESSY (tous projets non-externes confondus) ----
+  const hoursHourlyNessy = nessyBilledMin / 60;
   const heuresDette = NESSY.minHoursEq;
   const refundedH = Math.min(hoursHourlyNessy, heuresDette);            // 0 → 43,75
-  const debtRemainH = Math.max(0, heuresDette - hoursHourlyNessy);     // ce qu'il reste à faire pour le client
+  const debtRemainH = Math.max(0, heuresDette - hoursHourlyNessy);     // ce qu'il reste à faire
   const t3h = Math.max(hoursHourlyNessy - heuresDette, 0);             // SURPLUS BONUS au-dessus du Min Garanti
 
-  // Pour les cartes paliers 1/2/3 : on affiche le % D'ACQUITTEMENT DE LA DETTE
-  // (pas le % d'acquisition car l'argent est déjà acquis)
   const socleHours = NESSY.socleHours;
   const t1h = Math.min(refundedH, socleHours);                                         // Remboursement Socle
   const t2h = Math.min(Math.max(refundedH - socleHours, 0), heuresDette - socleHours); // Remboursement Régie Garantie
 
   // CA NESSY = MIN GARANTI (acquis) + SURPLUS RÉEL HORAIRE + FORFAITS
   const minG = getMinGaranti(monthIdx);
-  // Revenu hourly réel NESSY pour heures > minHoursEq (surplus) + forfaits
-  const hourlySurplusEur = Math.max(0, mainHourlyRealEur - (heuresDette * NESSY.regieRate));
-  const mainFlatEur = mainFlatLogs.reduce((a, l) => a + (l.custom_price || 0), 0);
+  const hourlySurplusEur = Math.max(0, nessyHourlyEur - (heuresDette * NESSY.regieRate));
+  const mainFlatEur = nessyFlatEur;
   const bonusEur = hourlySurplusEur + mainFlatEur;
 
-  // t1eur/t2eur = Ce qui a été "comptabilisé" comme Heures REMBOURSÉES (pas euros facturés — c'est déjà dans MinG)
   const t1eur = t1h * NESSY.regieRate;              // 0 → 2000
   const t2eur = t2h * NESSY.regieRate;              // 0 → 1500
   const t3eur = hourlySurplusEur;
 
   const mainRevenusAvantMin = (refundedH * NESSY.regieRate) + bonusEur;
   // Si on a ne serait-ce qu'1 log Nessy → on active le contrat pour le mois → Min Garanti
-  const hasAnyNessy = (mainHourlyLogs.length + mainFlatLogs.length) > 0;
+  const hasAnyNessy = nessyLogCount > 0;
   const mainFinalCA = hasAnyNessy
     ? Math.max(minG, mainRevenusAvantMin)
     : 0;
   const minApplied = hasAnyNessy && mainRevenusAvantMin < minG;
 
-  // Revenus clients secondaires (brut, sans min garanti)
-  let secondaryEur = 0;
-  for (const [cid, v] of byClient) {
-    if (cid !== mainClientId) secondaryEur += v.eur;
-  }
+  const secondaryEur = externalEur;
   const globalCA = mainFinalCA + secondaryEur;
 
   // ---- CASCADE TRÉSORERIE ----
@@ -497,14 +463,13 @@ function aggregateMonth() {
 
   return {
     monthIdx, minG, minApplied,
-    mainClient,
     tiers: { t1: { h: t1h, eur: t1eur }, t2: { h: t2h, eur: t2eur }, t3: { h: t3h, eur: t3eur } },
     mainFlatEur,
     mainRevenusAvantMin,
     mainFinalCA,
     mainHoursHourly: hoursHourlyNessy,
-    mainRealMinutes: mainRealMin,
-    mainBilledMinutes: mainBilledMin,
+    mainRealMinutes: nessyRealMin,
+    mainBilledMinutes: nessyBilledMin,
     secondaryEur,
     globalCA,
     globalRealMin,
@@ -528,9 +493,19 @@ function aggregateMonth() {
 // =============================================================
 // 🎨 RENDU PRINCIPAL
 // =============================================================
-async function refreshPeriod() {
-  await loadClients();
-  await loadLogsForMonth();
+function recomputeMonthLogs() {
+  const start = firstDayOfMonth(STATE.selectedYear, STATE.selectedMonth).getTime();
+  const end = lastDayOfMonth(STATE.selectedYear, STATE.selectedMonth).getTime();
+  STATE.logs = STATE.allLogs.filter((l) => {
+    const t = toMillisSafe(l.date);
+    return t >= start && t <= end;
+  });
+}
+
+/** Rendu complet du tableau de bord à partir de STATE (alimenté en temps réel par les listeners Firestore). */
+function renderAll() {
+  if (!STATE.user) return;
+  recomputeMonthLogs();
   const agg = aggregateMonth();
   populateClientSelects();
   renderHeader(agg);
@@ -541,8 +516,12 @@ async function refreshPeriod() {
   renderWaterfall(agg);
   renderClientsList(agg);
   renderLogs(agg);
+  updateDescList();
   if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
 }
+// Alias conservé pour tous les points d'appel existants (CRUD → re-rendu immédiat,
+// même si le listener temps réel confirmera l'état juste après).
+const refreshPeriod = renderAll;
 
 function renderHeader(agg) {
   const months = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -639,7 +618,7 @@ function renderNessyGauge(agg) {
           </div>
         </div>
         <div class="mt-3 text-[12px] text-zinc-400">
-          Sélectionnez <b>${agg.mainClient?.name || 'NESSY'}</b> dans la saisie rapide ci-dessus, puis encodez vos heures · Le top-up Min Garanti s'appliquera en fin de mois si nécessaire.
+          Sélectionnez un <b>projet Nessy</b> dans la saisie rapide ci-dessus, puis encodez vos heures · Le top-up Min Garanti s'appliquera en fin de mois si nécessaire.
         </div>
       </div>`;
   }
@@ -728,156 +707,47 @@ function renderNessyGauge(agg) {
 }
 
 // =================================================================
-// 🎮 GAMIFIED · MINE KOPEK 3D + SCOREBOARD
+// 🎮 KOPEK CITY · vraie 3D low-poly (Three.js) pilotée par la jauge
 // =================================================================
+let cityInited = false;
+let lastBonusHFlag = 0;
+
+function initCityIfNeeded() {
+  if (cityInited) return;
+  const canvas = document.getElementById('city-canvas');
+  if (!canvas) return;
+  initCity(canvas);
+  cityInited = true;
+}
+
 function renderCity(agg) {
-  // ==========================================================================
-  // KOPEK CITY · VRAI RENDU "CITY BUILDER" 2,5D
-  //  - lecture visuelle façon SimCity / jeu de gestion
-  //  - districts organisés sur un plateau isométrique
-  //  - routes diagonales, lots, carrefour, place centrale, canal
-  //  - bâtiments plus "volumiques" avec faces gauche/droite/toit
-  // ==========================================================================
-  const root = document.getElementById('city-buildings');
-  if (!root) return;
+  initCityIfNeeded();
+  if (!cityInited) return;
 
-  const socleH = NESSY.socleHours;
-  const fullH = NESSY.minHoursEq;
-  const refunded = agg.refundedH || 0;
+  const caps = { socleH: NESSY.socleHours, garantieH: NESSY.minHoursEq };
+  // Seed stable par mois calendaire (indépendant du contrat) → thème/agencement
+  // différent chaque mois, mais identique si on revient sur le même mois.
+  const seedKey = STATE.selectedYear * 12 + STATE.selectedMonth;
+  renderCityScene(agg, caps, seedKey);
+
   const bonusH = agg.tiers?.t3?.h || 0;
-  const soclePct = Math.min(100, (refunded / socleH) * 100);
-  const garantiPct = refunded >= socleH
-    ? Math.min(100, ((refunded - socleH) / (fullH - socleH)) * 100)
-    : 0;
-  const bonusPct = Math.min(150, (bonusH / 12) * 100);
+  if (bonusH > 0.01 && lastBonusHFlag <= 0.01) celebrate();
+  lastBonusHFlag = bonusH;
 
-  const factory = document.getElementById('k-factory');
-  if (factory) {
-    if (agg.mainHoursHourly > 0.01) factory.classList.add('lit');
-    else factory.classList.remove('lit');
-  }
-
-  const districtLots = {
-    socle: [
-      { x: 6, y: 29, type: 'villa' },
-      { x: 15, y: 34, type: 'shop' },
-      { x: 24, y: 29, type: 'villa' },
-      { x: 10, y: 19, type: 'villa' },
-      { x: 20, y: 23, type: 'shop' },
-      { x: 28, y: 18, type: 'villa' },
-    ],
-    garantie: [
-      { x: 34, y: 37, type: 'shop' },
-      { x: 44, y: 42, type: 'midrise' },
-      { x: 55, y: 37, type: 'midrise' },
-      { x: 38, y: 24, type: 'shop' },
-      { x: 49, y: 28, type: 'midrise' },
-      { x: 60, y: 23, type: 'midrise' },
-    ],
-    bonus: [
-      { x: 67, y: 39, type: 'tower' },
-      { x: 79, y: 44, type: 'spire' },
-      { x: 90, y: 39, type: 'tower' },
-      { x: 73, y: 24, type: 'tower' },
-      { x: 85, y: 21, type: 'spire' },
-    ],
-  };
-
-  function completionState(list, pct, index) {
-    const progress = (pct / 100) * list.length;
-    const completed = Math.floor(progress);
-    const hasActive = progress > 0 && completed < list.length;
-    return {
-      built: index < completed,
-      active: hasActive && index === completed,
-      empty: index > completed || (completed === 0 && progress === 0),
-    };
-  }
-
-  function buildingMarkup(type, state, idx) {
-    if (state.empty) return '';
-    const cls = [
-      'k-iso',
-      type,
-      state.built ? 'lit' : '',
-      state.active ? 'construction' : '',
-      idx % 2 === 0 ? 'k-twinkle' : '',
-    ].filter(Boolean).join(' ');
-    return `<div class="${cls}">
-      <div class="top"></div>
-      <div class="left"></div>
-      <div class="right"></div>
-      <div class="front"></div>
-      ${state.active ? '<div class="k-crane"><div class="hook"></div></div>' : ''}
-    </div>`;
-  }
-
-  function lotCluster(zone, pct, list) {
-    return list.map((lot, index) => {
-      const state = completionState(list, pct, index);
-      return `<div class="k-lot ${zone}" style="left:${lot.x}%; bottom:${lot.y}%;">
-        ${buildingMarkup(lot.type, state, index)}
-      </div>`;
-    }).join('');
-  }
-
-  const treePositions = [
-    [31, 19], [35, 14], [63, 18], [67, 13], [95, 19], [92, 13], [58, 47], [26, 42],
-  ];
-  const trees = treePositions.map(([x, y]) =>
-    `<div class="k-stage-tree" style="left:${x}%; bottom:${y}%"></div>`
-  ).join('');
-
-  const crowdPositions = [
-    [47, 29, '#f472b6'], [49, 31, '#60a5fa'], [51, 27, '#34d399'], [53, 29, '#facc15'],
-    [41, 24, '#f59e0b'], [57, 24, '#a78bfa'], [46, 21, '#fb7185'], [54, 21, '#22c55e'],
-  ];
-  const crowds = crowdPositions.map(([x, y, color], idx) =>
-    `<div class="k-crowd-dot" style="left:${x}%; bottom:${y}%; background:${color}; animation: sky-pulse-y ${2.2 + (idx % 3) * 0.4}s ease-in-out infinite; animation-delay:-${idx * 0.25}s;"></div>`
-  ).join('');
-
-  const vans = `
-    <div class="k-van" style="left:4%; bottom:15%; --v1:#60a5fa; --v2:#1d4ed8; animation:diagDriveA 11s linear infinite;"></div>
-    <div class="k-van" style="left:82%; bottom:33%; --v1:#34d399; --v2:#047857; animation:diagDriveB 13s linear infinite -4s;"></div>
-    <div class="k-van" style="left:12%; bottom:15%; --v1:#f59e0b; --v2:#b45309; animation:diagDriveA 15s linear infinite -7s;"></div>
-  `;
-
-  root.innerHTML = `
-    <div class="k-stage">
-      <div class="k-district-band"></div>
-      <div class="k-canal"></div>
-      <div class="k-rail"></div>
-      <div class="k-avenue a1"></div>
-      <div class="k-avenue a2"></div>
-      <div class="k-cross"></div>
-      <div class="k-plaza"></div>
-      <div class="k-district-tag socle" style="left:8%; bottom:57%;">District Socle</div>
-      <div class="k-district-tag garantie" style="left:41%; bottom:61%;">District Garantie</div>
-      <div class="k-district-tag bonus" style="left:73%; bottom:58%;">District Bonus</div>
-      ${lotCluster('socle', soclePct, districtLots.socle)}
-      ${lotCluster('garantie', garantiPct, districtLots.garantie)}
-      ${lotCluster('bonus', bonusPct, districtLots.bonus)}
-      ${trees}
-      ${crowds}
-      ${vans}
-    </div>
-  `;
-
-  // ---------------------------------------------------------------------------
-  // HUD · City Board (infobulle en bas à droite)
-  // ---------------------------------------------------------------------------
-  const pctForBar = Math.min(120,
-    (refunded / fullH) * 100 + Math.min(30, (bonusH / 24) * 30)
-  );
   const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  setText('hud-socle',  `${soclePct.toFixed(0)} %`);
-  setText('hud-garanti', `${garantiPct.toFixed(0)} %`);
-  setText('hud-bonus',  `+${bonusH.toFixed(1).replace('.',',')} h`);
+  const socleH = NESSY.socleHours, fullH = NESSY.minHoursEq;
+  const refunded = agg.refundedH || 0;
+  const soclePct = Math.min(100, (refunded / socleH) * 100);
+  const garantiPct = refunded >= socleH ? Math.min(100, ((refunded - socleH) / (fullH - socleH)) * 100) : 0;
   const population = Math.round(150 + refunded * 28 + bonusH * 60 + agg.secondaryEur / 8);
-  setText('hud-pop',    population.toLocaleString('fr-BE') + ' hab.');
+  setText('hud-socle', `${soclePct.toFixed(0)} %`);
+  setText('hud-garanti', `${garantiPct.toFixed(0)} %`);
+  setText('hud-bonus', `+${bonusH.toFixed(1).replace('.', ',')} h`);
+  setText('hud-pop', population.toLocaleString('fr-BE') + ' hab.');
   setText('hud-acquis', EUR(agg.hasAnyNessy ? agg.minG : 0));
   setText('hud-ca-bonus', EUR(agg.bonusEur || 0));
   const bar = document.getElementById('hud-bar');
+  const pctForBar = Math.min(120, (refunded / fullH) * 100 + Math.min(30, (bonusH / 24) * 30));
   if (bar) bar.style.width = `${pctForBar}%`;
   const label = document.getElementById('hud-label');
   if (label) {
@@ -885,105 +755,6 @@ function renderCity(agg) {
     else if (refunded < fullH) label.textContent = `Engagement ${refunded.toFixed(2).replace('.', ',')} / ${fullH.toFixed(2).replace('.', ',')} h · reste ${agg.debtRemainH.toFixed(2).replace('.', ',')} h`;
     else label.textContent = `Engagement validé · Bonus ${EUR(agg.bonusEur || 0)} · Surplus ${bonusH.toFixed(1).replace('.', ',')} h`;
   }
-
-  // ---------------------------------------------------------------------------
-  // POP-UP BULLE (info-bulle flottante comme Pixar)
-  // ---------------------------------------------------------------------------
-  const pop = document.getElementById('city-pop');
-  if (pop) {
-    pop.classList.remove('hidden');
-    let popHtml = '';
-    if (!agg.hasAnyNessy) {
-      popHtml = `<span class="text-white font-bold">Contrat en attente</span><br><span class="text-zinc-400">Premier encodage nécessaire pour lancer la ville et activer ${EUR(agg.minG)}.</span>`;
-      pop.classList.remove('gain','loss');
-    } else if (refunded < socleH) {
-      popHtml = `<span class="text-white font-bold">Chantier Socle</span><br><span class="text-zinc-400">${soclePct.toFixed(0)}% du district livré · reste <b>${(socleH - refunded).toFixed(2).replace('.', ',')} h</b>.</span>`;
-      pop.classList.remove('gain','loss');
-    } else if (refunded < fullH) {
-      popHtml = `<span class="text-white font-bold">Garantie en construction</span><br><span class="text-zinc-400">${garantiPct.toFixed(0)}% du centre-ville livré · encore <b>${agg.debtRemainH.toFixed(2).replace('.', ',')} h</b>.</span>`;
-      pop.classList.remove('gain','loss');
-    } else if (agg.bonusEur > 50) {
-      popHtml = `<span class="text-emerald-300 font-bold">District Bonus lancé</span><br><span class="text-zinc-300">${bonusH.toFixed(1).replace('.', ',')} h en surplus · <b>+${EUR(agg.bonusEur)}</b> facturables.</span>`;
-      pop.classList.add('gain'); pop.classList.remove('loss');
-    } else {
-      popHtml = `<span class="text-emerald-300 font-bold">Ville stabilisée</span><br><span class="text-zinc-300">Engagement contractuel couvert · continue pour ouvrir le quartier bonus.</span>`;
-      pop.classList.add('gain'); pop.classList.remove('loss');
-    }
-    pop.innerHTML = popHtml;
-  }
-
-  // ---------------------------------------------------------------------------
-  // VÉHICULE SUPPLÉMENTAIRE (camion-citerne d'or) qui apparaît quand BONUS > 0
-  // ---------------------------------------------------------------------------
-  let truckEl = document.getElementById('bonus-truck');
-  if (bonusH > 0.1) {
-    if (!truckEl) {
-      const section = document.getElementById('kopek-city');
-      if (section) {
-        truckEl = document.createElement('div');
-        truckEl.id = 'bonus-truck';
-        truckEl.className = 'k-car';
-        truckEl.style.cssText = `bottom: calc(22% + 52px);
-          --c1: linear-gradient(180deg,#facc15,#ca8a04); --c2: linear-gradient(180deg,#a16207,#713f12);
-          animation: k-car-right 11s linear infinite;
-          transform: scale(1.15);
-          filter: drop-shadow(0 6px 8px rgba(234,179,8,0.45));`;
-        truckEl.innerHTML = `<div class="cb" style="width: 92px; background: linear-gradient(180deg, #fde047 0%, #ca8a04 100%);
-          box-shadow: inset 0 -6px 0 rgba(0,0,0,0.2), inset 0 8px 0 rgba(255,255,255,0.28), 0 0 24px rgba(250,204,21,0.35);">
-          <div style="position:absolute; inset: 25% 8% 12% 38%;
-            background: repeating-linear-gradient(45deg,#0ea5e9 0 6px,#082f49 6px 12px);
-            border-radius: 8px; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.2);"></div>
-          </div><div class="cw"></div>`;
-        section.appendChild(truckEl);
-      }
-    }
-  } else if (truckEl) {
-    truckEl.remove();
-  }
-
-  // ---------------------------------------------------------------------------
-  // HÉLICOPTÈRE BONUS qui survole quand bonus > 2h
-  // ---------------------------------------------------------------------------
-  let heliEl = document.getElementById('bonus-heli');
-  if (bonusH > 2) {
-    if (!heliEl) {
-      const sky = document.querySelector('.k-sky-wrap');
-      if (sky) {
-        heliEl = document.createElement('div');
-        heliEl.id = 'bonus-heli';
-        heliEl.style.cssText = `position:absolute; top:15%; left:-10%;
-          font-size: 40px; filter: drop-shadow(0 8px 10px rgba(15,23,42,0.35));
-          animation: sky-drift-x 22s linear infinite reverse; animation-delay:-4s;`;
-        heliEl.textContent = '🚁';
-        sky.appendChild(heliEl);
-      }
-    }
-  } else if (heliEl) {
-    heliEl.remove();
-  }
-
-  // ---------------------------------------------------------------------------
-  // PETIT EFFET FUMÉE RÉGULIER (si on encode du temps cette heure-ci)
-  // ---------------------------------------------------------------------------
-  maybePuffSmoke(agg.mainHoursHourly > 0.01);
-
-  // Re-render icônes lucide (le HUD City Board en utilise)
-  if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
-}
-
-// Déclencher un (ou 2) puits de fumée si usine allumée (pas d'accumulation)
-let puffCooldown = 0;
-function maybePuffSmoke(shouldRun) {
-  if (!shouldRun) return;
-  const smoke = document.getElementById('k-smoke');
-  if (!smoke) return;
-  if (puffCooldown > 0) return;
-  smoke.style.animation = 'none';
-  // reflow
-  void smoke.offsetWidth;
-  smoke.style.animation = `puf ${(2.6 + Math.random() * 0.8).toFixed(2)}s ease-out forwards`;
-  puffCooldown = 1;
-  setTimeout(() => { puffCooldown = 0; }, 2400);
 }
 
 function renderPocket(agg) {
@@ -1045,26 +816,27 @@ function renderWaterfall(agg) {
 }
 
 function renderClientsList(agg) {
-  const mainId = agg.mainClient?.id;
   const entries = Array.from(agg.byClient.entries());
   if (entries.length === 0) {
-    $('#clients-list').innerHTML = `<div class="text-xs text-zinc-500 p-4 border border-dashed border-zinc-800 rounded-xl text-center">Aucun encodage ce mois-ci.<br>Créez un client via le bouton <b>"+ Nouveau Client"</b>.</div>`;
+    $('#clients-list').innerHTML = `<div class="text-xs text-zinc-500 p-4 border border-dashed border-zinc-800 rounded-xl text-center">Aucun encodage ce mois-ci.<br>Créez un projet via le bouton <b>"+ Nouveau Projet"</b>.</div>`;
     return;
   }
   entries.sort((a, b) => b[1].eur - a[1].eur);
   const totalEur = entries.reduce((s, [, v]) => s + v.eur, 0) || 1;
   const html = entries.map(([cid, v]) => {
-    const isMain = cid === mainId;
+    const isExternal = !!v.client?.is_external;
     const pct = Math.max(6, (v.eur / totalEur) * 100);
-    const grad = isMain
-      ? 'from-indigo-500/80 via-fuchsia-500/70 to-emerald-400/70'
-      : 'from-zinc-500/60 via-zinc-400/60 to-zinc-300/50';
+    const grad = isExternal
+      ? 'from-zinc-500/60 via-zinc-400/60 to-zinc-300/50'
+      : 'from-indigo-500/80 via-fuchsia-500/70 to-emerald-400/70';
     return `<div class="rounded-xl p-3 border border-zinc-800 bg-zinc-900/30 hover:bg-zinc-900/60 transition">
       <div class="flex items-start justify-between gap-3 mb-2">
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 mb-0.5">
             <div class="font-semibold text-sm truncate">${v.client?.name || 'N/A'}</div>
-            ${isMain ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase bg-gradient-to-r from-indigo-500/20 to-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-500/30"><i data-lucide="crown" class="w-2.5 h-2.5"></i> Principal</span>` : ''}
+            ${isExternal
+              ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase bg-zinc-800 text-zinc-400 border border-zinc-700"><i data-lucide="building" class="w-2.5 h-2.5"></i> Externe</span>`
+              : `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase bg-gradient-to-r from-indigo-500/20 to-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-500/30"><i data-lucide="crown" class="w-2.5 h-2.5"></i> Nessy</span>`}
           </div>
           <div class="text-[11px] text-zinc-500">${v.count} entrée${v.count > 1 ? 's' : ''} · ${HH(v.realMin)} réel · ${HHdecimal(v.billedMin)} h facturé</div>
         </div>
@@ -1099,9 +871,9 @@ function renderLogs(agg) {
     realMin += rm;
     const isFlat = l.custom_price != null && l.custom_price > 0;
     let eur = isFlat ? l.custom_price : (bm / 60) * (l.rate_applied || 0);
-    const isMain = l.client_id === agg.mainClient?.id;
-    if (isMain) { mainBilled += bm; mainEur += eur; } else otherEur += eur;
     const client = getClient(l.client_id);
+    const isMain = !client?.is_external;
+    if (isMain) { mainBilled += bm; mainEur += eur; } else otherEur += eur;
     const diff = bm - rm;
     const roundedPct = diff > 0;
     const badge = roundedPct
@@ -1112,7 +884,7 @@ function renderLogs(agg) {
       <td class="px-4 sm:px-5 py-3 min-w-[160px]">
         <div class="flex items-center gap-2">
           <div class="w-1 h-1.5 rounded-full ${isMain ? 'bg-fuchsia-400' : 'bg-zinc-600'}"></div>
-          <span class="text-sm truncate ${isMain ? 'text-zinc-100 font-medium' : 'text-zinc-300'}">${client?.name || 'Client supprimé'}</span>
+          <span class="text-sm truncate ${isMain ? 'text-zinc-100 font-medium' : 'text-zinc-300'}">${client?.name || 'Projet supprimé'}</span>
         </div>
       </td>
       <td class="px-4 sm:px-5 py-3 min-w-[220px] text-sm text-zinc-200"><span class="truncate inline-block max-w-full">${l.description || ''}</span></td>
@@ -1129,8 +901,11 @@ function renderLogs(agg) {
           : `<span class="font-mono chip">${EUR(l.rate_applied || 0)}<span class="text-zinc-500 text-xs">/h</span></span>`}
       </td>
       <td class="px-4 sm:px-5 py-3 text-right hidden sm:table-cell whitespace-nowrap font-mono chip font-semibold">${EUR(eur)}</td>
-      <td class="px-4 sm:px-5 py-3 text-right w-16">
+      <td class="px-4 sm:px-5 py-3 text-right w-24">
         <div class="flex items-center justify-end gap-1 opacity-50 group-hover:opacity-100 transition">
+          <button data-dup class="p-1.5 hover:bg-emerald-500/20 text-emerald-300 rounded" title="Dupliquer (répéter cette tâche)">
+            <i data-lucide="copy-plus" class="w-4 h-4"></i>
+          </button>
           <button data-edit class="p-1.5 hover:bg-indigo-500/20 text-indigo-300 rounded" title="Modifier">
             <i data-lucide="edit-3" class="w-4 h-4"></i>
           </button>
@@ -1145,8 +920,8 @@ function renderLogs(agg) {
   tfoot.innerHTML = `<tr>
     <td class="px-4 sm:px-5 py-3" colspan="3">
       <div class="flex items-center gap-2 flex-wrap">
-        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold"><i data-lucide="crown" class="w-3 h-3"></i> Principal · ${HHdecimal(mainBilled)} h · ${EUR(mainEur)}</span>
-        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800/80 text-zinc-300 border border-zinc-700 text-[11px] font-semibold">Autres clients · ${EUR(otherEur)}</span>
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold"><i data-lucide="crown" class="w-3 h-3"></i> Nessy · ${HHdecimal(mainBilled)} h · ${EUR(mainEur)}</span>
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800/80 text-zinc-300 border border-zinc-700 text-[11px] font-semibold">Clients externes · ${EUR(otherEur)}</span>
       </div>
     </td>
     <td class="px-4 sm:px-5 py-3 text-right whitespace-nowrap">
@@ -1174,18 +949,34 @@ function renderLogs(agg) {
       } catch { toast('Erreur suppression', 'alert-circle', 'danger'); }
     });
     tr.querySelector('[data-edit]').addEventListener('click', () => openEditLog(log));
+    tr.querySelector('[data-dup]').addEventListener('click', () => duplicateLogIntoQuickForm(log));
   });
 }
 
 // =============================================================
 // ⚡ SAISIE RAPIDE
 // =============================================================
+const LAST_CLIENT_KEY = 'kopek_last_client_id';
+
 function bindQuickForm() {
   const form = $('#quick-form');
   $('#q-date').value = fmtDateInput(new Date());
   $('#q-min').addEventListener('input', updateQuickRoundInfo);
   $('#q-type').addEventListener('change', syncQuickRateFromType);
-  $('#q-client').addEventListener('change', syncQuickRateFromClient);
+  $('#q-client').addEventListener('change', () => {
+    syncQuickRateFromClient();
+    localStorage.setItem(LAST_CLIENT_KEY, $('#q-client').value);
+    updateDescList();
+  });
+  $$('.q-preset').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      $('#q-min').value = btn.getAttribute('data-preset-min');
+      updateQuickRoundInfo();
+      $$('.q-preset').forEach((b) => b.classList.remove('border-indigo-500/70', 'text-indigo-200', 'bg-indigo-500/10'));
+      btn.classList.add('border-indigo-500/70', 'text-indigo-200', 'bg-indigo-500/10');
+      $('#q-desc').focus();
+    });
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1219,14 +1010,15 @@ function bindQuickForm() {
     try {
       await createLog(payload);
       toast('Encodage ajouté', 'check-circle');
-      // reset quick form
+      // reset quick form (garde le projet + le tarif sélectionnés pour enchaîner vite)
       $('#q-desc').value = ''; $('#q-min').value = '';
+      $$('.q-preset').forEach((b) => b.classList.remove('border-indigo-500/70', 'text-indigo-200', 'bg-indigo-500/10'));
       updateQuickRoundInfo();
-      syncQuickRateFromClient();
+      updateDescList();
       refreshPeriod();
-      // Petit effet bonus : usine en ébullition + bonus confetti si la somme nous fait passer en bonus
-      maybePuffSmoke(true);
-      setTimeout(maybePuffSmoke, 800, true);
+      $('#q-desc').focus();
+      // NB: le feu d'artifice de confettis 3D se déclenche automatiquement dans
+      // renderCity() dès que ce nouvel encodage fait franchir le seuil du Bonus.
     } catch (ex) {
       console.warn(ex);
       toast('Erreur d\'enregistrement · index Firestore requis ?', 'alert-circle', 'danger');
@@ -1274,25 +1066,74 @@ function syncQuickRateFromClient() {
   if (c) $('#q-rate').value = c.default_rate || 0;
 }
 
+/** Suggestions de description (autocomplete) : dernières descriptions distinctes du projet sélectionné. */
+function updateDescList() {
+  const dl = $('#q-desc-list');
+  if (!dl) return;
+  const cid = $('#q-client').value;
+  const seen = new Set();
+  const recent = [];
+  for (let i = STATE.allLogs.length - 1; i >= 0 && recent.length < 12; i--) {
+    const l = STATE.allLogs[i];
+    if (cid && l.client_id !== cid) continue;
+    const d = (l.description || '').trim();
+    if (!d || seen.has(d)) continue;
+    seen.add(d);
+    recent.push(d);
+  }
+  dl.innerHTML = recent.map((d) => `<option value="${d.replace(/"/g, '&quot;')}"></option>`).join('');
+}
+
+/** Pré-remplit la saisie rapide à partir d'un encodage existant (répéter une tâche similaire). */
+function duplicateLogIntoQuickForm(log) {
+  $('#q-client').value = log.client_id;
+  syncQuickRateFromClient();
+  updateDescList();
+  $('#q-desc').value = log.description || '';
+  $('#q-min').value = '';
+  const isFlat = log.custom_price != null && log.custom_price > 0;
+  $('#q-type').value = isFlat ? 'flat' : 'hourly';
+  syncQuickRateFromType();
+  if (isFlat) $('#q-rate').value = log.custom_price;
+  else if (log.rate_applied) $('#q-rate').value = log.rate_applied;
+  updateQuickRoundInfo();
+  localStorage.setItem(LAST_CLIENT_KEY, log.client_id);
+  $('#quick-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  $('#q-min').focus();
+  toast('Encodage dupliqué · ajustez la durée', 'copy-plus');
+}
+
 // =============================================================
 // 🗂️ POPULATE CLIENT DROPDOWNS
 // =============================================================
 function populateClientSelects() {
-  const main = getMainClient();
   const list = STATE.clients.slice().sort((a, b) => {
-    if (a.is_main_contract && !b.is_main_contract) return -1;
-    if (!a.is_main_contract && b.is_main_contract) return 1;
-    return a.name.localeCompare(b.name);
+    if (!!a.is_external !== !!b.is_external) return a.is_external ? 1 : -1; // projets Nessy d'abord
+    return (a.name || '').localeCompare(b.name || '');
   });
+
+  // Saisie rapide : on préserve la sélection en cours pour ne pas la faire sauter
+  // à chaque mise à jour temps réel (onSnapshot) pendant que l'utilisateur tape.
   const qSel = $('#q-client');
-  qSel.innerHTML = list.map((c) => `<option value="${c.id}">${c.name}${c.is_main_contract ? '  👑' : ''} · ${c.default_rate}€/h</option>`).join('');
-  // Si main client existe → présélection
-  if (main) qSel.value = main.id;
-  syncQuickRateFromClient();
+  const prevVal = qSel.value;
+  qSel.innerHTML = list.map((c) => `<option value="${c.id}">${c.name}${c.is_external ? ' · Externe' : ''} · ${c.default_rate ?? 0}€/h</option>`).join('');
+  let nextVal = prevVal;
+  if (!list.some((c) => c.id === prevVal)) {
+    const lastUsed = localStorage.getItem(LAST_CLIENT_KEY);
+    nextVal = (lastUsed && list.some((c) => c.id === lastUsed)) ? lastUsed : (list[0]?.id || '');
+  }
+  qSel.value = nextVal;
+  if (nextVal !== STATE.lastPopulatedClientId) {
+    STATE.lastPopulatedClientId = nextVal;
+    syncQuickRateFromClient();
+    updateDescList();
+  }
 
   // Edit modal
   const eSel = $('#e-client');
-  eSel.innerHTML = list.map((c) => `<option value="${c.id}">${c.name}${c.is_main_contract ? '  👑' : ''}</option>`).join('');
+  const prevEVal = eSel.value;
+  eSel.innerHTML = list.map((c) => `<option value="${c.id}">${c.name}${c.is_external ? ' · Externe' : ''}</option>`).join('');
+  if (list.some((c) => c.id === prevEVal)) eSel.value = prevEVal;
 }
 
 // =============================================================
@@ -1325,10 +1166,10 @@ function bindModals() {
 function openClientModal(client) {
   STATE.editingClientId = client ? client.id : null;
   const err = $('#client-error'); err.classList.add('hidden');
-  $('#client-modal-title').textContent = client ? 'Modifier un Client' : 'Nouveau Client';
+  $('#client-modal-title').textContent = client ? 'Modifier le Projet' : 'Nouveau Projet';
   $('#c-name').value = client ? client.name : '';
-  $('#c-rate').value = client ? (client.default_rate ?? 80) : 80;
-  $('#c-main').checked = client ? !!client.is_main_contract : false;
+  $('#c-rate').value = client ? (client.default_rate ?? NESSY.regieRate) : NESSY.regieRate;
+  $('#c-main').checked = client ? !!client.is_external : false;
   $('#client-modal').classList.remove('hidden');
   setTimeout(() => $('#c-name').focus(), 50);
 }
@@ -1337,22 +1178,21 @@ async function handleClientFormSubmit(e) {
   const err = $('#client-error'); err.classList.add('hidden');
   const name = $('#c-name').value.trim();
   const rate = parseFloat($('#c-rate').value || '0');
-  const isMain = $('#c-main').checked;
+  const isExternal = $('#c-main').checked;
   if (!name) { err.textContent = 'Nom requis'; err.classList.remove('hidden'); return; }
   if (isNaN(rate) || rate < 0) { err.textContent = 'Taux invalide'; err.classList.remove('hidden'); return; }
   try {
     if (STATE.editingClientId) {
-      await updateClient(STATE.editingClientId, { name, default_rate: rate, is_main_contract: isMain });
-      toast('Client mis à jour', 'check');
+      await updateClient(STATE.editingClientId, { name, default_rate: rate, is_external: isExternal });
+      toast('Projet mis à jour', 'check');
     } else {
-      await createClient({ name, default_rate: rate, is_main_contract: isMain });
-      toast('Client créé', 'check');
+      await createClient({ name, default_rate: rate, is_external: isExternal });
+      toast('Projet créé', 'check');
     }
     $('#client-modal').classList.add('hidden');
-    refreshPeriod();
   } catch (ex) {
     console.warn(ex);
-    err.textContent = 'Erreur · vérifiez Firestore rules.';
+    err.textContent = 'Erreur · vérifiez les règles Firestore (l\'utilisateur doit pouvoir écrire dans "clients").';
     err.classList.remove('hidden');
   }
 }
@@ -1360,22 +1200,22 @@ async function handleClientFormSubmit(e) {
 function openManageClients() {
   const body = $('#manage-body');
   if (STATE.clients.length === 0) {
-    body.innerHTML = `<div class="text-sm text-zinc-500 text-center py-8">Aucun client.</div>`;
+    body.innerHTML = `<div class="text-sm text-zinc-500 text-center py-8">Aucun projet.</div>`;
   } else {
     body.innerHTML = STATE.clients.map((c) => `
       <div class="rounded-xl p-4 border border-zinc-800 bg-zinc-900/40 flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3 flex-1 min-w-0">
-          <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-none ${c.is_main_contract ? 'bg-gradient-to-br from-indigo-500/20 via-fuchsia-500/20 to-emerald-500/20 border border-fuchsia-500/30' : 'bg-zinc-800 border border-zinc-700'}">
-            ${c.is_main_contract ? '<i data-lucide="crown" class="w-5 h-5 text-fuchsia-300"></i>' : '<i data-lucide="building" class="w-5 h-5 text-zinc-400"></i>'}
+          <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-none ${!c.is_external ? 'bg-gradient-to-br from-indigo-500/20 via-fuchsia-500/20 to-emerald-500/20 border border-fuchsia-500/30' : 'bg-zinc-800 border border-zinc-700'}">
+            ${!c.is_external ? '<i data-lucide="crown" class="w-5 h-5 text-fuchsia-300"></i>' : '<i data-lucide="building" class="w-5 h-5 text-zinc-400"></i>'}
           </div>
           <div class="min-w-0 flex-1">
             <div class="font-semibold truncate">${c.name}</div>
-            <div class="text-[11px] text-zinc-500 font-mono chip">Taux ${c.default_rate || 0} €/h${c.is_main_contract ? ' · Contrat Principal' : ''}</div>
+            <div class="text-[11px] text-zinc-500 font-mono chip">Taux ${c.default_rate || 0} €/h${c.is_external ? ' · Client externe (hors jauge)' : ' · Projet Nessy (jauge)'}</div>
           </div>
         </div>
         <div class="flex items-center gap-1.5">
-          <button data-setmain="${c.id}" ${c.is_main_contract ? 'disabled' : ''} class="px-3 py-1.5 text-xs rounded-md ${c.is_main_contract ? 'bg-fuchsia-500/10 text-fuchsia-300 border border-fuchsia-500/30 cursor-default' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700'}">
-            ${c.is_main_contract ? '👑 Principal' : 'Définir Principal'}
+          <button data-toggleext="${c.id}" class="px-3 py-1.5 text-xs rounded-md ${c.is_external ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700' : 'bg-fuchsia-500/10 text-fuchsia-300 border border-fuchsia-500/30'}">
+            ${c.is_external ? 'Marquer Nessy' : 'Marquer Externe'}
           </button>
           <button data-editc="${c.id}" class="px-3 py-1.5 text-xs rounded-md bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
             <i data-lucide="pencil" class="w-3 h-3 inline mr-1"></i>Modifier
@@ -1397,16 +1237,19 @@ function openManageClients() {
   }));
   $$('#manage-body [data-delc]').forEach((b) => b.addEventListener('click', async () => {
     const id = b.getAttribute('data-delc');
-    if (!confirm('Supprimer ce client ? Les encodages liés seront orphelins.')) return;
-    try { await deleteClient(id); toast('Client supprimé', 'trash', 'warn'); refreshPeriod(); }
+    if (!confirm('Supprimer ce projet ? Les encodages liés deviendront orphelins.')) return;
+    try { await deleteClient(id); toast('Projet supprimé', 'trash', 'warn'); openManageClients(); }
     catch { /* handled toast */ }
   }));
-  $$('#manage-body [data-setmain]').forEach((b) => b.addEventListener('click', async () => {
-    const id = b.getAttribute('data-setmain');
+  $$('#manage-body [data-toggleext]').forEach((b) => b.addEventListener('click', async () => {
+    const id = b.getAttribute('data-toggleext');
     const c = STATE.clients.find((x) => x.id === id);
-    if (!c || c.is_main_contract) return;
-    try { await updateClient(id, { is_main_contract: true }); toast(c.name + ' · Contrat principal', 'crown'); refreshPeriod(); }
-    catch { toast('Erreur mise à jour', 'alert-circle', 'danger'); }
+    if (!c) return;
+    try {
+      await updateClient(id, { is_external: !c.is_external });
+      toast(c.name + (c.is_external ? ' · Projet Nessy' : ' · Client externe'), 'check');
+      openManageClients();
+    } catch { toast('Erreur mise à jour', 'alert-circle', 'danger'); }
   }));
 }
 
@@ -1461,7 +1304,7 @@ async function handleEditLogSubmit(e) {
 function exportCSV() {
   const agg = aggregateMonth();
   const months = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
-  const headers = ['Date', 'Client', 'Description', 'Min Réelles', 'Min Facturées', 'Durée (h)', 'Type', 'Tarif appliqué (€/h ou forfait)', '€ HTVA'];
+  const headers = ['Date', 'Projet', 'Description', 'Min Réelles', 'Min Facturées', 'Durée (h)', 'Type', 'Tarif appliqué (€/h ou forfait)', '€ HTVA'];
   const rows = [headers];
   for (const l of STATE.logs) {
     const client = getClient(l.client_id);
@@ -1469,7 +1312,7 @@ function exportCSV() {
     const eur = isFlat ? l.custom_price : ((l.billed_minutes || 0) / 60) * (l.rate_applied || 0);
     rows.push([
       fmtDateBE(l.date),
-      client?.name || 'Client supprimé',
+      client?.name || 'Projet supprimé',
       (l.description || '').replace(/"/g, '""'),
       String(l.real_minutes || 0),
       String(l.billed_minutes || 0),
