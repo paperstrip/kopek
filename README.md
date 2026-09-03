@@ -19,13 +19,21 @@ Aucune étape de build n'est nécessaire pour la faire tourner : `index.html` pe
 ## Vider le cache après un déploiement
 
 Les navigateurs (surtout Safari iOS) gardent longtemps les anciens fichiers.
-Chaque ressource est donc appelée avec un numéro de version : `styles.css?v=…`,
-`app.js?v=…`, etc. **Après chaque modification, incrémentez cette version**
-(une simple date suffit) partout où elle apparaît :
+Deux protections :
+
+1. Chaque ressource est appelée avec un numéro de version (`styles.css?v=…`).
+2. `index.html` lui-même peut être périmé — un `?v=` n'y change rien. La page
+   compare donc au chargement sa version embarquée à celle de `version.json`
+   (jamais mis en cache) et se recharge une fois sur une URL différente si elles
+   diffèrent.
+
+**À chaque déploiement, incrémentez la version dans `version.json` ET dans les
+fichiers** (une simple date suffit) :
 
 ```bash
-grep -rl 'v=2026-09-03-5' index.html app.js city3d.js vendor/ \
-  | xargs sed -i 's/v=2026-09-03-5/v=2026-09-04-1/g'
+OLD=2026-09-03-6; NEW=2026-09-04-1
+grep -rl "$OLD" index.html app.js city3d.js vendor/ version.json \
+  | xargs sed -i "s/$OLD/$NEW/g"
 ```
 
 Sans ça, un téléphone peut continuer à exécuter l'ancien JavaScript avec le

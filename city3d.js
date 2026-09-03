@@ -3,8 +3,8 @@
 // Pilotée par la progression des 3 paliers du contrat (Socle / Garantie / Bonus).
 // La composition (palette, formes, jitter) change chaque mois via un seed.
 // =============================================================================
-import * as THREE from './vendor/three/three.module.js?v=2026-09-03-5';
-import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-03-5';
+import * as THREE from './vendor/three/three.module.js?v=2026-09-03-6';
+import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-03-6';
 
 // ---- PRNG déterministe (mulberry32) — même seed = même ville ----
 function mulberry32(seed) {
@@ -23,12 +23,12 @@ function lerp(a, b, t) { return a + (b - a) * t; }
 // JAMAIS : elle reprend celle de son palier dans la jauge (indigo = Socle,
 // fuchsia = Garantie, émeraude = Bonus) pour qu'on relie les deux d'un coup d'œil.
 const THEMES = [
-  { name: 'Nuit indigo',  sky: ['#141c3a', '#0a0f22'], ground: '#1b2440', trees: '#2f6f57' },
-  { name: 'Nuit violette', sky: ['#1b1636', '#0b0a1e'], ground: '#221c40', trees: '#356a5e' },
-  { name: 'Nuit océan',   sky: ['#0f2138', '#070f1f'], ground: '#152a42', trees: '#2a6f66' },
-  { name: 'Nuit prune',   sky: ['#231733', '#0d0918'], ground: '#271b3d', trees: '#3a6b52' },
-  { name: 'Nuit ardoise', sky: ['#16203a', '#090d1c'], ground: '#1e2942', trees: '#2d6b5b' },
-  { name: 'Nuit sapin',   sky: ['#11253a', '#060e1c'], ground: '#173049', trees: '#2f7360' },
+  { name: 'Nuit indigo',   sky: ['#25325e', '#111936'], ground: '#33406b', trees: '#43a17c' },
+  { name: 'Nuit violette', sky: ['#2c2456', '#161232'], ground: '#3a2f68', trees: '#4aa088' },
+  { name: 'Nuit océan',    sky: ['#1c3a5c', '#0e1d33'], ground: '#254a6e', trees: '#3da393' },
+  { name: 'Nuit prune',    sky: ['#3a2653', '#1a1030'], ground: '#43305f', trees: '#4f9d78' },
+  { name: 'Nuit ardoise',  sky: ['#243156', '#10182e'], ground: '#32405f', trees: '#419b85' },
+  { name: 'Nuit sapin',    sky: ['#1a3b56', '#0c1c2e'], ground: '#22496b', trees: '#43a68d' },
 ];
 
 // Couleurs de palier, identiques à celles de la jauge et des badges.
@@ -40,7 +40,7 @@ const TIER_COLORS = {
 
 // Corps de bâtiments : ardoises sombres, pour que ce soit la couleur du palier
 // (toit) et les fenêtres allumées qui ressortent.
-const BODY_COLORS = ['#334155', '#3b4a63', '#2c3a52', '#41506b'];
+const BODY_COLORS = ['#5b6b86', '#67789a', '#526283', '#71829f'];
 
 // Un quartier par palier de la jauge, dans l'ordre où on les remplit.
 const DISTRICTS = [
@@ -195,9 +195,9 @@ export function initCity(canvas) {
   controls.autoRotate = true;
   controls.autoRotateSpeed = 0.35;
 
-  const hemi = new THREE.HemisphereLight('#5b6fa8', '#0f172a', 0.75);
+  const hemi = new THREE.HemisphereLight('#8ea4dd', '#243049', 1.05);
   scene.add(hemi);
-  sunLight = new THREE.DirectionalLight('#aebde8', 1.05);
+  sunLight = new THREE.DirectionalLight('#dbe6ff', 1.35);
   sunLight.position.set(7, 11, 5);
   sunLight.castShadow = true;
   sunLight.shadow.mapSize.set(1024, 1024);
@@ -212,6 +212,24 @@ export function initCity(canvas) {
   cityGroup = new THREE.Group(); scene.add(cityGroup);
   carsGroup = new THREE.Group(); scene.add(carsGroup);
   confettiGroup = new THREE.Group(); scene.add(confettiGroup);
+
+  canvas.addEventListener('webglcontextlost', (e) => {
+    // preventDefault() est indispensable : sans lui le contexte n'est jamais restauré.
+    e.preventDefault();
+    if (raf) cancelAnimationFrame(raf);
+    raf = null;
+    console.warn('[kopek] contexte WebGL perdu');
+  }, false);
+  canvas.addEventListener('webglcontextrestored', () => {
+    console.warn('[kopek] contexte WebGL restauré · reconstruction');
+    currentLayout = null;
+    onResize();
+    if (lastBuildArgs) {
+      buildCity(lastBuildArgs.rngFactory(), lastBuildArgs.theme, lastBuildArgs.progress, currentLayout);
+      frameCity();
+    }
+    if (!raf) raf = requestAnimationFrame(tick);
+  }, false);
 
   clock = new THREE.Clock();
   onResize();
@@ -512,7 +530,7 @@ function buildCity(rng, theme, progress, layout) {
         // pas une simple dalle vide — on voit ce qu'il reste à construire.
         const pad = new THREE.Mesh(
           new THREE.BoxGeometry(0.86, 0.05, 0.74),
-          new THREE.MeshStandardMaterial({ color: '#0f172a', roughness: 1 })
+          new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 1 })
         );
         pad.position.set(slot.x, PLATE_TOP + 0.025, slot.z);
         pad.receiveShadow = true;

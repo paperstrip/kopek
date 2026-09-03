@@ -14,7 +14,7 @@ import {
   Timestamp,
   serverTimestamp,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-03-5';
+} from './firebase-config.js?v=2026-09-03-6';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -752,7 +752,7 @@ async function ensureCityLoaded() {
   if (cityStatus === 'ready' || cityStatus === 'loading' || cityStatus === 'failed') return;
   cityStatus = 'loading';
   try {
-    cityMod = await import('./city3d.js?v=2026-09-03-5');
+    cityMod = await import('./city3d.js?v=2026-09-03-6');
     const canvas = document.getElementById('city-canvas');
     if (!canvas) throw new Error('canvas #city-canvas introuvable');
     cityMod.initCity(canvas);

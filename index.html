@@ -3,6 +3,30 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
+<script>
+  // Le versionnage ?v=… ne protège que les fichiers JS/CSS : le navigateur peut
+  // très bien garder un index.html périmé (Safari iOS le fait longtemps), et on
+  // se retrouve avec un vieux HTML qui charge du vieux JS. On compare donc la
+  // version embarquée à celle publiée dans version.json (jamais mise en cache),
+  // et on recharge une seule fois sur une URL différente si ça diffère.
+  window.KOPEK_VERSION = '2026-09-03-6';
+  (function () {
+    try {
+      fetch('./version.json?t=' + Date.now(), { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j || !j.version || j.version === window.KOPEK_VERSION) return;
+          var key = 'kopek_reloaded_' + j.version;
+          if (sessionStorage.getItem(key)) return;   // une seule tentative
+          sessionStorage.setItem(key, '1');
+          location.replace(location.pathname + '?v=' + encodeURIComponent(j.version));
+        })
+        .catch(function () {});
+    } catch (e) {}
+  })();
+</script>
+
 <title>kopek · Cockpit Financier</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -10,7 +34,7 @@
 <!-- Feuille Tailwind compilée et commitée (styles.css) : le CDN cdn.tailwindcss.com
      est un outil de DEV qui recompile le CSS dans le navigateur à chaque chargement.
      Pour régénérer après avoir ajouté des classes : voir README.md -->
-<link rel="stylesheet" href="./styles.css?v=2026-09-03-5">
+<link rel="stylesheet" href="./styles.css?v=2026-09-03-6">
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 </head>
 <body class="min-h-screen text-zinc-100 font-sans relative overflow-x-hidden">
@@ -134,90 +158,6 @@
 
     <!-- ===== BENTO GRID ===== -->
     <div class="grid grid-cols-12 auto-rows-min gap-4 lg:gap-5">
-
-      <!-- ============================================================= -->
-      <!-- BENTO · KOPEK CITY · ville 3D low-poly (Three.js vendoré en local) -->
-      <!-- Le chantier avance avec la jauge ; thème et agencement changent -->
-      <!-- chaque mois (seed = année×12+mois).                             -->
-      <!-- ============================================================= -->
-      <section id="kopek-city" class="col-span-12 relative rounded-3xl card-hover overflow-hidden select-none h-[420px] sm:h-[520px] lg:h-[620px]"
-        style="background:#0b1120; border:1px solid rgba(129,140,248,0.3);
-               box-shadow: 0 40px 120px -40px rgba(99,102,241,0.55), inset 0 1px 0 rgba(255,255,255,0.05);">
-
-        <canvas id="city-canvas" class="absolute inset-0 w-full h-full block" aria-label="Ville Kopek 3D · avancement du contrat Nessy"></canvas>
-
-        <!-- Affiché uniquement si la 3D ne peut pas démarrer (WebGL indisponible, fichier manquant…) -->
-        <div id="city-fallback" class="hidden absolute inset-0 flex flex-col items-center justify-center text-center px-6 gap-2">
-          <i data-lucide="box" class="w-8 h-8 text-indigo-400/70"></i>
-          <div class="text-sm font-semibold text-zinc-300">Vue 3D indisponible sur cet appareil</div>
-          <div class="text-[11px] text-zinc-500 max-w-xs">Les chiffres ci-dessous restent exacts, seul le rendu de la ville est désactivé.</div>
-          <code id="city-fallback-detail" class="text-[10px] text-zinc-600 font-mono mt-1"></code>
-        </div>
-
-        <!-- Panneaux indicateurs quartiers -->
-        <div class="absolute left-3 sm:left-6 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
-                    bg-indigo-500/15 border border-indigo-400/40 text-indigo-300 backdrop-blur pointer-events-none">
-          Socle · 25 h
-        </div>
-        <div class="absolute left-1/2 -translate-x-1/2 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
-                    bg-fuchsia-500/15 border border-fuchsia-400/40 text-fuchsia-300 backdrop-blur pointer-events-none">
-          Garantie
-        </div>
-        <div class="absolute right-3 sm:right-6 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
-                    bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 backdrop-blur pointer-events-none">
-          Bonus
-        </div>
-
-        <!-- Indice d'interaction (desktop seulement : sur mobile le bandeau occupe le bas) -->
-        <div class="hidden sm:flex absolute left-1/2 -translate-x-1/2 bottom-3 text-[10px] text-white/35 tracking-wide pointer-events-none items-center gap-1.5">
-          <i data-lucide="move" class="w-3 h-3"></i> Glissez pour tourner autour de la ville
-        </div>
-
-        <!-- ================= HUD =================
-             Mobile : bandeau fin en bas, pour ne pas masquer la ville.
-             sm+ : carte flottante détaillée en bas à droite. -->
-        <div class="absolute left-2 right-2 bottom-2 sm:left-auto sm:right-4 sm:bottom-4 sm:w-[20rem] rounded-2xl p-2.5 sm:p-3.5 backdrop-blur-xl pointer-events-none
-                    bg-zinc-950/75 border border-white/10 shadow-[0_30px_60px_-10px_rgba(0,0,0,0.7)]
-                    grid grid-cols-2 gap-2 sm:gap-2.5 text-[11px] leading-tight">
-          <div class="col-span-2 hidden sm:flex items-center gap-2 pb-2 mb-0.5 border-b border-white/10">
-            <i data-lucide="map" class="w-4 h-4 text-indigo-400"></i>
-            <div class="font-bold tracking-wider uppercase text-white text-[11px]">Kopek · City Builder</div>
-          </div>
-          <!-- Les 4 tuiles détaillées mangeraient tout l'écran sur un téléphone : réservées au sm+ -->
-          <div class="hidden sm:block rounded-xl bg-indigo-500/10 border border-indigo-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-indigo-300/90">Socle</div>
-            <div id="hud-socle" class="font-mono font-bold text-indigo-300 text-[13px] mt-0.5">—</div>
-          </div>
-          <div class="hidden sm:block rounded-xl bg-fuchsia-500/10 border border-fuchsia-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-fuchsia-300/90">Garantie</div>
-            <div id="hud-garanti" class="font-mono font-bold text-fuchsia-300 text-[13px] mt-0.5">—</div>
-          </div>
-          <div class="hidden sm:block rounded-xl bg-emerald-500/10 border border-emerald-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-emerald-300/90">Bonus</div>
-            <div id="hud-bonus" class="font-mono font-bold text-emerald-300 text-[13px] mt-0.5">—</div>
-          </div>
-          <div class="hidden sm:block rounded-xl bg-indigo-500/10 border border-indigo-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-indigo-300/90">Population</div>
-            <div id="hud-pop" class="font-mono font-bold text-indigo-300 text-[13px] mt-0.5">—</div>
-          </div>
-          <div class="col-span-2 rounded-xl bg-amber-500/10 border border-amber-400/30 p-2 sm:p-2.5">
-            <div class="flex items-center justify-between gap-3">
-              <div class="min-w-0">
-                <div class="text-[9px] uppercase tracking-wider text-amber-300/90 truncate">Acquis contractuel</div>
-                <div id="hud-acquis" class="font-mono font-bold text-amber-300 text-[13px] sm:text-[14px] mt-0.5">—</div>
-              </div>
-              <div class="text-right min-w-0">
-                <div class="text-[9px] uppercase tracking-wider text-zinc-400">+ Bonus</div>
-                <div id="hud-ca-bonus" class="font-mono font-bold text-emerald-400 text-[13px] sm:text-[14px] mt-0.5">—</div>
-              </div>
-            </div>
-            <div class="mt-1.5 sm:mt-2 h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
-              <div id="hud-bar" class="h-full bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-emerald-400 transition-all duration-700" style="width:0%"></div>
-            </div>
-            <div id="hud-label" class="mt-1 text-[10px] text-zinc-400 font-mono leading-snug">—</div>
-          </div>
-        </div>
-      </section>
 
       <!-- BENTO · ACTION PRINCIPALE : ajouter des heures -->
       <section class="col-span-12 card rounded-2xl p-4 sm:p-5 card-hover flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
@@ -449,6 +389,91 @@
             <i data-lucide="clock-3" class="w-10 h-10 mx-auto mb-3 opacity-40"></i>
             <p class="text-sm">Aucun encodage pour ce mois.</p>
             <p class="text-xs mt-1 text-zinc-600">Utilisez la barre de saisie rapide ci-dessus.</p>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ============================================================= -->
+      <!-- BENTO · KOPEK CITY · ville 3D low-poly (Three.js vendoré en local) -->
+      <!-- Le chantier avance avec la jauge ; thème et agencement changent -->
+      <!-- chaque mois (seed = année×12+mois).                             -->
+      <!-- ============================================================= -->
+      <section id="kopek-city" class="col-span-12 relative rounded-3xl card-hover overflow-hidden select-none h-[420px] sm:h-[520px] lg:h-[620px]"
+        style="background:#0b1120; border:1px solid rgba(129,140,248,0.3);
+               box-shadow: 0 40px 120px -40px rgba(99,102,241,0.55), inset 0 1px 0 rgba(255,255,255,0.05);">
+
+        <canvas id="city-canvas" class="absolute inset-0 w-full h-full block" aria-label="Ville Kopek 3D · avancement du contrat Nessy"></canvas>
+
+        <!-- Affiché uniquement si la 3D ne peut pas démarrer (WebGL indisponible, fichier manquant…) -->
+        <div id="city-fallback" class="hidden absolute inset-0 flex flex-col items-center justify-center text-center px-6 gap-2">
+          <i data-lucide="box" class="w-8 h-8 text-indigo-400/70"></i>
+          <div class="text-sm font-semibold text-zinc-300">Vue 3D indisponible sur cet appareil</div>
+          <div class="text-[11px] text-zinc-500 max-w-xs">Les chiffres ci-dessous restent exacts, seul le rendu de la ville est désactivé.</div>
+          <code id="city-fallback-detail" class="text-[10px] text-zinc-600 font-mono mt-1"></code>
+        </div>
+
+        <!-- Panneaux indicateurs quartiers -->
+        <div class="absolute left-3 sm:left-6 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
+                    bg-indigo-500/15 border border-indigo-400/40 text-indigo-300 backdrop-blur pointer-events-none">
+          Socle · 25 h
+        </div>
+        <div class="absolute left-1/2 -translate-x-1/2 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
+                    bg-fuchsia-500/15 border border-fuchsia-400/40 text-fuchsia-300 backdrop-blur pointer-events-none">
+          Garantie
+        </div>
+        <div class="absolute right-3 sm:right-6 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
+                    bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 backdrop-blur pointer-events-none">
+          Bonus
+        </div>
+
+        <!-- Indice d'interaction (desktop seulement : sur mobile le bandeau occupe le bas) -->
+        <div class="hidden sm:flex absolute left-1/2 -translate-x-1/2 bottom-3 text-[10px] text-white/35 tracking-wide pointer-events-none items-center gap-1.5">
+          <i data-lucide="move" class="w-3 h-3"></i> Glissez pour tourner autour de la ville
+        </div>
+
+        <!-- ================= HUD =================
+             Mobile : bandeau fin en bas, pour ne pas masquer la ville.
+             sm+ : carte flottante détaillée en bas à droite. -->
+        <div class="absolute left-2 right-2 bottom-2 sm:left-auto sm:right-4 sm:bottom-4 sm:w-[20rem] rounded-2xl p-2.5 sm:p-3.5 backdrop-blur-xl pointer-events-none
+                    bg-zinc-950/75 border border-white/10 shadow-[0_30px_60px_-10px_rgba(0,0,0,0.7)]
+                    grid grid-cols-2 gap-2 sm:gap-2.5 text-[11px] leading-tight">
+          <div class="col-span-2 hidden sm:flex items-center gap-2 pb-2 mb-0.5 border-b border-white/10">
+            <i data-lucide="map" class="w-4 h-4 text-indigo-400"></i>
+            <div class="font-bold tracking-wider uppercase text-white text-[11px]">Kopek · City Builder</div>
+          </div>
+          <!-- Les 4 tuiles détaillées mangeraient tout l'écran sur un téléphone : réservées au sm+ -->
+          <div class="hidden sm:block rounded-xl bg-indigo-500/10 border border-indigo-400/30 p-2">
+            <div class="text-[9px] uppercase tracking-wider text-indigo-300/90">Socle</div>
+            <div id="hud-socle" class="font-mono font-bold text-indigo-300 text-[13px] mt-0.5">—</div>
+          </div>
+          <div class="hidden sm:block rounded-xl bg-fuchsia-500/10 border border-fuchsia-400/30 p-2">
+            <div class="text-[9px] uppercase tracking-wider text-fuchsia-300/90">Garantie</div>
+            <div id="hud-garanti" class="font-mono font-bold text-fuchsia-300 text-[13px] mt-0.5">—</div>
+          </div>
+          <div class="hidden sm:block rounded-xl bg-emerald-500/10 border border-emerald-400/30 p-2">
+            <div class="text-[9px] uppercase tracking-wider text-emerald-300/90">Bonus</div>
+            <div id="hud-bonus" class="font-mono font-bold text-emerald-300 text-[13px] mt-0.5">—</div>
+          </div>
+          <div class="hidden sm:block rounded-xl bg-indigo-500/10 border border-indigo-400/30 p-2">
+            <div class="text-[9px] uppercase tracking-wider text-indigo-300/90">Population</div>
+            <div id="hud-pop" class="font-mono font-bold text-indigo-300 text-[13px] mt-0.5">—</div>
+          </div>
+          <div class="col-span-2 rounded-xl bg-amber-500/10 border border-amber-400/30 p-2 sm:p-2.5">
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-[9px] uppercase tracking-wider text-amber-300/90 truncate">Acquis contractuel</div>
+                <div id="hud-acquis" class="font-mono font-bold text-amber-300 text-[13px] sm:text-[14px] mt-0.5">—</div>
+              </div>
+              <div class="text-right min-w-0">
+                <div class="text-[9px] uppercase tracking-wider text-zinc-400">+ Bonus</div>
+                <div id="hud-ca-bonus" class="font-mono font-bold text-emerald-400 text-[13px] sm:text-[14px] mt-0.5">—</div>
+              </div>
+            </div>
+            <div class="mt-1.5 sm:mt-2 h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+              <div id="hud-bar" class="h-full bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-emerald-400 transition-all duration-700" style="width:0%"></div>
+            </div>
+            <div id="hud-label" class="mt-1 text-[10px] text-zinc-400 font-mono leading-snug">—</div>
           </div>
         </div>
       </section>
@@ -700,7 +725,7 @@
 <!-- ===== TOAST ===== -->
 <div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] px-4 py-2.5 bg-zinc-900/95 border border-zinc-700 text-sm rounded-xl shadow-2xl flex items-center gap-2 fade-in"></div>
 
-<script type="module" src="./firebase-config.js?v=2026-09-03-5"></script>
-<script type="module" src="./app.js?v=2026-09-03-5"></script>
+<script type="module" src="./firebase-config.js?v=2026-09-03-6"></script>
+<script type="module" src="./app.js?v=2026-09-03-6"></script>
 </body>
 </html>
