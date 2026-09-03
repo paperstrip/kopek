@@ -58,3 +58,15 @@
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* iOS Safari zoome sur la page dès qu'un champ a une police < 16 px. On force
+   donc 16 px sur tous les contrôles de formulaire aux largeurs téléphone —
+   c'est la seule parade fiable, `maximum-scale` étant ignoré (et nuisible à
+   l'accessibilité). */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}

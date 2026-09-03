@@ -14,7 +14,7 @@ import {
   Timestamp,
   serverTimestamp,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-03-7';
+} from './firebase-config.js?v=2026-09-03-8';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -43,6 +43,7 @@ const STATE = {
   selectedYear: new Date().getFullYear(),
   contractStart: firstDayOfMonth(new Date().getFullYear(), 0), // À override : ex. new Date('2025-01-01')
   editingClientId: null,
+  clientsLoaded: false,   // les projets ont-ils été reçus au moins une fois ?
   lastPopulatedClientId: null,
 };
 
@@ -274,6 +275,7 @@ function teardownData() {
   if (unsubClients) { unsubClients(); unsubClients = null; }
   if (unsubLogs) { unsubLogs(); unsubLogs = null; }
   STATE.clients = []; STATE.allLogs = []; STATE.logs = [];
+  STATE.clientsLoaded = false;
 }
 
 function subscribeData() {
@@ -286,6 +288,7 @@ function subscribeData() {
     snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
     list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     STATE.clients = list;
+    STATE.clientsLoaded = true;
     if (list.length === 0 && !seedingDefaultProject) {
       seedingDefaultProject = true;
       ensureDefaultProject()
@@ -527,6 +530,10 @@ function renderAll() {
   if (!STATE.user) return;
   recomputeMonthLogs();
   const agg = aggregateMonth();
+  // Le bouton reste inactif tant que Firestore n'a pas répondu, sinon un clic
+  // trop tôt tombait sur une liste de projets vide.
+  const addBtn = document.getElementById('btn-add-hours');
+  if (addBtn) addBtn.disabled = !STATE.clientsLoaded;
   section('projets', populateClientSelects, agg);
   section('entête', renderHeader, agg);
   section('jauge', renderNessyGauge, agg);
@@ -750,7 +757,7 @@ async function ensureCityLoaded() {
   if (cityStatus === 'ready' || cityStatus === 'loading' || cityStatus === 'failed') return;
   cityStatus = 'loading';
   try {
-    cityMod = await import('./city3d.js?v=2026-09-03-7');
+    cityMod = await import('./city3d.js?v=2026-09-03-8');
     const canvas = document.getElementById('city-canvas');
     if (!canvas) throw new Error('canvas #city-canvas introuvable');
     cityMod.initCity(canvas);
@@ -938,9 +945,11 @@ const LAST_CLIENT_KEY = 'kopek_last_client_id';
 const WIZ = { step: 1, minutes: 0, type: 'hourly' };
 
 function openHoursWizard(prefill) {
-  if (STATE.clients.length === 0) {
-    toast("Créez d'abord un projet", 'alert-circle', 'warn');
-    openClientModal(null);
+  // Avant, un clic pendant le chargement des projets ouvrait la modale « Nouveau
+  // projet » à la place de l'assistant : la liste était vide simplement parce que
+  // Firestore n'avait pas encore répondu. On attend, on ne détourne plus.
+  if (!STATE.clientsLoaded) {
+    toast('Chargement des projets…', 'loader', 'warn');
     return;
   }
   WIZ.step = 1;
@@ -979,7 +988,15 @@ function populateWizardClients() {
   });
   $('#w-client').innerHTML = list
     .map((c) => `<option value="${c.id}">${c.name}${c.is_external ? ' · Externe' : ''}</option>`)
-    .join('');
+    .join('') + '<option value="__new__">➕ Nouveau projet…</option>';
+  syncNewClientField();
+}
+
+/** Affiche le champ « nom du nouveau projet » quand on choisit ➕ dans la liste. */
+function syncNewClientField() {
+  const isNew = $('#w-client').value === '__new__';
+  $('#w-newclient-wrap').classList.toggle('hidden', !isNew);
+  if (isNew) setTimeout(() => $('#w-newclient').focus(), 50);
 }
 
 function showWizardStep(n) {
@@ -1042,12 +1059,11 @@ function renderWizardSummary() {
 
 function bindHoursWizard() {
   $('#btn-add-hours').addEventListener('click', () => openHoursWizard(null));
-  $('#w-new-client').addEventListener('click', () => {
-    $('#hours-modal').classList.add('hidden');
-    openClientModal(null);
-  });
   $('#w-client').addEventListener('change', () => {
-    if (WIZ.type === 'hourly') $('#w-rate').value = clientRate($('#w-client').value);
+    syncNewClientField();
+    if (WIZ.type === 'hourly' && $('#w-client').value !== '__new__') {
+      $('#w-rate').value = clientRate($('#w-client').value);
+    }
     updateWizardDescList();
   });
 
@@ -1093,8 +1109,31 @@ function wizardError(msg) {
 
 async function onWizardNext() {
   if (WIZ.step === 1) {
-    if (!$('#w-client').value) return wizardError('Choisissez un projet.');
     if (!$('#w-desc').value.trim()) return wizardError('Ajoutez une description.');
+
+    // Nouveau projet demandé : on le crée ici même, sans changer de fenêtre.
+    if ($('#w-client').value === '__new__') {
+      const name = $('#w-newclient').value.trim();
+      if (!name) return wizardError('Donnez un nom au nouveau projet.');
+      const btn = $('#w-next');
+      btn.disabled = true;
+      try {
+        const id = await createClient({ name, default_rate: NESSY.regieRate, is_external: false });
+        populateWizardClients();
+        $('#w-client').value = id;
+        syncNewClientField();
+        $('#w-newclient').value = '';
+        $('#w-rate').value = NESSY.regieRate;
+        hideErrorBanner();
+        toast(`Projet « ${name} » créé`, 'check-circle');
+      } catch (ex) {
+        showErrorBanner('Création du projet impossible', ex);
+        return wizardError(explainFirebaseError(ex));
+      } finally {
+        btn.disabled = false;
+      }
+    }
+    if (!$('#w-client').value || $('#w-client').value === '__new__') return wizardError('Choisissez un projet.');
     return showWizardStep(2);
   }
   if (WIZ.step === 2) {
@@ -1106,7 +1145,10 @@ async function onWizardNext() {
   if (!rate || rate <= 0) return wizardError(WIZ.type === 'flat' ? 'Indiquez le prix du forfait.' : 'Indiquez le taux horaire.');
 
   const btn = $('#w-next');
+  const label = $('#w-next-label');
+  const previous = label.textContent;
   btn.disabled = true;
+  label.textContent = 'Enregistrement…';
   try {
     await createLog({
       client_id: $('#w-client').value,
@@ -1126,6 +1168,7 @@ async function onWizardNext() {
     wizardError(explainFirebaseError(ex));
   } finally {
     btn.disabled = false;
+    label.textContent = previous;
   }
 }
 
@@ -1174,7 +1217,9 @@ function bindModals() {
     if (modal) modal.classList.add('hidden');
   }));
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') $$('.fixed').forEach((m) => m.classList.add('hidden'));
+    // Cible les vraies fenêtres : `.fixed` tout court attrapait aussi les halos
+    // décoratifs du fond, qui disparaissaient définitivement au premier Échap.
+    if (e.key === 'Escape') $$('#hours-modal, #client-modal, #manage-modal, #edit-modal').forEach((m) => m.classList.add('hidden'));
   });
   // New client
   $('#btn-new-client').addEventListener('click', () => openClientModal(null));
@@ -1209,6 +1254,11 @@ async function handleClientFormSubmit(e) {
   const isExternal = $('#c-main').checked;
   if (!name) { err.textContent = 'Nom requis'; err.classList.remove('hidden'); return; }
   if (isNaN(rate) || rate < 0) { err.textContent = 'Taux invalide'; err.classList.remove('hidden'); return; }
+  const submitBtn = $('#client-form button[type=submit]');
+  const submitLabel = submitBtn ? submitBtn.querySelector('span:last-child') : null;
+  const previousLabel = submitLabel ? submitLabel.innerHTML : null;
+  if (submitBtn) submitBtn.disabled = true;
+  if (submitLabel) submitLabel.textContent = 'Enregistrement…';
   try {
     if (STATE.editingClientId) {
       await updateClient(STATE.editingClientId, { name, default_rate: rate, is_external: isExternal });
@@ -1222,6 +1272,9 @@ async function handleClientFormSubmit(e) {
     err.textContent = explainFirebaseError(ex) + ` (code : ${ex.code || 'inconnu'})`;
     err.classList.remove('hidden');
     showErrorBanner('Enregistrement du projet impossible', ex);
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+    if (submitLabel && previousLabel !== null) submitLabel.innerHTML = previousLabel;
   }
 }
 
@@ -1318,12 +1371,15 @@ async function handleEditLogSubmit(e) {
     rate_applied: type === 'hourly' ? rateVal : 0,
     custom_price: type === 'flat' ? rateVal : null,
   };
+  const editBtn = $('#edit-form button[type=submit]');
+  if (editBtn) editBtn.disabled = true;
   try {
     await updateLog(id, patch);
     toast('Encodage mis à jour', 'check');
     $('#edit-modal').classList.add('hidden');
     refreshPeriod();
   } catch (ex) { showErrorBanner('Mise à jour impossible', ex); }
+  finally { if (editBtn) editBtn.disabled = false; }
 }
 
 // =============================================================
