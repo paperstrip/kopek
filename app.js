@@ -15,7 +15,6 @@ import {
   serverTimestamp,
   onSnapshot,
 } from './firebase-config.js';
-import { initCity, renderCityScene, celebrate } from './city3d.js';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -82,8 +81,12 @@ function HH(totalMinutes, showMinSuffix = true) {
   const out = `${h}h${String(m).padStart(2, '0')}`;
   return showMinSuffix ? out : out;
 }
+/** Nombre au format belge/français : virgule décimale. */
+function FR(n, digits = 2) {
+  return Number(n).toLocaleString('fr-BE', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
 function HHdecimal(totalMinutes) {
-  return (totalMinutes / 60).toFixed(2);
+  return FR(totalMinutes / 60);
 }
 function firstDayOfMonth(y, m) { return new Date(y, m, 1, 0, 0, 0, 0); }
 function lastDayOfMonth(y, m)  { return new Date(y, m + 1, 0, 23, 59, 59, 999); }
@@ -141,8 +144,9 @@ onAuthStateChanged(auth, (user) => {
   if (user) {
     $('#login-screen').classList.add('hidden');
     $('#dashboard-screen').classList.remove('hidden');
-    $('#auth-status').classList.remove('hidden');
-    $('#auth-status').classList.add('flex');
+    // NB : la visibilité de #auth-status est gérée par ses classes responsive
+    // (masqué sous sm) — on ne force plus `flex` ici, sinon la barre du haut
+    // déborde sur trois lignes au téléphone.
     $('#auth-email').textContent = user.email || '';
     initApp();
   } else {
@@ -502,21 +506,27 @@ function recomputeMonthLogs() {
   });
 }
 
+// Chaque bloc est rendu isolément : une erreur dans une section (un id absent du
+// HTML, par ex.) ne doit plus faire tomber tout le tableau de bord comme avant.
+function section(name, fn, agg) {
+  try { fn(agg); } catch (ex) { console.error(`[kopek] rendu "${name}" en échec`, ex); }
+}
+
 /** Rendu complet du tableau de bord à partir de STATE (alimenté en temps réel par les listeners Firestore). */
 function renderAll() {
   if (!STATE.user) return;
   recomputeMonthLogs();
   const agg = aggregateMonth();
-  populateClientSelects();
-  renderHeader(agg);
-  renderNessyGauge(agg);
-  renderCity(agg);
-  renderPocket(agg);
-  renderMetrics(agg);
-  renderWaterfall(agg);
-  renderClientsList(agg);
-  renderLogs(agg);
-  updateDescList();
+  section('projets', populateClientSelects, agg);
+  section('entête', renderHeader, agg);
+  section('jauge', renderNessyGauge, agg);
+  section('ville', renderCity, agg);
+  section('poche', renderPocket, agg);
+  section('métriques', renderMetrics, agg);
+  section('cascade', renderWaterfall, agg);
+  section('synthèse projets', renderClientsList, agg);
+  section('encodages', renderLogs, agg);
+  section('suggestions', updateDescList, agg);
   if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
 }
 // Alias conservé pour tous les points d'appel existants (CRUD → re-rendu immédiat,
@@ -553,13 +563,25 @@ function renderNessyGauge(agg) {
   const garantieH = NESSY.minHoursEq;              // 43,75 h
 
   // ============================================================
-  // ⚠️ POSITIONS DES ZONES SOCLE / GARANTIE / SURPLUS SONT FIXES EN DUR DANS LE HTML
-  //    (fond coloré en filigrane + séparateurs verticaux épais)
-  //    Ici on ne fait que positionner le FILL et le CURSEUR sur cette grille fixe.
+  // La piste HTML fait 100 % = 43,75 h (min garanti). On borne donc le
+  // remplissage à 100 % : tout ce qui dépasse est raconté par le bandeau
+  // surplus ci-dessous, plus jamais par un débordement de la piste.
   // ============================================================
-  const pct = agg.gaugePct; // 0..120
+  const pct = Math.min(100, agg.gaugePct);
   $('#gauge-fill').style.width   = `${pct}%`;
-  $('#gauge-cursor').style.left  = `${pct}%`;
+  $('#gauge-cursor').style.left  = `calc(${pct}% - 1.5px)`;
+
+  // Bandeau surplus
+  const surplusBox = $('#gauge-surplus');
+  const surplusH = agg.tiers.t3.h;
+  if (surplusH > 0.001) {
+    surplusBox.classList.remove('hidden');
+    $('#gauge-surplus-text').innerHTML =
+      `Minimum garanti atteint · <b class="font-mono">+${FR(surplusH)} h</b> de surplus ` +
+      `facturable en plus, soit <b class="font-mono text-emerald-300">+${EUR(agg.tiers.t3.eur)}</b>.`;
+  } else {
+    surplusBox.classList.add('hidden');
+  }
 
   // ------------------------------------------------------------------
   // HEADER NESSY (à gauche du Hero)
@@ -572,17 +594,17 @@ function renderNessyGauge(agg) {
   const hh = HHdecimal(hoursNessy * 60);           // heures decimal pour affichage
   $('#nessy-sub').innerHTML = (agg.hasAnyNessy)
     ? `<b>Acquis <span class="chip text-amber-300 font-bold">${acquisShow}</span> garanti</b> · ` +
-      `Réalisé <span class="chip text-white font-bold">${hh} h / ${garantieH.toFixed(2)} h</span> · ` +
+      `Réalisé <span class="chip text-white font-bold">${hh} h / ${FR(garantieH)} h</span> · ` +
       `<span class="text-emerald-300 font-bold">+ ${bonusShow} bonus</span>`
     : `Aucun encodage Nessy ce mois · Acquis contractuel non activé — Encode tes premières heures pour activer <b class="text-amber-300">${EUR(agg.minG)}</b> de Min Garanti.`;
 
   // Cards tiers (3 sous-cartes sous la jauge)
   // Puisque l'argent est acquis : montrer REMBOURSEMENT (pas € gagnés)
-  $('#tier1-h').textContent   = `${agg.tiers.t1.h.toFixed(2)} h / ${socleH.toFixed(2)} h`;
+  $('#tier1-h').textContent   = `${FR(agg.tiers.t1.h)} h`;
   $('#tier1-eur').textContent = `~ ${EUR(agg.tiers.t1.eur)} remboursés`;
-  $('#tier2-h').textContent   = `${agg.tiers.t2.h.toFixed(2)} h / ${(garantieH - socleH).toFixed(2)} h`;
+  $('#tier2-h').textContent   = `${FR(agg.tiers.t2.h)} h`;
   $('#tier2-eur').textContent = `~ ${EUR(agg.tiers.t2.eur)} remboursés @ ${NESSY.regieRate} €/h`;
-  $('#tier3-h').textContent   = `+ ${agg.tiers.t3.h.toFixed(2)} h`;
+  $('#tier3-h').textContent   = `+ ${FR(agg.tiers.t3.h)} h`;
   $('#tier3-eur').textContent = `+ ${EUR(agg.tiers.t3.eur + agg.mainFlatEur)} bonus`;
 
   // ---- STATUS BAND : remplacements ACQUIS vs RÉALISÉ vs BONUS ----
@@ -600,21 +622,21 @@ function renderNessyGauge(agg) {
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-zinc-800/80 border border-zinc-700 text-zinc-300 text-[11px] font-mono">💶 Min Garanti · ${EUR(agg.minG)}</span>
         </div>
         <strong class="text-zinc-100 block">0 h encodées Nessy · L'acquis <b class="text-amber-300">${EUR(agg.minG)}</b> est PROMIS par contrat, mais <b>pas encore activé</b> sur le mois.</strong>
-        <div class="mt-3 grid grid-cols-3 gap-3 text-xs font-mono">
+        <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 text-xs font-mono">
           <div class="rounded-lg p-2 bg-zinc-900/70 border border-zinc-800 text-indigo-300/90">
             <div class="text-[9px] uppercase tracking-wider text-zinc-500 font-sans">Socle 2 000 €</div>
             <b class="block mt-1 text-zinc-100">—</b>
-            <div class="text-[10px] text-zinc-500 mt-0.5">0 / ${socleH.toFixed(2)} h · dette</div>
+            <div class="text-[10px] text-zinc-500 mt-0.5">0 / ${FR(socleH)} h · dette</div>
           </div>
           <div class="rounded-lg p-2 bg-zinc-900/70 border border-zinc-800 text-fuchsia-300/90">
             <div class="text-[9px] uppercase tracking-wider text-zinc-500 font-sans">Régie Garantie</div>
             <b class="block mt-1 text-zinc-100">—</b>
-            <div class="text-[10px] text-zinc-500 mt-0.5">0 / ${(garantieH - socleH).toFixed(2)} h · dette</div>
+            <div class="text-[10px] text-zinc-500 mt-0.5">0 / ${FR(garantieH - socleH)} h · dette</div>
           </div>
           <div class="rounded-lg p-2 bg-zinc-900/70 border border-zinc-800 text-emerald-300/90">
             <div class="text-[9px] uppercase tracking-wider text-zinc-500 font-sans">Bonus Surplus</div>
             <b class="block mt-1 text-zinc-100">0,00 €</b>
-            <div class="text-[10px] text-zinc-500 mt-0.5">seulement après ${garantieH.toFixed(2)} h</div>
+            <div class="text-[10px] text-zinc-500 mt-0.5">seulement après ${FR(garantieH)} h</div>
           </div>
         </div>
         <div class="mt-3 text-[12px] text-zinc-400">
@@ -634,14 +656,14 @@ function renderNessyGauge(agg) {
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-400/50 text-indigo-200 text-[11px] font-semibold tracking-wider uppercase">🧱 SOCLE EN COURS</span>
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-400/40 text-emerald-200 text-[11px] font-mono">✨ BONUS <b class="ml-1">${EUR(agg.bonusEur || 0)}</b></span>
         </div>
-        <strong class="text-indigo-100">Heures de dette · <span class="chip">${refunded.toFixed(2)} h / ${socleH.toFixed(2)} h</span> sur le Socle (25 h)</strong>
+        <strong class="text-indigo-100">Heures de dette · <span class="chip">${FR(refunded)} h / ${FR(socleH)} h</span> sur le Socle (25 h)</strong>
         <div class="mt-2 h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-indigo-500 to-indigo-300 rounded-full" style="width:${pctSocle}%"></div></div>
-        <div class="flex justify-between text-[11px] font-mono mt-1.5 text-indigo-300/80">
+        <div class="flex justify-between flex-wrap gap-x-3 gap-y-1 text-[10px] sm:text-[11px] font-mono mt-1.5 text-indigo-300/80">
           <span>Remboursement Socle · ${pctSocle.toFixed(0)}%</span>
-          <span>Il manque <b>${debt.toFixed(2)} h</b> avant déclenchement du surplus</span>
+          <span>Il manque <b>${FR(debt)} h</b> avant déclenchement du surplus</span>
         </div>
         <div class="text-zinc-400 text-[12px] mt-2">
-          Le contrat Nessy est activé · Tu gagnes <b class="text-amber-300">déjà ${EUR(agg.minG)}</b> d'office. Encode encore <b class="text-indigo-300">${(socleH - refunded).toFixed(2)} h</b> pour solder le socle.
+          Le contrat Nessy est activé · Tu gagnes <b class="text-amber-300">déjà ${EUR(agg.minG)}</b> d'office. Encode encore <b class="text-indigo-300">${FR(socleH - refunded)} h</b> pour solder le socle.
         </div>
       </div>`;
   }
@@ -660,17 +682,17 @@ function renderNessyGauge(agg) {
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-fuchsia-500/20 border border-fuchsia-400/50 text-fuchsia-200 text-[11px] font-semibold tracking-wider uppercase">🛡️ RÉGIE ${pctRegie.toFixed(0)}%</span>
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-400/40 text-emerald-200 text-[11px] font-mono">✨ BONUS <b class="ml-1">${EUR(agg.bonusEur || 0)}</b></span>
         </div>
-        <strong class="text-fuchsia-100">Dette Régie Garantie · <span class="chip">${regieH.toFixed(2)} h / ${regieMax.toFixed(2)} h</span> · il reste <b>${debt.toFixed(2)} h</b></strong>
+        <strong class="text-fuchsia-100">Dette Régie Garantie · <span class="chip">${FR(regieH)} h / ${FR(regieMax)} h</span> · il reste <b>${FR(debt)} h</b></strong>
         <div class="mt-2 grid grid-cols-2 gap-3">
           <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-indigo-500 to-indigo-300 rounded-full" style="width:100%"></div></div>
           <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-fuchsia-500 to-fuchsia-300 rounded-full" style="width:${pctRegie}%"></div></div>
         </div>
-        <div class="flex justify-between text-[11px] font-mono mt-1.5 text-zinc-400">
+        <div class="flex justify-between flex-wrap gap-x-3 gap-y-1 text-[10px] sm:text-[11px] font-mono mt-1.5 text-zinc-400">
           <span class="text-indigo-300/80">Socle 100% · 25 h · dette remboursée</span>
-          <span class="text-fuchsia-300/80">Régie Garantie · manque <b>${(garantieH - refunded).toFixed(2)} h</b></span>
+          <span class="text-fuchsia-300/80">Régie Garantie · manque <b>${FR(garantieH - refunded)} h</b></span>
         </div>
         <div class="text-zinc-400 text-[12px] mt-2">
-          <b class="text-amber-300">${EUR(agg.minG)}</b> d'office · Dès que tu atteindras <b class="text-fuchsia-300">${garantieH.toFixed(2)} h</b>, tu passeras en <b class="text-emerald-300">Surplus Bonus</b>.
+          <b class="text-amber-300">${EUR(agg.minG)}</b> d'office · Dès que tu atteindras <b class="text-fuchsia-300">${FR(garantieH)} h</b>, tu passeras en <b class="text-emerald-300">Surplus Bonus</b>.
         </div>
       </div>`;
   }
@@ -687,16 +709,16 @@ function renderNessyGauge(agg) {
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-fuchsia-500/20 border border-fuchsia-400/50 text-fuchsia-200 text-[11px] font-semibold tracking-wider uppercase">🛡️ GARANTIE ✓</span>
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 text-[11px] font-mono">✨ BONUS +<b class="ml-1">${EUR(agg.bonusEur || 0)}</b></span>
         </div>
-        <strong class="text-emerald-100">Tu as remboursé toutes tes heures · <span class="chip">+${surplusH.toFixed(2)} h</span> en bonus facturable en <b class="text-amber-300">plus de ${EUR(agg.minG)}</b></strong>
+        <strong class="text-emerald-100">Tu as remboursé toutes tes heures · <span class="chip">+${FR(surplusH)} h</span> en bonus facturable en <b class="text-amber-300">plus de ${EUR(agg.minG)}</b></strong>
         <div class="mt-2 grid grid-cols-3 gap-3">
           <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-indigo-500 to-indigo-300 rounded-full" style="width:100%"></div></div>
           <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-fuchsia-500 to-fuchsia-300 rounded-full" style="width:100%"></div></div>
           <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-emerald-400 via-lime-400 to-amber-300 rounded-full" style="width:${Math.min(100,(surplusH/8.75)*100)}%"></div></div>
         </div>
-        <div class="flex justify-between text-[11px] font-mono mt-1.5 text-zinc-400">
+        <div class="flex justify-between flex-wrap gap-x-3 gap-y-1 text-[10px] sm:text-[11px] font-mono mt-1.5 text-zinc-400">
           <span class="text-indigo-300/80">Socle 25 h · ${EUR(NESSY.socleFlat)}</span>
           <span class="text-fuchsia-300/80">Régie 18,75 h · ${EUR(1500)}</span>
-          <span class="text-emerald-300/80">Surplus · +${surplusH.toFixed(2)} h × ${NESSY.regieRate} €</span>
+          <span class="text-emerald-300/80">Surplus · +${FR(surplusH)} h × ${NESSY.regieRate} €</span>
         </div>
         <div class="text-zinc-400 text-[12px] mt-2">
           CA principal · <b class="text-white">${EUR(agg.mainFinalCA)}</b> dont acquis <b class="text-amber-300">${EUR(agg.minG)}</b> + bonus <b class="text-emerald-300">${EUR(agg.bonusEur || 0)}</b> · Chaque heure en plus = c'est <b class="text-emerald-300">directement dans la poche</b>.
@@ -709,31 +731,67 @@ function renderNessyGauge(agg) {
 // =================================================================
 // 🎮 KOPEK CITY · vraie 3D low-poly (Three.js) pilotée par la jauge
 // =================================================================
+// Le module 3D est chargé DYNAMIQUEMENT et son échec est non-fatal : si WebGL est
+// indisponible ou si un fichier de vendor/three ne se sert pas (Jekyll, cache, réseau),
+// le time-tracking doit continuer à fonctionner normalement.
+let cityMod = null;
+let cityStatus = 'idle';   // idle | loading | ready | failed
 let cityInited = false;
 let lastBonusHFlag = 0;
+let lastAggForCity = null;
 
-function initCityIfNeeded() {
-  if (cityInited) return;
-  const canvas = document.getElementById('city-canvas');
-  if (!canvas) return;
-  initCity(canvas);
-  cityInited = true;
+function showCityFallback(msg) {
+  const el = document.getElementById('city-fallback');
+  if (!el) return;
+  el.classList.remove('hidden');
+  const detail = document.getElementById('city-fallback-detail');
+  if (detail && msg) detail.textContent = msg;
 }
 
-function renderCity(agg) {
-  initCityIfNeeded();
-  if (!cityInited) return;
+async function ensureCityLoaded() {
+  if (cityStatus === 'ready' || cityStatus === 'loading' || cityStatus === 'failed') return;
+  cityStatus = 'loading';
+  try {
+    cityMod = await import('./city3d.js');
+    const canvas = document.getElementById('city-canvas');
+    if (!canvas) throw new Error('canvas #city-canvas introuvable');
+    cityMod.initCity(canvas);
+    cityInited = true;
+    cityStatus = 'ready';
+    if (lastAggForCity) renderCity3D(lastAggForCity);
+  } catch (ex) {
+    cityStatus = 'failed';
+    console.error('Kopek City 3D indisponible', ex);
+    showCityFallback(ex && ex.message ? ex.message : String(ex));
+  }
+}
 
-  const caps = { socleH: NESSY.socleHours, garantieH: NESSY.minHoursEq };
-  // Seed stable par mois calendaire (indépendant du contrat) → thème/agencement
-  // différent chaque mois, mais identique si on revient sur le même mois.
-  const seedKey = STATE.selectedYear * 12 + STATE.selectedMonth;
-  renderCityScene(agg, caps, seedKey);
+function renderCity3D(agg) {
+  if (cityStatus !== 'ready' || !cityMod) return;
+  try {
+    const caps = { socleH: NESSY.socleHours, garantieH: NESSY.minHoursEq };
+    // Seed stable par mois calendaire (indépendant du contrat) → thème/agencement
+    // différent chaque mois, mais identique si on revient sur le même mois.
+    const seedKey = STATE.selectedYear * 12 + STATE.selectedMonth;
+    cityMod.renderCityScene(agg, caps, seedKey);
+
+    const bonusH = agg.tiers?.t3?.h || 0;
+    if (bonusH > 0.01 && lastBonusHFlag <= 0.01) cityMod.celebrate();
+    lastBonusHFlag = bonusH;
+  } catch (ex) {
+    cityStatus = 'failed';
+    console.error('Kopek City 3D · erreur de rendu', ex);
+    showCityFallback(ex && ex.message ? ex.message : String(ex));
+  }
+}
+
+/** HUD = DOM pur : il doit toujours afficher les bons chiffres, même si la 3D échoue. */
+function renderCity(agg) {
+  lastAggForCity = agg;
+  ensureCityLoaded();
+  renderCity3D(agg);
 
   const bonusH = agg.tiers?.t3?.h || 0;
-  if (bonusH > 0.01 && lastBonusHFlag <= 0.01) celebrate();
-  lastBonusHFlag = bonusH;
-
   const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   const socleH = NESSY.socleHours, fullH = NESSY.minHoursEq;
   const refunded = agg.refundedH || 0;
@@ -742,7 +800,7 @@ function renderCity(agg) {
   const population = Math.round(150 + refunded * 28 + bonusH * 60 + agg.secondaryEur / 8);
   setText('hud-socle', `${soclePct.toFixed(0)} %`);
   setText('hud-garanti', `${garantiPct.toFixed(0)} %`);
-  setText('hud-bonus', `+${bonusH.toFixed(1).replace('.', ',')} h`);
+  setText('hud-bonus', `+${FR(bonusH, 1)} h`);
   setText('hud-pop', population.toLocaleString('fr-BE') + ' hab.');
   setText('hud-acquis', EUR(agg.hasAnyNessy ? agg.minG : 0));
   setText('hud-ca-bonus', EUR(agg.bonusEur || 0));
@@ -752,8 +810,8 @@ function renderCity(agg) {
   const label = document.getElementById('hud-label');
   if (label) {
     if (!agg.hasAnyNessy) label.textContent = 'Contrat principal non activé sur la période';
-    else if (refunded < fullH) label.textContent = `Engagement ${refunded.toFixed(2).replace('.', ',')} / ${fullH.toFixed(2).replace('.', ',')} h · reste ${agg.debtRemainH.toFixed(2).replace('.', ',')} h`;
-    else label.textContent = `Engagement validé · Bonus ${EUR(agg.bonusEur || 0)} · Surplus ${bonusH.toFixed(1).replace('.', ',')} h`;
+    else if (refunded < fullH) label.textContent = `Engagement ${FR(refunded)} / ${FR(fullH)} h · reste ${FR(agg.debtRemainH)} h`;
+    else label.textContent = `Engagement validé · Bonus ${EUR(agg.bonusEur || 0)} · Surplus ${FR(bonusH, 1)} h`;
   }
 }
 

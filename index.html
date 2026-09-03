@@ -7,75 +7,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  tailwind.config = {
-    theme: {
-      extend: {
-        colors: {
-          zinc: {
-            925: '#111114',
-            950: '#09090b',
-          },
-        },
-        fontFamily: {
-          sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-          mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
-        },
-        boxShadow: {
-          'pocket': '0 0 60px -15px rgba(16,185,129,0.45)',
-          'brand':  '0 0 80px -25px rgba(99,102,241,0.55)',
-        },
-          keyframes: {
-            shimmer: { 
-              '0%': { backgroundPosition: '-200% 0' },
-              '100%': { backgroundPosition: '200% 0' },
-            },
-            float: {
-              '0%, 100%': { transform: 'translateY(0)' },
-              '50%': { transform: 'translateY(-4px)' },
-            },
-          },
-        animation: {
-          shimmer: 'shimmer 2.5s linear infinite',
-          float: 'float 6s ease-in-out infinite',
-        },
-      },
-    },
-  };
-</script>
+<!-- Feuille Tailwind compilée et commitée (styles.css) : le CDN cdn.tailwindcss.com
+     est un outil de DEV qui recompile le CSS dans le navigateur à chaque chargement.
+     Pour régénérer après avoir ajouté des classes : voir README.md -->
+<link rel="stylesheet" href="./styles.css">
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-<script type="module" src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
-<script type="module" src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js"></script>
-<script type="module" src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"></script>
-<style>
-  * { -webkit-font-smoothing: antialiased; }
-  html, body { background:#09090b; }
-  .bg-grid {
-    background-image:
-      radial-gradient(rgba(255,255,255,0.035) 1px, transparent 1px);
-    background-size: 28px 28px;
-  }
-  .card {
-    background: rgba(24,24,27,0.55);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(39,39,42,0.9);
-  }
-  .card-hover:hover {
-    border-color: rgba(63,63,70,0.9);
-    transform: translateY(-1px);
-    transition: all .2s ease;
-  }
-  .chip { font-variant-numeric: tabular-nums; }
-  .glow-gradient-text {
-    background: linear-gradient(90deg, #a5f3fc 0%, #86efac 50%, #bef264 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-  .gauge-seg { transition: width .6s cubic-bezier(.22,1,.36,1); }
-</style>
 </head>
 <body class="min-h-screen text-zinc-100 font-sans relative overflow-x-hidden">
 
@@ -145,7 +81,7 @@
         </div>
         <div>
           <div class="text-sm font-bold tracking-tight leading-none">kopek</div>
-          <div class="text-[10px] text-zinc-500 leading-none mt-1 tracking-wider uppercase">Cockpit Financier · Belgique</div>
+          <div class="hidden sm:block text-[10px] text-zinc-500 leading-none mt-1 tracking-wider uppercase">Cockpit Financier · Belgique</div>
         </div>
       </div>
 
@@ -164,9 +100,9 @@
             <i data-lucide="chevron-right" class="w-4 h-4"></i>
           </button>
         </div>
-        <button id="btn-new-client" class="group relative inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium overflow-hidden border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-900 transition">
+        <button id="btn-new-client" title="Nouveau projet" class="group relative inline-flex items-center gap-1.5 px-2.5 sm:px-3.5 py-2 rounded-lg text-sm font-medium overflow-hidden border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-900 transition">
           <i data-lucide="user-plus" class="w-4 h-4 text-indigo-400"></i>
-          <span>Nouveau Projet</span>
+          <span class="hidden sm:inline">Nouveau Projet</span>
         </button>
         <div id="auth-status" class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-900/60 border border-zinc-800 text-[11px] text-zinc-400 max-w-[200px]">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 badge-pulse"></span>
@@ -184,165 +120,89 @@
     <!-- ===== BENTO GRID ===== -->
     <div class="grid grid-cols-12 auto-rows-min gap-4 lg:gap-5">
 
-      <!-- BENTO #1 · HERO JAUGE NESSY (8 cols) -->
-      <section class="col-span-12 lg:col-span-8 card rounded-2xl p-5 sm:p-7 card-hover relative overflow-hidden">
-        <div class="absolute -right-20 -top-20 w-80 h-80 rounded-full bg-gradient-to-br from-indigo-600/20 via-fuchsia-500/10 to-emerald-400/10 blur-3xl pointer-events-none"></div>
-        <div class="flex items-start justify-between flex-wrap gap-4 relative">
-          <div>
-            <div class="flex items-center gap-2 mb-1.5">
-              <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 text-[10px] font-semibold tracking-wider uppercase border border-indigo-500/20">
-                <i data-lucide="shield-check" class="w-3 h-3"></i> Contrat Principal · Nessy
-              </span>
-              <span id="phase-badge" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-zinc-800/80 text-zinc-400 text-[10px] font-semibold tracking-wider uppercase border border-zinc-700/70"></span>
-            </div>
-            <h1 id="period-title" class="text-2xl sm:text-3xl font-bold tracking-tight"></h1>
-            <p id="period-sub" class="text-sm text-zinc-500 mt-1"></p>
-          </div>
-          <div class="text-right">
-            <div class="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-1">CA HTVA · Nessy</div>
-            <div id="nessy-ca" class="font-mono text-3xl sm:text-4xl font-bold tracking-tight chip">0 €</div>
-          </div>
-        </div>
-        <p id="nessy-sub" class="text-sm text-zinc-400 mt-3 relative leading-relaxed"></p>
+      <!-- ============================================================= -->
+      <!-- BENTO · KOPEK CITY · ville 3D low-poly (Three.js vendoré en local) -->
+      <!-- Le chantier avance avec la jauge ; thème et agencement changent -->
+      <!-- chaque mois (seed = année×12+mois).                             -->
+      <!-- ============================================================= -->
+      <section id="kopek-city" class="col-span-12 relative rounded-3xl card-hover overflow-hidden select-none h-[420px] sm:h-[520px] lg:h-[620px]"
+        style="background:#0b1120; border:1px solid rgba(129,140,248,0.3);
+               box-shadow: 0 40px 120px -40px rgba(99,102,241,0.55), inset 0 1px 0 rgba(255,255,255,0.05);">
 
-        <!-- Gauge -->
-        <div class="mt-8 sm:mt-10 relative">
-          <!-- Tier markers -->
-          <div class="relative mb-3 h-10">
-            <div class="absolute left-0 top-8 text-[11px] text-zinc-500 -translate-x-1">
-              <span class="font-mono font-semibold">0 h</span>
-            </div>
-            <!-- MARKER SOCLE 25h -->
-            <div id="tier1-marker" class="absolute top-0 -translate-x-1/2 flex flex-col items-center" style="left:57.14%">
-              <span class="font-mono font-bold text-indigo-300 text-[11px]">25 h · Socle</span>
-              <span class="text-[10px] text-indigo-400/80 font-mono bg-indigo-500/10 px-1.5 py-0.5 rounded mt-0.5 border border-indigo-500/20">= 2 000 € HTVA</span>
-              <div class="w-0.5 h-4 bg-indigo-400/60 mt-1 rounded-full"></div>
-            </div>
-            <!-- MARKER GARANTIE 43,75h -->
-            <div id="tier2-marker" class="absolute top-0 -translate-x-1/2 flex flex-col items-center" style="left:100%">
-              <span class="font-mono font-bold text-fuchsia-300 text-[11px]">43,75 h · Min Garanti</span>
-              <span class="text-[10px] text-fuchsia-400/80 font-mono bg-fuchsia-500/10 px-1.5 py-0.5 rounded mt-0.5 border border-fuchsia-500/20">= 3 500 € HTVA</span>
-              <div class="w-0.5 h-4 bg-fuchsia-400/60 mt-1 rounded-full"></div>
-            </div>
-            <!-- MARKER SURPLUS (débord à 120%) -->
-            <div id="tier3-marker" class="absolute top-0 -translate-x-1/2 flex flex-col items-center opacity-70" style="left:120%">
-              <span class="font-mono font-bold text-emerald-300 text-[10px]">Surplus</span>
-              <span class="text-[9px] text-emerald-400/80 font-mono">@ 80 €/h</span>
-            </div>
-          </div>
+        <canvas id="city-canvas" class="absolute inset-0 w-full h-full block" aria-label="Ville Kopek 3D · avancement du contrat Nessy"></canvas>
 
-          <!-- Bar container 120% width to allow overflow surplus visual -->
-          <div class="pr-[16.666%]">
-            <div class="relative h-6 bg-zinc-900/80 rounded-full overflow-visible border border-zinc-800">
-
-              <div class="absolute inset-y-0 left-0 rounded-l-full flex items-center" style="width:57.14%; background: linear-gradient(90deg, rgba(99,102,241,0.22) 0%, rgba(99,102,241,0.14) 100%);">
-                <span class="absolute right-3 text-[10px] font-mono font-semibold text-indigo-300/80 tracking-wider uppercase">Socle</span>
-              </div>
-
-              <div class="absolute top-0 bottom-0 w-[3px] bg-indigo-300/80 z-[1]" style="left:57.14%"></div>
-
-              <div class="absolute inset-y-0 flex items-center" style="left:57.14%; width:42.86%; background: linear-gradient(90deg, rgba(217,70,239,0.18) 0%, rgba(217,70,239,0.10) 100%); border-top-right-radius:9999px; border-bottom-right-radius:9999px;">
-                <span class="absolute left-3 text-[10px] font-mono font-semibold text-fuchsia-300/80 tracking-wider uppercase">Régie Garantie · 80 €/h</span>
-              </div>
-
-              <div class="absolute top-0 bottom-0 w-[3px] bg-fuchsia-300/80 z-[1]" style="left:100%"></div>
-
-              <div class="absolute top-0 bottom-0 rounded-r-full flex items-center" style="left:100%; width:20%; background: linear-gradient(90deg, rgba(52,211,153,0.22) 0%, rgba(52,211,153,0.12) 100%);">
-                <span class="absolute left-3 text-[10px] font-mono font-semibold text-emerald-300/80 tracking-wider uppercase">Surplus Facturable</span>
-              </div>
-
-              <div class="absolute top-0 bottom-0 w-[2px] bg-emerald-300/50 z-[1]" style="left:120%"></div>
-
-              <div id="gauge-fill" class="gauge-seg absolute inset-y-0 left-0 rounded-full z-[2] pointer-events-none"
-                style="width:0%; background: linear-gradient(90deg, rgba(99,102,241,0.95) 0%, rgba(168,85,247,0.95) 50%, rgba(52,211,153,0.95) 100%); box-shadow: 0 0 24px -6px rgba(168,85,247,0.65); mix-blend-mode: normal;"></div>
-
-              <div id="gauge-cursor" class="absolute top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-white shadow-2xl border-[3px] border-white ring-4 ring-indigo-400/40 -translate-x-1/2 transition-all duration-500 ease-out z-[3] pointer-events-none flex items-center justify-center" style="left:0%">
-                <div class="w-2 h-2 rounded-full bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-emerald-400"></div>
-              </div>
-            </div>
-
-            <div class="flex justify-between mt-2 pr-[16.666%] text-[10px] text-zinc-500 font-mono chip">
-              <span>0 €</span>
-              <span style="margin-left:calc(57.14% - 3ch)">2 000 €</span>
-              <span style="margin-right:calc(0% - 0ch)">3 500 €</span>
-              <span class="text-emerald-400" style="margin-right:-1ch">+ 3 500 €</span>
-            </div>
-          </div>
-
-          <!-- Status band -->
-          <div id="gauge-status" class="mt-8 rounded-xl p-4 sm:p-4.5 flex items-start gap-3.5 border"></div>
+        <!-- Affiché uniquement si la 3D ne peut pas démarrer (WebGL indisponible, fichier manquant…) -->
+        <div id="city-fallback" class="hidden absolute inset-0 flex flex-col items-center justify-center text-center px-6 gap-2">
+          <i data-lucide="box" class="w-8 h-8 text-indigo-400/70"></i>
+          <div class="text-sm font-semibold text-zinc-300">Vue 3D indisponible sur cet appareil</div>
+          <div class="text-[11px] text-zinc-500 max-w-xs">Les chiffres ci-dessous restent exacts, seul le rendu de la ville est désactivé.</div>
+          <code id="city-fallback-detail" class="text-[10px] text-zinc-600 font-mono mt-1"></code>
         </div>
 
-        <!-- Tier numbers -->
-        <div class="grid grid-cols-3 gap-2 sm:gap-4 mt-6">
-          <div class="rounded-xl p-3 border border-zinc-800 bg-zinc-900/40">
-            <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-indigo-300 font-semibold mb-1.5">
-              <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span> Palier 1 · Socle
-            </div>
-            <div class="flex items-baseline gap-1.5">
-              <span id="tier1-h" class="font-mono text-xl font-bold chip">0 h</span>
-              <span class="text-xs text-zinc-500">/ 25 h</span>
-            </div>
-            <div id="tier1-eur" class="text-[11px] text-zinc-500 font-mono mt-0.5">0 €</div>
+        <!-- Panneaux indicateurs quartiers -->
+        <div class="absolute left-3 sm:left-6 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
+                    bg-red-500/15 border border-red-400/40 text-red-300 backdrop-blur pointer-events-none">
+          Socle · 25 h
+        </div>
+        <div class="absolute left-1/2 -translate-x-1/2 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
+                    bg-fuchsia-500/15 border border-fuchsia-400/40 text-fuchsia-300 backdrop-blur pointer-events-none">
+          Garantie
+        </div>
+        <div class="absolute right-3 sm:right-6 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
+                    bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 backdrop-blur pointer-events-none">
+          Bonus
+        </div>
+
+        <!-- Indice d'interaction (desktop seulement : sur mobile le bandeau occupe le bas) -->
+        <div class="hidden sm:flex absolute left-1/2 -translate-x-1/2 bottom-3 text-[10px] text-white/35 tracking-wide pointer-events-none items-center gap-1.5">
+          <i data-lucide="move" class="w-3 h-3"></i> Glissez pour tourner autour de la ville
+        </div>
+
+        <!-- ================= HUD =================
+             Mobile : bandeau fin en bas, pour ne pas masquer la ville.
+             sm+ : carte flottante détaillée en bas à droite. -->
+        <div class="absolute left-2 right-2 bottom-2 sm:left-auto sm:right-4 sm:bottom-4 sm:w-[20rem] rounded-2xl p-2.5 sm:p-3.5 backdrop-blur-xl pointer-events-none
+                    bg-zinc-950/75 border border-white/10 shadow-[0_30px_60px_-10px_rgba(0,0,0,0.7)]
+                    grid grid-cols-2 gap-2 sm:gap-2.5 text-[11px] leading-tight">
+          <div class="col-span-2 hidden sm:flex items-center gap-2 pb-2 mb-0.5 border-b border-white/10">
+            <i data-lucide="map" class="w-4 h-4 text-indigo-400"></i>
+            <div class="font-bold tracking-wider uppercase text-white text-[11px]">Kopek · City Builder</div>
           </div>
-          <div class="rounded-xl p-3 border border-zinc-800 bg-zinc-900/40">
-            <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-fuchsia-300 font-semibold mb-1.5">
-              <span class="w-1.5 h-1.5 rounded-full bg-fuchsia-400"></span> Palier 2 · Régie Garantie
-            </div>
-            <div class="flex items-baseline gap-1.5">
-              <span id="tier2-h" class="font-mono text-xl font-bold chip">0 h</span>
-              <span class="text-xs text-zinc-500">/ 18,75 h</span>
-            </div>
-            <div id="tier2-eur" class="text-[11px] text-zinc-500 font-mono mt-0.5">0 € @ 80 €/h</div>
+          <!-- Les 4 tuiles détaillées mangeraient tout l'écran sur un téléphone : réservées au sm+ -->
+          <div class="hidden sm:block rounded-xl bg-red-500/10 border border-red-400/30 p-2">
+            <div class="text-[9px] uppercase tracking-wider text-red-300/90">Socle</div>
+            <div id="hud-socle" class="font-mono font-bold text-red-300 text-[13px] mt-0.5">—</div>
           </div>
-          <div class="rounded-xl p-3 border border-zinc-800 bg-zinc-900/40">
-            <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-emerald-300 font-semibold mb-1.5">
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Palier 3 · Surplus
+          <div class="hidden sm:block rounded-xl bg-fuchsia-500/10 border border-fuchsia-400/30 p-2">
+            <div class="text-[9px] uppercase tracking-wider text-fuchsia-300/90">Garantie</div>
+            <div id="hud-garanti" class="font-mono font-bold text-fuchsia-300 text-[13px] mt-0.5">—</div>
+          </div>
+          <div class="hidden sm:block rounded-xl bg-emerald-500/10 border border-emerald-400/30 p-2">
+            <div class="text-[9px] uppercase tracking-wider text-emerald-300/90">Bonus</div>
+            <div id="hud-bonus" class="font-mono font-bold text-emerald-300 text-[13px] mt-0.5">—</div>
+          </div>
+          <div class="hidden sm:block rounded-xl bg-indigo-500/10 border border-indigo-400/30 p-2">
+            <div class="text-[9px] uppercase tracking-wider text-indigo-300/90">Population</div>
+            <div id="hud-pop" class="font-mono font-bold text-indigo-300 text-[13px] mt-0.5">—</div>
+          </div>
+          <div class="col-span-2 rounded-xl bg-amber-500/10 border border-amber-400/30 p-2 sm:p-2.5">
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-[9px] uppercase tracking-wider text-amber-300/90 truncate">Acquis contractuel</div>
+                <div id="hud-acquis" class="font-mono font-bold text-amber-300 text-[13px] sm:text-[14px] mt-0.5">—</div>
+              </div>
+              <div class="text-right min-w-0">
+                <div class="text-[9px] uppercase tracking-wider text-zinc-400">+ Bonus</div>
+                <div id="hud-ca-bonus" class="font-mono font-bold text-emerald-400 text-[13px] sm:text-[14px] mt-0.5">—</div>
+              </div>
             </div>
-            <div class="flex items-baseline gap-1.5">
-              <span id="tier3-h" class="font-mono text-xl font-bold chip text-emerald-300">0 h</span>
+            <div class="mt-1.5 sm:mt-2 h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+              <div id="hud-bar" class="h-full bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-emerald-400 transition-all duration-700" style="width:0%"></div>
             </div>
-            <div id="tier3-eur" class="text-[11px] text-emerald-400/80 font-mono mt-0.5">+ 0 €</div>
+            <div id="hud-label" class="mt-1 text-[10px] text-zinc-400 font-mono leading-snug">—</div>
           </div>
         </div>
       </section>
-
-      <!-- BENTO #2 · POCKET MONEY (4 cols) -->
-      <section class="col-span-12 lg:col-span-4 relative rounded-2xl card-hover overflow-hidden"
-        style="background: linear-gradient(160deg, rgba(16,185,129,0.12) 0%, rgba(6,78,59,0.18) 45%, rgba(24,24,27,0.6) 100%); border:1px solid rgba(16,185,129,0.3); box-shadow: 0 0 70px -20px rgba(16,185,129,0.35);">
-        <div class="absolute -top-20 -right-20 w-64 h-64 rounded-full bg-emerald-400/30 blur-3xl"></div>
-        <div class="absolute -bottom-16 -left-10 w-52 h-52 rounded-full bg-lime-500/20 blur-3xl"></div>
-        <div class="relative p-5 sm:p-6 h-full flex flex-col justify-between gap-5">
-          <div class="flex items-start justify-between">
-            <div>
-              <div class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-400/10 text-emerald-300 text-[10px] font-bold tracking-[0.15em] uppercase border border-emerald-400/30 badge-pulse">
-                <i data-lucide="wallet" class="w-3 h-3"></i> Pocket Money
-              </div>
-              <div class="text-[11px] text-emerald-200/60 mt-2 uppercase tracking-wider">Reste NET Disponible</div>
-            </div>
-            <div class="w-11 h-11 rounded-xl bg-emerald-400/20 border border-emerald-400/40 flex items-center justify-center shadow-pocket">
-              <i data-lucide="coins" class="w-5 h-5 text-emerald-300"></i>
-            </div>
-          </div>
-          <div>
-            <div id="pocket-amount" class="font-mono text-5xl sm:text-6xl font-bold tracking-tight chip glow-gradient-text leading-none">
-              0 €
-            </div>
-            <div id="pocket-detail" class="text-xs text-emerald-100/60 mt-3 space-y-0.5"></div>
-          </div>
-          <div class="grid grid-cols-2 gap-3 pt-2 border-t border-emerald-400/20">
-            <div>
-              <div class="text-[9px] uppercase tracking-wider text-emerald-200/50 mb-1">CA Global HTVA</div>
-              <div id="pocket-ca" class="font-mono font-bold text-sm chip text-emerald-100">0 €</div>
-            </div>
-            <div>
-              <div class="text-[9px] uppercase tracking-wider text-emerald-200/50 mb-1">Charges + Provisions</div>
-              <div id="pocket-charges" class="font-mono font-bold text-sm chip text-emerald-100/80">−0 €</div>
-            </div>
-          </div>
-        </div>
-      </section>
-
 
       <!-- BENTO #3 · QUICK ENTRY (12 cols) -->
       <section class="col-span-12 card rounded-2xl p-4 sm:p-5 card-hover">
@@ -420,6 +280,155 @@
             <span>Saisissez la durée pour voir l'arrondi de facturation.</span>
           </div>
         </form>
+      </section>
+
+      <!-- BENTO #1 · HERO JAUGE NESSY (8 cols) -->
+      <section class="col-span-12 lg:col-span-8 card rounded-2xl p-5 sm:p-7 card-hover relative overflow-hidden">
+        <div class="absolute -right-20 -top-20 w-80 h-80 rounded-full bg-gradient-to-br from-indigo-600/20 via-fuchsia-500/10 to-emerald-400/10 blur-3xl pointer-events-none"></div>
+        <div class="flex items-start justify-between flex-wrap gap-4 relative">
+          <div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 text-[10px] font-semibold tracking-wider uppercase border border-indigo-500/20">
+                <i data-lucide="shield-check" class="w-3 h-3"></i> Contrat Principal · Nessy
+              </span>
+              <span id="phase-badge" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-zinc-800/80 text-zinc-400 text-[10px] font-semibold tracking-wider uppercase border border-zinc-700/70"></span>
+            </div>
+            <h1 id="period-title" class="text-2xl sm:text-3xl font-bold tracking-tight"></h1>
+            <p id="period-sub" class="text-sm text-zinc-500 mt-1"></p>
+          </div>
+          <div class="text-right">
+            <div class="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-1">CA HTVA · Nessy</div>
+            <div id="nessy-ca" class="font-mono text-3xl sm:text-4xl font-bold tracking-tight chip">0 €</div>
+          </div>
+        </div>
+        <p id="nessy-sub" class="text-sm text-zinc-400 mt-3 relative leading-relaxed"></p>
+
+        <!-- ================== JAUGE ==================
+             La piste fait 100 % = 43,75 h (le minimum garanti). Le surplus au-delà
+             n'est PLUS dessiné en débordement (l'ancienne version poussait des
+             éléments à left:120 %, ce qui explosait la mise en page sur mobile) :
+             il est affiché dans son propre bandeau juste en dessous. -->
+        <div class="mt-6 sm:mt-8 relative">
+          <!-- Libellés de zones (au-dessus de la piste, masqués sur très petit écran) -->
+          <div class="relative h-5 mb-1.5 hidden sm:block">
+            <span class="absolute -translate-x-1/2 font-mono font-bold text-indigo-300 text-[11px] whitespace-nowrap" style="left:57.14%">
+              25 h · Socle
+            </span>
+            <span class="absolute right-0 font-mono font-bold text-fuchsia-300 text-[11px] whitespace-nowrap">
+              43,75 h · Min Garanti
+            </span>
+          </div>
+
+          <div class="relative h-8 sm:h-9 bg-zinc-900/80 rounded-full border border-zinc-800 overflow-hidden">
+            <!-- Zone Socle -->
+            <div class="absolute inset-y-0 left-0 flex items-center" style="width:57.14%; background: linear-gradient(90deg, rgba(99,102,241,0.22) 0%, rgba(99,102,241,0.14) 100%);">
+              <span class="absolute left-3 text-[9px] sm:text-[10px] font-mono font-semibold text-indigo-300/80 tracking-wider uppercase">Socle</span>
+            </div>
+            <!-- Zone Régie garantie -->
+            <div class="absolute inset-y-0 flex items-center" style="left:57.14%; right:0; background: linear-gradient(90deg, rgba(217,70,239,0.18) 0%, rgba(217,70,239,0.10) 100%);">
+              <span class="absolute left-3 text-[9px] sm:text-[10px] font-mono font-semibold text-fuchsia-300/80 tracking-wider uppercase whitespace-nowrap">
+                Régie · 80 €/h
+              </span>
+            </div>
+            <!-- Séparateur 25 h -->
+            <div class="absolute top-0 bottom-0 w-[2px] bg-indigo-300/70 z-[2]" style="left:57.14%"></div>
+
+            <!-- Remplissage -->
+            <div id="gauge-fill" class="gauge-seg absolute inset-y-0 left-0 z-[3] pointer-events-none"
+              style="width:0%; background: linear-gradient(90deg, rgba(99,102,241,0.95) 0%, rgba(168,85,247,0.95) 60%, rgba(52,211,153,0.95) 100%); box-shadow: 0 0 24px -6px rgba(168,85,247,0.65);"></div>
+            <!-- Marqueur de position (reste TOUJOURS dans la piste) -->
+            <div id="gauge-cursor" class="absolute inset-y-0 w-[3px] bg-white rounded-full z-[4] pointer-events-none transition-all duration-500 ease-out shadow-[0_0_12px_2px_rgba(255,255,255,0.5)]" style="left:0%"></div>
+          </div>
+
+          <!-- Bornes (positionnées de façon à ne jamais dépasser les bords) -->
+          <div class="relative h-4 mt-2 text-[10px] font-mono text-zinc-500 chip">
+            <span class="absolute left-0 whitespace-nowrap">0 h</span>
+            <span class="absolute -translate-x-1/2 whitespace-nowrap" style="left:57.14%">
+              25 h<span class="hidden sm:inline"> · 2 000 €</span>
+            </span>
+            <span class="absolute right-0 whitespace-nowrap">
+              43,75 h<span class="hidden sm:inline"> · 3 500 €</span>
+            </span>
+          </div>
+
+          <!-- Bandeau surplus (affiché uniquement au-delà de 43,75 h) -->
+          <div id="gauge-surplus" class="hidden mt-3 rounded-xl px-3 py-2.5 border border-emerald-500/40 bg-emerald-500/10 flex items-center gap-2.5">
+            <i data-lucide="trending-up" class="w-4 h-4 text-emerald-300 flex-none"></i>
+            <span id="gauge-surplus-text" class="text-[12px] sm:text-sm text-emerald-100 font-medium"></span>
+          </div>
+
+          <!-- Status band -->
+          <div id="gauge-status" class="mt-5 sm:mt-6 rounded-xl p-3.5 sm:p-4 flex items-start gap-3 border"></div>
+        </div>
+
+        <!-- Tier numbers -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 mt-5 sm:mt-6">
+          <div class="rounded-xl p-3 border border-zinc-800 bg-zinc-900/40">
+            <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-indigo-300 font-semibold mb-1.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span> Palier 1 · Socle
+            </div>
+            <div class="flex items-baseline gap-1.5">
+              <span id="tier1-h" class="font-mono text-xl font-bold chip">0 h</span>
+              <span class="text-xs text-zinc-500">/ 25 h remboursées</span>
+            </div>
+            <div id="tier1-eur" class="text-[11px] text-zinc-500 font-mono mt-0.5">0 €</div>
+          </div>
+          <div class="rounded-xl p-3 border border-zinc-800 bg-zinc-900/40">
+            <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-fuchsia-300 font-semibold mb-1.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-fuchsia-400"></span> Palier 2 · Régie Garantie
+            </div>
+            <div class="flex items-baseline gap-1.5">
+              <span id="tier2-h" class="font-mono text-xl font-bold chip">0 h</span>
+              <span class="text-xs text-zinc-500">/ 18,75 h remboursées</span>
+            </div>
+            <div id="tier2-eur" class="text-[11px] text-zinc-500 font-mono mt-0.5">0 € @ 80 €/h</div>
+          </div>
+          <div class="rounded-xl p-3 border border-zinc-800 bg-zinc-900/40">
+            <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-emerald-300 font-semibold mb-1.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Palier 3 · Surplus
+            </div>
+            <div class="flex items-baseline gap-1.5">
+              <span id="tier3-h" class="font-mono text-xl font-bold chip text-emerald-300">0 h</span>
+            </div>
+            <div id="tier3-eur" class="text-[11px] text-emerald-400/80 font-mono mt-0.5">+ 0 €</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- BENTO #2 · POCKET MONEY (4 cols) -->
+      <section class="col-span-12 lg:col-span-4 relative rounded-2xl card-hover overflow-hidden"
+        style="background: linear-gradient(160deg, rgba(16,185,129,0.12) 0%, rgba(6,78,59,0.18) 45%, rgba(24,24,27,0.6) 100%); border:1px solid rgba(16,185,129,0.3); box-shadow: 0 0 70px -20px rgba(16,185,129,0.35);">
+        <div class="absolute -top-20 -right-20 w-64 h-64 rounded-full bg-emerald-400/30 blur-3xl"></div>
+        <div class="absolute -bottom-16 -left-10 w-52 h-52 rounded-full bg-lime-500/20 blur-3xl"></div>
+        <div class="relative p-5 sm:p-6 h-full flex flex-col justify-between gap-5">
+          <div class="flex items-start justify-between">
+            <div>
+              <div class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-400/10 text-emerald-300 text-[10px] font-bold tracking-[0.15em] uppercase border border-emerald-400/30 badge-pulse">
+                <i data-lucide="wallet" class="w-3 h-3"></i> Pocket Money
+              </div>
+              <div class="text-[11px] text-emerald-200/60 mt-2 uppercase tracking-wider">Reste NET Disponible</div>
+            </div>
+            <div class="w-11 h-11 rounded-xl bg-emerald-400/20 border border-emerald-400/40 flex items-center justify-center shadow-pocket">
+              <i data-lucide="coins" class="w-5 h-5 text-emerald-300"></i>
+            </div>
+          </div>
+          <div>
+            <div id="pocket-amount" class="font-mono text-5xl sm:text-6xl font-bold tracking-tight chip glow-gradient-text leading-none">
+              0 €
+            </div>
+            <div id="pocket-detail" class="text-xs text-emerald-100/60 mt-3 space-y-0.5"></div>
+          </div>
+          <div class="grid grid-cols-2 gap-3 pt-2 border-t border-emerald-400/20">
+            <div>
+              <div class="text-[9px] uppercase tracking-wider text-emerald-200/50 mb-1">CA Global HTVA</div>
+              <div id="pocket-ca" class="font-mono font-bold text-sm chip text-emerald-100">0 €</div>
+            </div>
+            <div>
+              <div class="text-[9px] uppercase tracking-wider text-emerald-200/50 mb-1">Charges + Provisions</div>
+              <div id="pocket-charges" class="font-mono font-bold text-sm chip text-emerald-100/80">−0 €</div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- BENTO #4 · FINANCIAL ROW (12 cols · 4 cards) -->
@@ -534,73 +543,6 @@
             <i data-lucide="clock-3" class="w-10 h-10 mx-auto mb-3 opacity-40"></i>
             <p class="text-sm">Aucun encodage pour ce mois.</p>
             <p class="text-xs mt-1 text-zinc-600">Utilisez la barre de saisie rapide ci-dessus.</p>
-          </div>
-        </div>
-      </section>
-
-      <!-- ============================================================= -->
-      <!-- BENTO · KOPEK CITY · vraie ville 3D low-poly (Three.js, vendorée en local) -->
-      <!-- Générée chaque mois avec un thème/agencement différent (seed = année×12+mois). -->
-      <!-- ============================================================= -->
-      <section id="kopek-city" class="col-span-12 relative rounded-3xl card-hover overflow-hidden select-none h-[340px] sm:h-[440px] lg:h-[560px]"
-        style="background:#0b1120; border:1px solid rgba(129,140,248,0.3);
-               box-shadow: 0 40px 120px -40px rgba(99,102,241,0.55), inset 0 1px 0 rgba(255,255,255,0.05);">
-
-        <canvas id="city-canvas" class="absolute inset-0 w-full h-full block" aria-label="Ville Kopek 3D · avancement du contrat Nessy"></canvas>
-
-        <!-- Panneaux indicateurs quartiers -->
-        <div class="absolute left-3 sm:left-6 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
-                    bg-red-500/15 border border-red-400/40 text-red-300 backdrop-blur pointer-events-none">
-          Socle · 25 h
-        </div>
-        <div class="absolute left-1/2 -translate-x-1/2 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
-                    bg-fuchsia-500/15 border border-fuchsia-400/40 text-fuchsia-300 backdrop-blur pointer-events-none">
-          Garantie · +18,75 h
-        </div>
-        <div class="absolute right-3 sm:right-6 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
-                    bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 backdrop-blur pointer-events-none">
-          Bonus · Surplus
-        </div>
-
-        <!-- ================= HUD SIMCITY (info-bulle droite) ================= -->
-        <div class="absolute right-2 sm:right-4 bottom-2 sm:bottom-4 w-[15rem] sm:w-[20rem] max-w-[calc(100%-1rem)] rounded-2xl p-2.5 sm:p-3.5 backdrop-blur-xl pointer-events-none
-                    bg-zinc-950/70 border border-white/10 shadow-[0_30px_60px_-10px_rgba(0,0,0,0.7)]
-                    grid grid-cols-2 gap-2.5 text-[11px] leading-tight">
-          <div class="col-span-2 flex items-center gap-2 pb-2 mb-1 border-b border-white/10">
-            <i data-lucide="map" class="w-4 h-4 text-indigo-400"></i>
-            <div class="font-bold tracking-wider uppercase text-white text-[11px]">Kopek · City Builder</div>
-          </div>
-          <div class="rounded-xl bg-red-500/10 border border-red-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-red-300/90">Socle</div>
-            <div id="hud-socle" class="font-mono font-bold text-red-300 text-[13px] mt-0.5">—</div>
-          </div>
-          <div class="rounded-xl bg-fuchsia-500/10 border border-fuchsia-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-fuchsia-300/90">Garantie</div>
-            <div id="hud-garanti" class="font-mono font-bold text-fuchsia-300 text-[13px] mt-0.5">—</div>
-          </div>
-          <div class="rounded-xl bg-emerald-500/10 border border-emerald-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-emerald-300/90">Bonus</div>
-            <div id="hud-bonus" class="font-mono font-bold text-emerald-300 text-[13px] mt-0.5">—</div>
-          </div>
-          <div class="rounded-xl bg-indigo-500/10 border border-indigo-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-indigo-300/90">Population</div>
-            <div id="hud-pop" class="font-mono font-bold text-indigo-300 text-[13px] mt-0.5">—</div>
-          </div>
-          <div class="col-span-2 rounded-xl bg-amber-500/10 border border-amber-400/30 p-2.5">
-            <div class="flex items-center justify-between">
-              <div>
-                <div class="text-[9px] uppercase tracking-wider text-amber-300/90">Acquis Contractuel (€ HT)</div>
-                <div id="hud-acquis" class="font-mono font-bold text-amber-300 text-[14px] mt-0.5">—</div>
-              </div>
-              <div class="text-right">
-                <div class="text-[9px] uppercase tracking-wider text-zinc-400">+ Bonus</div>
-                <div id="hud-ca-bonus" class="font-mono font-bold text-emerald-400 text-[14px] mt-0.5">—</div>
-              </div>
-            </div>
-            <div class="mt-2 h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
-              <div id="hud-bar" class="h-full bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-emerald-400" style="width:0%"></div>
-            </div>
-            <div id="hud-label" class="mt-1 text-[10px] text-zinc-400 font-mono">—</div>
           </div>
         </div>
       </section>
