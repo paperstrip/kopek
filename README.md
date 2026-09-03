@@ -31,7 +31,7 @@ Deux protections :
 fichiers** (une simple date suffit) :
 
 ```bash
-OLD=2026-09-03-10; NEW=2026-09-04-1
+OLD=2026-09-03-11; NEW=2026-09-04-1
 grep -rl "$OLD" index.html app.js city3d.js vendor/ version.json \
   | xargs sed -i "s/$OLD/$NEW/g"
 ```
@@ -71,31 +71,27 @@ C'est délibéré — toute requête combinant plusieurs champs exigerait un ind
 composite créé à la main dans la console Firebase, faute de quoi elle échoue
 silencieusement.
 
-## ⚠️ Prérequis : la base Firestore doit exister
+## ⚠️ Prérequis : base Firestore créée **et** règles publiées
 
-Vérifié le 03/09/2026 par un appel direct à l'API Firestore REST, jeton
-d'authentification valide à l'appui :
+Deux vérifications faites en direct sur le projet `kopek-4ffe6` via l'API
+Firestore REST, jeton d'authentification valide à l'appui :
 
-```
-POST https://firestore.googleapis.com/v1/projects/kopek-4ffe6/databases/(default)/documents:runQuery
-→ 404 NOT_FOUND
-  "The database (default) does not exist for project kopek-4ffe6"
-```
+| Date | Appel | Réponse | Diagnostic |
+|---|---|---|---|
+| 03/09/2026 | `documents:runQuery` | `404 NOT_FOUND` · *The database (default) does not exist* | aucune base provisionnée |
+| 03/09/2026 (après création) | `documents:runQuery` | `403 PERMISSION_DENIED` | base créée, mais règles par défaut du mode production = tout refusé |
 
-Le projet Firebase existe bel et bien (l'authentification par e-mail/mot de
-passe fonctionne, un projet inexistant renvoie un 403 d'une toute autre forme) :
-c'est **la base Firestore elle-même qui n'est pas provisionnée**. Aucune lecture
-ni écriture n'est possible tant que ce n'est pas corrigé, ce qui explique les
-données disparues et l'interface qui ne réagit pas.
+Une base créée « en mode production » démarre avec `allow read, write: if false;` :
+tant que les règles ci-dessous ne sont pas **publiées**, l'app ne peut ni lire ni
+écrire. Un projet Firebase inexistant, lui, renvoie un `403` d'une forme
+différente (`CONSUMER_INVALID`) — c'est ce qui permet de distinguer les cas.
 
-**Correction (console Firebase, une fois) :** Firestore Database → *Créer une
-base de données* → région `europe-west` → mode production, puis appliquer les
-règles ci-dessous.
-
-Depuis la version `2026-09-03-10`, l'app ne reste plus muette dans ce cas : si
-aucune donnée n'arrive en 8 secondes, un bandeau rouge affiche la marche à
-suivre et le bouton « Ajouter des heures » redevient cliquable au lieu de rester
-définitivement inerte.
+Depuis `2026-09-03-11`, l'app diagnostique elle-même les deux situations :
+elle affiche le code d'erreur réel dès qu'un écouteur le remonte, propose un
+bouton « Copier les règles Firestore », et débloque le bouton « Ajouter des
+heures » au lieu de le laisser définitivement inerte. Le chien de garde de
+8 secondes n'écrase jamais une erreur réellement remontée et n'invente pas de
+cause quand il n'en connaît aucune.
 
 ## Règles Firestore attendues
 

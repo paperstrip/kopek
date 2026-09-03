@@ -14,7 +14,7 @@ import {
   serverTimestamp,
   setDoc,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-03-10';
+} from './firebase-config.js?v=2026-09-03-11';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -127,6 +127,34 @@ function toast(msg, icon = 'check-circle', variant = 'success') {
 // kopek-4ffe6 : « The database (default) does not exist for project kopek-4ffe6 ».
 // Le projet Firebase existe et l'authentification fonctionne, mais aucune base
 // Firestore n'y est provisionnée : toute lecture et toute écriture échouent.
+// Règles minimales : chacun ne lit et n'écrit que ses propres documents.
+const RULES_TEXT = `rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{col}/{doc} {
+      allow read, delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+      allow create, update: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+    }
+  }
+}`;
+
+const RULES_MSG =
+  'Les règles de sécurité de Firestore refusent la lecture et l\'écriture — c\'est le '
+  + 'réglage par défaut d\'une base créée en mode production. Console Firebase → '
+  + 'Firestore Database → onglet Règles : remplacez tout par les règles ci-dessous, '
+  + 'cliquez sur Publier, puis rechargez cette page.';
+
+// Le chien de garde ne sait PAS pourquoi rien n'arrive : il ne doit donc rien
+// affirmer. Une cause inventée (« la base n'existe pas » alors qu'elle existe)
+// envoie chercher au mauvais endroit — c'est pire que pas de message du tout.
+const NO_DATA_MSG =
+  'Firestore n\'a renvoyé aucune donnée. Deux causes possibles, à vérifier dans '
+  + 'la console Firebase du projet kopek-4ffe6 : les règles de sécurité (onglet '
+  + 'Règles) refusent la lecture, ou aucune base Firestore n\'a encore été créée '
+  + '(Firestore Database → Créer une base de données, région europe-west).';
+
 const FIRESTORE_MISSING_MSG =
   "Aucune base Firestore n'existe dans le projet kopek-4ffe6. Ouvrez la console "
   + 'Firebase → Firestore Database → « Créer une base de données » (région europe-west, '
@@ -136,7 +164,7 @@ const FIRESTORE_MISSING_MSG =
 function explainFirebaseError(err) {
   const code = (err && err.code) || '';
   const map = {
-    'permission-denied': "Firestore refuse l'écriture. Les règles de sécurité du projet doivent autoriser l'utilisateur connecté à écrire dans les collections « clients » et « time_logs » (voir README.md).",
+    'permission-denied': RULES_MSG,
     'unauthenticated': 'Session expirée · reconnectez-vous.',
     'unavailable': 'Firestore est injoignable (réseau ou hors ligne).',
     'failed-precondition': "Firestore réclame un index. Normalement l'app n'en a plus besoin — signalez ce message.",
@@ -158,8 +186,23 @@ function showErrorBanner(action, err) {
   const codeEl = document.getElementById('error-banner-code');
   if (detail) detail.textContent = `${action} — ${explainFirebaseError(err)}`;
   if (codeEl) codeEl.textContent = `code : ${code}`;
+  // Recopier des règles Firestore à la main depuis un téléphone est intenable :
+  // on les met dans le presse-papier en un geste.
+  const copyBtn = document.getElementById('error-banner-copy');
+  if (copyBtn) copyBtn.classList.toggle('hidden', code !== 'permission-denied');
   el.classList.remove('hidden');
 }
+
+document.getElementById('error-banner-copy')?.addEventListener('click', async (e) => {
+  try {
+    await navigator.clipboard.writeText(RULES_TEXT);
+    e.currentTarget.textContent = 'Règles copiées ✓';
+  } catch {
+    // Presse-papier refusé (contexte non sécurisé) : on affiche les règles en clair.
+    const detail = document.getElementById('error-banner-text');
+    if (detail) detail.textContent = RULES_TEXT;
+  }
+});
 
 function hideErrorBanner() {
   const el = document.getElementById('error-banner');
@@ -300,15 +343,29 @@ function teardownData() {
 // moindre message. On borne donc l'attente.
 const READ_TIMEOUT_MS = 8000;
 let readWatchdog = null;
+let readReported = false;   // un écouteur a-t-il déjà remonté une vraie erreur ?
+
+// Une lecture refusée est définitive : inutile de faire patienter 8 secondes de
+// plus derrière un bouton inerte. On affiche la vraie cause et on rend la main.
+function onReadError(action, err) {
+  readReported = true;
+  STATE.dataTimeout = true;
+  if (readWatchdog) { clearTimeout(readWatchdog); readWatchdog = null; }
+  showErrorBanner(action, err);
+  renderAll();
+}
 
 function subscribeData() {
   teardownData();
   const uid = STATE.user.uid;
 
+  readReported = false;
   readWatchdog = setTimeout(() => {
     if (STATE.clientsLoaded) return;
     STATE.dataTimeout = true;
-    showErrorBanner('Firestore ne répond pas', { code: 'not-found', message: FIRESTORE_MISSING_MSG });
+    // Si un écouteur a déjà remonté son vrai code d'erreur, on le laisse en
+    // place : on se contente de débloquer l'interface.
+    if (!readReported) showErrorBanner('Aucune donnée reçue', { code: 'timeout', message: NO_DATA_MSG });
     renderAll();   // on débloque l'interface plutôt que de laisser un bouton mort
   }, READ_TIMEOUT_MS);
 
@@ -329,7 +386,7 @@ function subscribeData() {
         .finally(() => { seedingDefaultProject = false; });
     }
     renderAll();
-  }, (err) => showErrorBanner('Lecture des projets impossible', err));
+  }, (err) => onReadError('Lecture des projets impossible', err));
 
   const qLogs = query(colTimeLogs(), where('userId', '==', uid));
   unsubLogs = onSnapshot(qLogs, (snap) => {
@@ -338,7 +395,7 @@ function subscribeData() {
     list.sort((a, b) => toMillisSafe(a.date) - toMillisSafe(b.date));
     STATE.allLogs = list;
     renderAll();
-  }, (err) => showErrorBanner('Lecture des encodages impossible', err));
+  }, (err) => onReadError('Lecture des encodages impossible', err));
 }
 
 function ensureDefaultProject() {
@@ -807,7 +864,7 @@ async function ensureCityLoaded() {
   if (cityStatus === 'ready' || cityStatus === 'loading' || cityStatus === 'failed') return;
   cityStatus = 'loading';
   try {
-    cityMod = await import('./city3d.js?v=2026-09-03-10');
+    cityMod = await import('./city3d.js?v=2026-09-03-11');
     const canvas = document.getElementById('city-canvas');
     if (!canvas) throw new Error('canvas #city-canvas introuvable');
     cityMod.initCity(canvas);
