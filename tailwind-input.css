@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { -webkit-font-smoothing: antialiased; }
+  html, body { background: #09090b; }
+  /* Évite qu'un mot/chiffre trop long fasse déborder une carte sur mobile */
+  body { overflow-wrap: anywhere; }
+}
+
+@layer components {
+  .bg-grid {
+    background-image: radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  .card {
+    background: rgba(24, 24, 27, 0.55);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(39, 39, 42, 0.9);
+  }
+  .card-hover {
+    transition: border-color .2s ease, transform .2s ease;
+  }
+  @media (hover: hover) {
+    .card-hover:hover {
+      border-color: rgba(63, 63, 70, 0.9);
+      transform: translateY(-1px);
+    }
+  }
+  .chip { font-variant-numeric: tabular-nums; }
+  .glow-gradient-text {
+    background: linear-gradient(90deg, #a5f3fc 0%, #86efac 50%, #bef264 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .gauge-seg { transition: width .6s cubic-bezier(.22, 1, .36, 1); }
+
+  /* Ces 3 classes étaient utilisées dans le HTML sans jamais avoir été définies. */
+  .badge-pulse { animation: badgePulse 2s ease-in-out infinite; }
+  .fade-in { animation: fadeIn .18s ease-out; }
+  .scrollbar-thin { scrollbar-width: thin; }
+  .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(82, 82, 91, 0.7);
+    border-radius: 9999px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+}
+
+@keyframes badgePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}

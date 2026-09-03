@@ -36,13 +36,14 @@ const DISTRICTS = [
 
 let renderer, scene, camera, controls, clock;
 let canvasEl, roEl;
-let sunMesh, sunLight;
+let sunLight;
 let cityGroup, carsGroup, confettiGroup;
 let carAnims = [];
 let confettiPool = [];
 let lastSeedKey = null;
 let growTargets = new Map(); // mesh -> {from, to, t}
 let raf = null;
+let lastBuildArgs = null;    // permet de rebâtir à l'identique si l'écran change de forme
 
 function makeSkyTexture(top, bottom) {
   const c = document.createElement('canvas');
@@ -168,11 +169,11 @@ export function initCity(canvas) {
   camera.lookAt(0, 0.6, 0);
 
   controls = new OrbitControls(camera, canvas);
-  controls.target.set(0, 0.6, 0);
+  controls.target.set(0, 1.1, 0);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
-  controls.minDistance = 9;
-  controls.maxDistance = 20;
+  controls.minDistance = 8;
+  controls.maxDistance = 40;
   controls.minPolarAngle = Math.PI * 0.18;
   controls.maxPolarAngle = Math.PI * 0.46;
   controls.enablePan = false;
@@ -190,11 +191,8 @@ export function initCity(canvas) {
   scene.add(sunLight);
   scene.add(sunLight.target);
 
-  sunMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.55, 16, 16),
-    new THREE.MeshBasicMaterial({ color: '#ffe08a' })
-  );
-  scene.add(sunMesh);
+  // Pas de disque solaire : à cette distance il passait derrière les étiquettes
+  // du HUD et bavait dans le ciel. La lumière directionnelle suffit.
 
   cityGroup = new THREE.Group(); scene.add(cityGroup);
   carsGroup = new THREE.Group(); scene.add(carsGroup);
@@ -206,12 +204,71 @@ export function initCity(canvas) {
   raf = requestAnimationFrame(tick);
 }
 
+/** 'compact' dès que le canvas est presque carré ou plus haut que large (téléphone). */
+function layoutForAspect(aspect) {
+  return aspect < 1.45 ? 'compact' : 'linear';
+}
+
+let currentLayout = null;
+let camDist = 16;
+
+/** Le brouillard doit suivre la distance de caméra, sinon il avale la ville entière. */
+function applyFog() {
+  if (scene && scene.fog) {
+    scene.fog.near = camDist * 0.85;
+    scene.fog.far = camDist * 2.6;
+  }
+}
+
+/**
+ * Recule la caméra juste ce qu'il faut pour que TOUTE la ville tienne dans le
+ * cadre, quel que soit l'angle (la caméra tourne en continu). Sans ça, un écran
+ * étroit réduit le champ horizontal et on a le nez collé sur un seul quartier.
+ */
+function frameCity() {
+  const radius = cityRadius(currentLayout || 'linear');
+  const vFov = (camera.fov * Math.PI) / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+  const dist = Math.max(radius / Math.tan(hFov / 2), (radius * 0.6) / Math.tan(vFov / 2)) * 0.98;
+  camDist = dist;
+  controls.minDistance = dist * 0.75;
+  controls.maxDistance = dist * 1.8;
+
+  // Angle de plongée : sur un écran étroit on regarde la ville de plus haut,
+  // sinon la disposition en diagonale laisse la moitié du cadre en ciel vide.
+  const polar = currentLayout === 'compact' ? 0.78 : 1.02;
+  const dirNow = camera.position.clone().sub(controls.target);
+  const azimuth = Math.atan2(dirNow.x, dirNow.z);
+  camera.position.set(
+    controls.target.x + dist * Math.sin(polar) * Math.sin(azimuth),
+    controls.target.y + dist * Math.cos(polar),
+    controls.target.z + dist * Math.sin(polar) * Math.cos(azimuth)
+  );
+  controls.update();
+  applyFog();
+  // L'ombre portée doit couvrir la ville entière, sinon les quartiers du bord
+  // perdent leur ombre quand la disposition change.
+  const sc = sunLight.shadow.camera;
+  sc.left = -radius; sc.right = radius; sc.top = radius; sc.bottom = -radius;
+  sc.far = dist * 2.5;
+  sc.updateProjectionMatrix();
+  sunLight.position.set(radius * 0.7, radius * 1.2, radius * 0.5);
+}
+
 function onResize() {
   if (!canvasEl) return;
   const w = canvasEl.clientWidth || 600, h = canvasEl.clientHeight || 400;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+
+  // Changement de forme d'écran → on rebâtit avec la disposition adaptée.
+  const wanted = layoutForAspect(camera.aspect);
+  if (wanted !== currentLayout) {
+    currentLayout = wanted;
+    if (lastBuildArgs) buildCity(lastBuildArgs.rngFactory(), lastBuildArgs.theme, lastBuildArgs.progress, currentLayout);
+  }
+  frameCity();
 }
 
 function tick() {
@@ -221,14 +278,13 @@ function tick() {
 
   controls.update();
 
-  sunMesh.position.set(Math.cos(t * 0.05) * 0.2, 8.6 + Math.sin(t * 0.4) * 0.15, -3.5);
 
   // croissance progressive des bâtiments en construction
   growTargets.forEach((g, mesh) => {
     g.t = Math.min(1, g.t + dt * 1.6);
     const s = lerp(g.from, g.to, easeOutBack(g.t));
     mesh.scale.y = Math.max(0.001, s);
-    mesh.position.y = mesh.userData.baseY * s;
+    mesh.position.y = mesh.userData.baseY;
     if (g.t >= 1) growTargets.delete(mesh);
   });
 
@@ -297,53 +353,116 @@ export function renderCityScene(agg, caps, seedKey) {
   const bonusPct = Math.min(150, (bonusH / 10) * 100);
   const progress = { socle: soclePct, garantie: garantiePct, bonus: bonusPct };
 
-  const rng = mulberry32((seedKey || 0) * 7919 + 13);
+  const seed = (seedKey || 0) * 7919 + 13;
   const theme = THEMES[Math.abs(seedKey || 0) % THEMES.length];
+  if (!currentLayout) currentLayout = layoutForAspect(camera.aspect);
+
+  // On mémorise de quoi rebâtir à l'identique si l'écran change de forme.
+  lastBuildArgs = { rngFactory: () => mulberry32(seed), theme, progress };
 
   // Le PRNG est déterministe (même seed = même mois → mêmes formes/positions/thème),
   // donc on peut reconstruire à chaque appel : seul `progress` fait varier le nombre
   // de bâtiments "débloqués". La scène reste légère (< 60 objets), le coût est négligeable.
-  buildCity(rng, theme, progress);
+  buildCity(mulberry32(seed), theme, progress, currentLayout);
   lastSeedKey = seedKey;
 
   scene.background = makeSkyTexture(theme.sky[0], theme.sky[1]);
-  scene.fog = new THREE.Fog(theme.sky[1], 16, 30);
+  scene.fog = new THREE.Fog(theme.sky[1], 1, 100);
+  frameCity();
 }
 
-function buildCity(rng, theme, progress) {
+/**
+ * Positions des quartiers selon la forme du canvas.
+ *  - 'linear'  : les 3 quartiers alignés (écran large)
+ *  - 'compact' : disposition en diagonale (écran étroit/téléphone) — une bande
+ *    horizontale de 15 unités ne peut pas remplir un viewport quasi carré.
+ */
+function districtCenters(layout) {
+  if (layout === 'compact') {
+    return [
+      { x: -3.5, z: 2.9 },
+      { x: 0.2, z: -0.2 },
+      { x: 3.9, z: -3.2 },
+    ];
+  }
+  return [
+    { x: -6.4, z: 0 },
+    { x: 0, z: 0 },
+    { x: 6.4, z: 0 },
+  ];
+}
+
+/** Rayon englobant la ville, pour cadrer la caméra sans rien couper. */
+function cityRadius(layout) {
+  const centers = districtCenters(layout);
+  let r = 0;
+  centers.forEach((c) => { r = Math.max(r, Math.hypot(c.x, c.z)); });
+  return r + 3.2; // + demi-diagonale de plaque
+}
+
+/** Segment de route entre deux points, avec ses pointillés. */
+function addRoadSegment(a, b) {
+  const roadMat = new THREE.MeshStandardMaterial({ color: '#3f3f46', roughness: 0.9 });
+  const dx = b.x - a.x, dz = b.z - a.z;
+  const len = Math.hypot(dx, dz);
+  const angle = Math.atan2(dx, dz);
+
+  const road = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.05, len + 1.2), roadMat);
+  road.position.set((a.x + b.x) / 2, 0.03, (a.z + b.z) / 2);
+  road.rotation.y = angle;
+  road.receiveShadow = true;
+  cityGroup.add(road);
+
+  const lineMat = new THREE.MeshBasicMaterial({ color: '#fde047' });
+  const dashes = Math.max(2, Math.round(len / 0.9));
+  for (let i = 0; i < dashes; i++) {
+    const t = (i + 0.5) / dashes;
+    const dash = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.001, 0.45), lineMat);
+    dash.position.set(a.x + dx * t, 0.061, a.z + dz * t);
+    dash.rotation.y = angle;
+    cityGroup.add(dash);
+  }
+}
+
+// Hauteur réelle du dessus de la plaque : calculée depuis la géométrie, car le
+// biseau de l'ExtrudeGeometry ajoute de la hauteur en plus de `depth` — une
+// valeur devinée enterrait bâtiments et parcelles dans la plaque.
+let PLATE_TOP = 0.33;
+function measurePlateTop(geo) {
+  geo.computeBoundingBox();
+  PLATE_TOP = geo.boundingBox.max.y;
+}
+
+function buildCity(rng, theme, progress, layout) {
   clearGroup(cityGroup);
   clearGroup(carsGroup);
   growTargets = new Map();
   carAnims = [];
 
+  const centers = districtCenters(layout);
+  const groundR = cityRadius(layout) + 1.2;
+
   // sol général
   const baseGround = new THREE.Mesh(
-    new THREE.CircleGeometry(9.6, 40),
+    new THREE.CircleGeometry(groundR, 44),
     new THREE.MeshStandardMaterial({ color: theme.ground, roughness: 1 })
   );
   baseGround.rotation.x = -Math.PI / 2;
   baseGround.receiveShadow = true;
   cityGroup.add(baseGround);
 
-  // route centrale reliant les 3 districts
-  const roadMat = new THREE.MeshStandardMaterial({ color: '#3f3f46', roughness: 0.9 });
-  const road = new THREE.Mesh(new THREE.BoxGeometry(14.4, 0.05, 1.15), roadMat);
-  road.position.y = 0.03;
-  road.receiveShadow = true;
-  cityGroup.add(road);
-  const lineMat = new THREE.MeshBasicMaterial({ color: '#fde047' });
-  for (let x = -6.6; x <= 6.6; x += 0.9) {
-    const dash = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.001, 0.06), lineMat);
-    dash.position.set(x, 0.061, 0);
-    cityGroup.add(dash);
-  }
+  // routes reliant les quartiers consécutifs
+  for (let i = 0; i < centers.length - 1; i++) addRoadSegment(centers[i], centers[i + 1]);
 
   DISTRICTS.forEach((d, di) => {
+    const C = centers[di];
+    const plateGeo = roundedPlateGeometry(4.7, 4.5, 0.55);
+    measurePlateTop(plateGeo);
     const plate = new THREE.Mesh(
-      roundedPlateGeometry(4.6, 3.8, 0.5),
+      plateGeo,
       new THREE.MeshStandardMaterial({ color: theme.accents[d.colorRole], roughness: 0.85, metalness: 0.02 })
     );
-    plate.position.set(d.cx, 0, 0);
+    plate.position.set(C.x, 0, C.z);
     plate.receiveShadow = true;
     cityGroup.add(plate);
 
@@ -352,13 +471,20 @@ function buildCity(rng, theme, progress) {
     const slots = [];
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        if (r === 1 && c === 1 && di === 1) continue; // laisse un espace place centrale district garantie
+        if (r === 1 && c === 1 && di === 1) continue; // place centrale du quartier Garantie
         slots.push({
-          x: d.cx + (c - (cols - 1) / 2) * 1.35 + (rng() - 0.5) * 0.28,
-          z: (r - (rows - 1) / 2) * 1.05 + (rng() - 0.5) * 0.22,
+          x: C.x + (c - (cols - 1) / 2) * 1.32 + (rng() - 0.5) * 0.16,
+          z: C.z + (r - (rows - 1) / 2) * 1.32 + (rng() - 0.5) * 0.14,
         });
       }
     }
+    // Mélange déterministe : la ville se remplit de façon dispersée et non
+    // rangée par rangée (sinon tout s'entasse dans un coin de la plaque).
+    for (let i = slots.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [slots[i], slots[j]] = [slots[j], slots[i]];
+    }
+
     const pct = progress[d.key];
     const built = Math.floor((pct / 100) * slots.length);
     const activeIdx = pct > 0 && built < slots.length ? built : -1;
@@ -366,57 +492,61 @@ function buildCity(rng, theme, progress) {
     slots.forEach((slot, idx) => {
       const isBuilt = idx < built;
       const isActive = idx === activeIdx;
-      if (!isBuilt && !isActive) return;
+      if (!isBuilt && !isActive) {
+        // Parcelle encore libre : on la matérialise pour que le quartier ne soit
+        // pas une simple dalle vide — on voit ce qu'il reste à construire.
+        const pad = new THREE.Mesh(
+          new THREE.BoxGeometry(0.86, 0.05, 0.74),
+          new THREE.MeshStandardMaterial({ color: '#3f3f46', roughness: 1 })
+        );
+        pad.position.set(slot.x, PLATE_TOP + 0.025, slot.z);
+        pad.receiveShadow = true;
+        cityGroup.add(pad);
+        return;
+      }
       const type = pick(rng, d.shapes);
       const winMat = new THREE.MeshStandardMaterial({
         color: '#fef9c3', emissive: '#facc15', emissiveIntensity: 0.7, roughness: 0.4,
       });
       winMat.userData.blink = lerp(1.2, 2.6, rng());
       winMat.userData.phase = rng() * Math.PI * 2;
-      const tempGroupHack = { userData: { winMat } };
       const bld = buildingGeometryWithMat(type, winMat, theme.accents[(d.colorRole + 1) % theme.accents.length]);
-      bld.position.set(slot.x, 0, slot.z);
+      bld.position.set(slot.x, PLATE_TOP, slot.z);
       bld.rotation.y = (rng() - 0.5) * 0.3;
-      const scale = lerp(0.86, 1.05, rng());
+      const scale = lerp(0.95, 1.1, rng());
       bld.scale.set(scale, 0, scale);
-      bld.userData.baseY = 0;
+      bld.userData.baseY = PLATE_TOP;
       cityGroup.add(bld);
       growTargets.set(bld, { from: 0, to: scale, t: isBuilt ? 1 : 0 });
       if (isBuilt) bld.scale.y = scale;
 
       if (isActive) {
         const crane = makeCrane();
-        crane.position.set(slot.x, 0, slot.z);
-        crane.userData.spin = true;
+        crane.position.set(slot.x, PLATE_TOP, slot.z);
         cityGroup.add(crane);
       }
     });
 
-    // arbres décoratifs
+    // arbres décoratifs autour de la plaque
     const treeCount = 3 + Math.floor(rng() * 3);
     for (let i = 0; i < treeCount; i++) {
       const tree = makeTree(rng, theme.accents[(d.colorRole + 2) % theme.accents.length]);
       const angle = rng() * Math.PI * 2;
-      const rad = 1.9 + rng() * 0.4;
-      tree.position.set(d.cx + Math.cos(angle) * rad, 0, Math.sin(angle) * rad);
+      const rad = 3.1 + rng() * 0.6;
+      tree.position.set(C.x + Math.cos(angle) * rad, 0, C.z + Math.sin(angle) * rad);
       cityGroup.add(tree);
     }
   });
 
-  // voitures sur la route centrale
-  const carColors = theme.accents;
+  // trafic : les voitures suivent la route d'un bout à l'autre puis reviennent
+  const path = centers.map((c) => new THREE.Vector3(c.x, 0.05, c.z));
+  const backAndForth = path.concat(path.slice(0, -1).reverse());
   for (let i = 0; i < 3; i++) {
-    const car = makeCar(carColors[i % carColors.length]);
+    const car = makeCar(theme.accents[i % theme.accents.length]);
     car.castShadow = true;
     carsGroup.add(car);
-    const zOff = i % 2 === 0 ? 0.25 : -0.25;
-    const curve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(-7.2, 0.05, zOff),
-      new THREE.Vector3(0, 0.05, zOff),
-      new THREE.Vector3(7.2, 0.05, zOff),
-      new THREE.Vector3(0, 0.05, zOff),
-    ], true, 'catmullrom', 0.2);
-    carAnims.push({ mesh: car, curve, progress: rng(), duration: lerp(9, 15, rng()) });
+    const curve = new THREE.CatmullRomCurve3(backAndForth, true, 'catmullrom', 0.2);
+    carAnims.push({ mesh: car, curve, progress: rng(), duration: lerp(11, 18, rng()) });
   }
 }
 
