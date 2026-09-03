@@ -10,7 +10,7 @@
 <!-- Feuille Tailwind compilée et commitée (styles.css) : le CDN cdn.tailwindcss.com
      est un outil de DEV qui recompile le CSS dans le navigateur à chaque chargement.
      Pour régénérer après avoir ajouté des classes : voir README.md -->
-<link rel="stylesheet" href="./styles.css">
+<link rel="stylesheet" href="./styles.css?v=2026-09-03-5">
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 </head>
 <body class="min-h-screen text-zinc-100 font-sans relative overflow-x-hidden">
@@ -156,7 +156,7 @@
 
         <!-- Panneaux indicateurs quartiers -->
         <div class="absolute left-3 sm:left-6 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
-                    bg-red-500/15 border border-red-400/40 text-red-300 backdrop-blur pointer-events-none">
+                    bg-indigo-500/15 border border-indigo-400/40 text-indigo-300 backdrop-blur pointer-events-none">
           Socle · 25 h
         </div>
         <div class="absolute left-1/2 -translate-x-1/2 top-3 sm:top-5 rounded-xl px-2.5 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider
@@ -184,9 +184,9 @@
             <div class="font-bold tracking-wider uppercase text-white text-[11px]">Kopek · City Builder</div>
           </div>
           <!-- Les 4 tuiles détaillées mangeraient tout l'écran sur un téléphone : réservées au sm+ -->
-          <div class="hidden sm:block rounded-xl bg-red-500/10 border border-red-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-red-300/90">Socle</div>
-            <div id="hud-socle" class="font-mono font-bold text-red-300 text-[13px] mt-0.5">—</div>
+          <div class="hidden sm:block rounded-xl bg-indigo-500/10 border border-indigo-400/30 p-2">
+            <div class="text-[9px] uppercase tracking-wider text-indigo-300/90">Socle</div>
+            <div id="hud-socle" class="font-mono font-bold text-indigo-300 text-[13px] mt-0.5">—</div>
           </div>
           <div class="hidden sm:block rounded-xl bg-fuchsia-500/10 border border-fuchsia-400/30 p-2">
             <div class="text-[9px] uppercase tracking-wider text-fuchsia-300/90">Garantie</div>
@@ -219,86 +219,28 @@
         </div>
       </section>
 
-      <!-- BENTO #3 · QUICK ENTRY (12 cols) -->
-      <section class="col-span-12 card rounded-2xl p-4 sm:p-5 card-hover">
-        <div class="flex items-center gap-2 mb-3 sm:mb-4">
-          <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500/20 to-fuchsia-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300">
-            <i data-lucide="plus-circle" class="w-4 h-4"></i>
+      <!-- BENTO · ACTION PRINCIPALE : ajouter des heures -->
+      <section class="col-span-12 card rounded-2xl p-4 sm:p-5 card-hover flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+        <div class="flex items-center gap-3 flex-1 min-w-0">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500/20 to-fuchsia-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300 flex-none">
+            <i data-lucide="timer" class="w-5 h-5"></i>
           </div>
-          <div>
-            <h2 class="text-sm font-bold tracking-tight">Saisie rapide</h2>
-            <p class="text-[11px] text-zinc-500">Encodez un temps en 2 clics. Arrondi auto 15 min sup.</p>
+          <div class="min-w-0">
+            <h2 class="text-sm font-bold tracking-tight">Encoder du temps</h2>
+            <p class="text-[11px] text-zinc-500">Arrondi automatique au quart d'heure supérieur.</p>
           </div>
         </div>
-
-        <form id="quick-form" class="grid grid-cols-12 gap-2 sm:gap-3 items-end">
-          <div class="col-span-12 sm:col-span-3 lg:col-span-2">
-            <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-1 font-semibold">Date</label>
-            <input id="q-date" type="date" required
-              class="w-full px-3 py-2.5 bg-zinc-950/80 border border-zinc-800 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition text-zinc-200" />
-          </div>
-          <div class="col-span-12 sm:col-span-4 lg:col-span-3">
-            <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-1 font-semibold">Projet</label>
-            <div class="flex gap-1.5">
-              <select id="q-client"
-                class="flex-1 px-3 py-2.5 bg-zinc-950/80 border border-zinc-800 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition">
-              </select>
-            </div>
-          </div>
-          <div class="col-span-12 lg:col-span-3">
-            <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-1 font-semibold">Description</label>
-            <input id="q-desc" type="text" required placeholder="Tâche effectuée…" list="q-desc-list" autocomplete="off"
-              class="w-full px-3 py-2.5 bg-zinc-950/80 border border-zinc-800 rounded-lg text-sm placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition" />
-            <datalist id="q-desc-list"></datalist>
-          </div>
-          <div class="col-span-6 sm:col-span-4 lg:col-span-1">
-            <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-1 font-semibold">Minutes</label>
-            <input id="q-min" type="number" min="1" step="1" required placeholder="60"
-              class="w-full px-3 py-2.5 bg-zinc-950/80 border border-zinc-800 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition chip" />
-          </div>
-          <div class="col-span-6 sm:col-span-4 lg:col-span-2">
-            <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-1 font-semibold">Tarif</label>
-            <div class="flex gap-1.5">
-              <select id="q-type"
-                class="w-24 px-2 py-2.5 bg-zinc-950/80 border border-zinc-800 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition">
-                <option value="hourly">Taux Horaire</option>
-                <option value="flat">Forfait</option>
-              </select>
-              <div class="relative flex-1">
-                <input id="q-rate" type="number" min="0" step="1" placeholder="80"
-                  class="w-full px-3 py-2.5 pl-6 bg-zinc-950/80 border border-zinc-800 rounded-lg text-sm text-right font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition chip" />
-                <span id="q-rate-unit" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 text-xs">€</span>
-              </div>
-            </div>
-          </div>
-          <div class="col-span-12 sm:col-span-4 lg:col-span-1">
-            <button type="submit"
-              class="group relative w-full py-2.5 rounded-lg font-semibold text-white overflow-hidden transition">
-              <span class="absolute inset-0 bg-gradient-to-r from-indigo-600 via-fuchsia-500 to-emerald-500 bg-[length:200%_100%] animate-shimmer"></span>
-              <span class="relative flex items-center justify-center gap-1.5 text-sm">
-                <i data-lucide="send" class="w-4 h-4"></i> Ajouter
-              </span>
-            </button>
-          </div>
-          <div class="col-span-12 flex items-center flex-wrap gap-1.5 -mt-1">
-            <span class="text-[10px] uppercase tracking-[0.15em] text-zinc-600 font-semibold mr-1">Presets</span>
-            <button type="button" data-preset-min="15" class="q-preset px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:border-indigo-500/50 hover:text-indigo-300 transition">15 min</button>
-            <button type="button" data-preset-min="30" class="q-preset px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:border-indigo-500/50 hover:text-indigo-300 transition">30 min</button>
-            <button type="button" data-preset-min="45" class="q-preset px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:border-indigo-500/50 hover:text-indigo-300 transition">45 min</button>
-            <button type="button" data-preset-min="60" class="q-preset px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:border-indigo-500/50 hover:text-indigo-300 transition">1 h</button>
-            <button type="button" data-preset-min="90" class="q-preset px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:border-indigo-500/50 hover:text-indigo-300 transition">1 h 30</button>
-            <button type="button" data-preset-min="120" class="q-preset px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:border-indigo-500/50 hover:text-indigo-300 transition">2 h</button>
-            <button type="button" data-preset-min="240" class="q-preset px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:border-indigo-500/50 hover:text-indigo-300 transition">4 h</button>
-          </div>
-          <div id="q-round-info" class="col-span-12 mt-0.5 text-xs h-5 flex items-center gap-2 text-zinc-500">
-            <i data-lucide="info" class="w-3.5 h-3.5 text-zinc-600"></i>
-            <span>Saisissez la durée pour voir l'arrondi de facturation.</span>
-          </div>
-        </form>
+        <button id="btn-add-hours" type="button"
+          class="group relative w-full sm:w-auto px-5 py-3 rounded-xl font-semibold text-white overflow-hidden transition flex-none">
+          <span class="absolute inset-0 bg-gradient-to-r from-indigo-600 via-fuchsia-500 to-emerald-500 bg-[length:200%_100%] animate-shimmer"></span>
+          <span class="relative flex items-center justify-center gap-2 text-sm">
+            <i data-lucide="plus" class="w-4 h-4"></i> Ajouter des heures
+          </span>
+        </button>
       </section>
 
       <!-- BENTO #1 · HERO JAUGE NESSY (8 cols) -->
-      <section class="col-span-12 lg:col-span-8 card rounded-2xl p-5 sm:p-7 card-hover relative overflow-hidden">
+      <section class="col-span-12 card rounded-2xl p-5 sm:p-7 card-hover relative overflow-hidden">
         <div class="absolute -right-20 -top-20 w-80 h-80 rounded-full bg-gradient-to-br from-indigo-600/20 via-fuchsia-500/10 to-emerald-400/10 blur-3xl pointer-events-none"></div>
         <div class="flex items-start justify-between flex-wrap gap-4 relative">
           <div>
@@ -410,49 +352,13 @@
         </div>
       </section>
 
-      <!-- BENTO #2 · POCKET MONEY (4 cols) -->
-      <section class="col-span-12 lg:col-span-4 relative rounded-2xl card-hover overflow-hidden"
-        style="background: linear-gradient(160deg, rgba(16,185,129,0.12) 0%, rgba(6,78,59,0.18) 45%, rgba(24,24,27,0.6) 100%); border:1px solid rgba(16,185,129,0.3); box-shadow: 0 0 70px -20px rgba(16,185,129,0.35);">
-        <div class="absolute -top-20 -right-20 w-64 h-64 rounded-full bg-emerald-400/30 blur-3xl"></div>
-        <div class="absolute -bottom-16 -left-10 w-52 h-52 rounded-full bg-lime-500/20 blur-3xl"></div>
-        <div class="relative p-5 sm:p-6 h-full flex flex-col justify-between gap-5">
-          <div class="flex items-start justify-between">
-            <div>
-              <div class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-400/10 text-emerald-300 text-[10px] font-bold tracking-[0.15em] uppercase border border-emerald-400/30 badge-pulse">
-                <i data-lucide="wallet" class="w-3 h-3"></i> Pocket Money
-              </div>
-              <div class="text-[11px] text-emerald-200/60 mt-2 uppercase tracking-wider">Reste NET Disponible</div>
-            </div>
-            <div class="w-11 h-11 rounded-xl bg-emerald-400/20 border border-emerald-400/40 flex items-center justify-center shadow-pocket">
-              <i data-lucide="coins" class="w-5 h-5 text-emerald-300"></i>
-            </div>
-          </div>
-          <div>
-            <div id="pocket-amount" class="font-mono text-5xl sm:text-6xl font-bold tracking-tight chip glow-gradient-text leading-none">
-              0 €
-            </div>
-            <div id="pocket-detail" class="text-xs text-emerald-100/60 mt-3 space-y-0.5"></div>
-          </div>
-          <div class="grid grid-cols-2 gap-3 pt-2 border-t border-emerald-400/20">
-            <div>
-              <div class="text-[9px] uppercase tracking-wider text-emerald-200/50 mb-1">CA Global HTVA</div>
-              <div id="pocket-ca" class="font-mono font-bold text-sm chip text-emerald-100">0 €</div>
-            </div>
-            <div>
-              <div class="text-[9px] uppercase tracking-wider text-emerald-200/50 mb-1">Charges + Provisions</div>
-              <div id="pocket-charges" class="font-mono font-bold text-sm chip text-emerald-100/80">−0 €</div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- BENTO #4 · FINANCIAL ROW (12 cols · 4 cards) -->
+      <!-- BENTO · CHIFFRES CLÉS DU MOIS -->
       <section class="col-span-12 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div class="card rounded-2xl p-4 sm:p-5 card-hover">
           <div class="flex items-center justify-between mb-3">
-            <span class="text-[10px] uppercase tracking-[0.15em] text-zinc-500 font-semibold">CA Global HTVA</span>
+            <span class="text-[10px] uppercase tracking-[0.15em] text-zinc-500 font-semibold">À facturer</span>
             <div class="w-8 h-8 rounded-lg bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-300">
-              <i data-lucide="trending-up" class="w-4 h-4"></i>
+              <i data-lucide="receipt" class="w-4 h-4"></i>
             </div>
           </div>
           <div id="m-ca" class="font-mono text-2xl font-bold chip">0 €</div>
@@ -460,27 +366,7 @@
         </div>
         <div class="card rounded-2xl p-4 sm:p-5 card-hover">
           <div class="flex items-center justify-between mb-3">
-            <span class="text-[10px] uppercase tracking-[0.15em] text-zinc-500 font-semibold">TVA à Reverser</span>
-            <div class="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-300">
-              <i data-lucide="receipt-percent" class="w-4 h-4"></i>
-            </div>
-          </div>
-          <div id="m-tva" class="font-mono text-2xl font-bold chip text-amber-300">0 €</div>
-          <div id="m-tva-detail" class="text-[11px] text-zinc-500 mt-1"></div>
-        </div>
-        <div class="card rounded-2xl p-4 sm:p-5 card-hover">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-[10px] uppercase tracking-[0.15em] text-zinc-500 font-semibold">Impôts Réservés</span>
-            <div class="w-8 h-8 rounded-lg bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-300">
-              <i data-lucide="shield-alert" class="w-4 h-4"></i>
-            </div>
-          </div>
-          <div id="m-impots" class="font-mono text-2xl font-bold chip text-rose-300">0 €</div>
-          <div id="m-impots-detail" class="text-[11px] text-zinc-500 mt-1"></div>
-        </div>
-        <div class="card rounded-2xl p-4 sm:p-5 card-hover">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-[10px] uppercase tracking-[0.15em] text-zinc-500 font-semibold">Heures du Mois</span>
+            <span class="text-[10px] uppercase tracking-[0.15em] text-zinc-500 font-semibold">Heures facturées</span>
             <div class="w-8 h-8 rounded-lg bg-fuchsia-500/15 border border-fuchsia-500/30 flex items-center justify-center text-fuchsia-300">
               <i data-lucide="clock" class="w-4 h-4"></i>
             </div>
@@ -488,24 +374,30 @@
           <div id="m-hours" class="font-mono text-2xl font-bold chip">0 h</div>
           <div id="m-hours-detail" class="text-[11px] text-zinc-500 mt-1"></div>
         </div>
-      </section>
-
-      <!-- BENTO #5 · WATERFALL (12 cols) -->
-      <section class="col-span-12 lg:col-span-7 card rounded-2xl p-4 sm:p-5 card-hover">
-        <div class="flex items-center justify-between mb-4">
-          <div class="flex items-center gap-2">
-            <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500/20 to-emerald-500/20 border border-zinc-800 flex items-center justify-center">
-              <i data-lucide="workflow" class="w-4 h-4 text-zinc-300"></i>
+        <div class="card rounded-2xl p-4 sm:p-5 card-hover">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-[10px] uppercase tracking-[0.15em] text-zinc-500 font-semibold">Reste à prester</span>
+            <div class="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-300">
+              <i data-lucide="hourglass" class="w-4 h-4"></i>
             </div>
-            <h2 class="font-bold tracking-tight">Cascade de Trésorerie</h2>
           </div>
-          <span class="text-[10px] uppercase tracking-wider text-zinc-500">Belgique · Freelance</span>
+          <div id="m-reste" class="font-mono text-2xl font-bold chip text-amber-300">0 h</div>
+          <div id="m-reste-detail" class="text-[11px] text-zinc-500 mt-1"></div>
         </div>
-        <div id="waterfall" class="space-y-1.5"></div>
+        <div class="card rounded-2xl p-4 sm:p-5 card-hover">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-[10px] uppercase tracking-[0.15em] text-zinc-500 font-semibold">Surplus</span>
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-300">
+              <i data-lucide="trending-up" class="w-4 h-4"></i>
+            </div>
+          </div>
+          <div id="m-bonus" class="font-mono text-2xl font-bold chip text-emerald-300">+ 0 €</div>
+          <div id="m-bonus-detail" class="text-[11px] text-zinc-500 mt-1"></div>
+        </div>
       </section>
 
       <!-- BENTO #6 · CLIENTS SYNTHESIS (5 cols) -->
-      <section class="col-span-12 lg:col-span-5 card rounded-2xl p-4 sm:p-5 card-hover">
+      <section class="col-span-12 card rounded-2xl p-4 sm:p-5 card-hover">
         <div class="flex items-center justify-between mb-4">
           <div class="flex items-center gap-2">
             <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-fuchsia-500/20 to-amber-500/20 border border-zinc-800 flex items-center justify-center">
@@ -519,7 +411,6 @@
         </div>
         <div id="clients-list" class="space-y-2"></div>
       </section>
-
       <!-- BENTO #7 · LOGS TABLE (12 cols) -->
       <section class="col-span-12 card rounded-2xl overflow-hidden card-hover">
         <div class="flex items-center justify-between px-4 sm:px-5 py-4 border-b border-zinc-800/80 flex-wrap gap-3">
@@ -571,6 +462,118 @@
 </div>
 
 <!-- ================= NEW CLIENT MODAL ================= -->
+<!-- ================= ASSISTANT · AJOUTER DES HEURES (3 étapes) ================= -->
+<div id="hours-modal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+  <div class="absolute inset-0 bg-black/75 backdrop-blur-sm" data-close-modal></div>
+  <div class="relative card rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg fade-in overflow-hidden max-h-[92vh] flex flex-col">
+    <div class="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-emerald-400"></div>
+
+    <div class="flex items-center justify-between px-5 py-4 border-b border-zinc-800 flex-none">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500/20 to-fuchsia-500/20 border border-indigo-500/30 flex items-center justify-center flex-none">
+          <i data-lucide="timer" class="w-4 h-4 text-indigo-300"></i>
+        </div>
+        <div class="min-w-0">
+          <h3 class="font-bold leading-tight">Ajouter des heures</h3>
+          <p id="hours-step-label" class="text-[11px] text-zinc-500"></p>
+        </div>
+      </div>
+      <button data-close-modal class="p-2 hover:bg-zinc-800 rounded-lg transition text-zinc-400 flex-none">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <!-- Progression -->
+    <div class="flex gap-1.5 px-5 pt-4 flex-none">
+      <div data-step-bar="1" class="h-1 flex-1 rounded-full bg-indigo-500"></div>
+      <div data-step-bar="2" class="h-1 flex-1 rounded-full bg-zinc-800"></div>
+      <div data-step-bar="3" class="h-1 flex-1 rounded-full bg-zinc-800"></div>
+    </div>
+
+    <div class="p-5 overflow-y-auto scrollbar-thin flex-1">
+      <!-- ÉTAPE 1 · Projet + description -->
+      <div data-step="1" class="space-y-4">
+        <div>
+          <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-400 mb-1.5 font-semibold">Client / Projet</label>
+          <select id="w-client" class="w-full px-3.5 py-3 bg-zinc-950 border border-zinc-800 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500/50"></select>
+          <button type="button" id="w-new-client" class="mt-2 text-[11px] text-indigo-300 hover:text-indigo-200 inline-flex items-center gap-1">
+            <i data-lucide="plus" class="w-3 h-3"></i> Créer un nouveau projet
+          </button>
+        </div>
+        <div>
+          <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-400 mb-1.5 font-semibold">Description</label>
+          <input id="w-desc" type="text" list="w-desc-list" autocomplete="off" placeholder="Ex. Intégration API stock"
+            class="w-full px-3.5 py-3 bg-zinc-950 border border-zinc-800 rounded-xl text-sm placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:border-indigo-500/50" />
+          <datalist id="w-desc-list"></datalist>
+        </div>
+        <div>
+          <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-400 mb-1.5 font-semibold">Date</label>
+          <input id="w-date" type="date" class="w-full px-3.5 py-3 bg-zinc-950 border border-zinc-800 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/50" />
+        </div>
+      </div>
+
+      <!-- ÉTAPE 2 · Durée -->
+      <div data-step="2" class="hidden space-y-4">
+        <div>
+          <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-400 mb-2 font-semibold">Durée</label>
+          <div class="grid grid-cols-3 gap-2">
+            <button type="button" class="w-dur px-3 py-3.5 rounded-xl text-sm font-mono font-semibold bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition" data-min="15">15 min</button>
+            <button type="button" class="w-dur px-3 py-3.5 rounded-xl text-sm font-mono font-semibold bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition" data-min="30">30 min</button>
+            <button type="button" class="w-dur px-3 py-3.5 rounded-xl text-sm font-mono font-semibold bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition" data-min="45">45 min</button>
+            <button type="button" class="w-dur px-3 py-3.5 rounded-xl text-sm font-mono font-semibold bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition" data-min="60">1 h</button>
+            <button type="button" class="w-dur px-3 py-3.5 rounded-xl text-sm font-mono font-semibold bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition" data-min="120">2 h</button>
+            <button type="button" class="w-dur px-3 py-3.5 rounded-xl text-sm font-mono font-semibold bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition" data-min="240">4 h</button>
+            <button type="button" class="w-dur px-3 py-3.5 rounded-xl text-sm font-mono font-semibold bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition" data-min="420">7 h</button>
+            <button type="button" class="w-dur px-3 py-3.5 rounded-xl text-sm font-mono font-semibold bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition" data-min="480">8 h</button>
+            <button type="button" class="w-dur px-3 py-3.5 rounded-xl text-sm font-mono font-semibold bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition" data-min="0">Autre…</button>
+          </div>
+        </div>
+        <div id="w-custom-wrap" class="hidden">
+          <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-400 mb-1.5 font-semibold">Minutes</label>
+          <input id="w-min" type="number" min="1" step="5" inputmode="numeric" placeholder="90"
+            class="w-full px-3.5 py-3 bg-zinc-950 border border-zinc-800 rounded-xl text-sm font-mono text-right chip focus:outline-none focus:ring-1 focus:ring-indigo-500/50" />
+        </div>
+        <div id="w-round" class="text-xs text-zinc-500 flex items-center gap-2 min-h-[20px]"></div>
+      </div>
+
+      <!-- ÉTAPE 3 · Prix + récapitulatif -->
+      <div data-step="3" class="hidden space-y-4">
+        <div>
+          <label class="block text-[10px] uppercase tracking-[0.15em] text-zinc-400 mb-2 font-semibold">Facturation</label>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" id="w-type-hourly" class="px-3 py-3 rounded-xl text-sm font-semibold bg-indigo-500/15 border border-indigo-500/50 text-indigo-200 transition">Taux horaire</button>
+            <button type="button" id="w-type-flat" class="px-3 py-3 rounded-xl text-sm font-semibold bg-zinc-900 border border-zinc-800 text-zinc-300 hover:border-indigo-500/40 transition">Forfait</button>
+          </div>
+        </div>
+        <div>
+          <label id="w-rate-label" class="block text-[10px] uppercase tracking-[0.15em] text-zinc-400 mb-1.5 font-semibold">Taux horaire (€)</label>
+          <div class="flex gap-2 flex-wrap mb-2">
+            <button type="button" class="w-rate px-3 py-1.5 rounded-lg text-xs font-mono bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition" data-rate="80">80 €</button>
+            <button type="button" class="w-rate px-3 py-1.5 rounded-lg text-xs font-mono bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition" data-rate="95">95 €</button>
+            <button type="button" class="w-rate px-3 py-1.5 rounded-lg text-xs font-mono bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 transition" data-rate="110">110 €</button>
+          </div>
+          <input id="w-rate" type="number" min="0" step="1" inputmode="decimal"
+            class="w-full px-3.5 py-3 bg-zinc-950 border border-zinc-800 rounded-xl text-sm font-mono text-right chip focus:outline-none focus:ring-1 focus:ring-indigo-500/50" />
+        </div>
+        <div id="w-summary" class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3.5 text-sm space-y-1.5"></div>
+      </div>
+
+      <div id="w-error" class="hidden mt-3 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2"></div>
+    </div>
+
+    <div class="flex items-center justify-between gap-2 px-5 py-4 border-t border-zinc-800 flex-none">
+      <button type="button" id="w-back" class="px-4 py-2.5 text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition invisible">
+        Retour
+      </button>
+      <button type="button" id="w-next" class="group relative px-6 py-2.5 rounded-lg font-semibold text-white overflow-hidden">
+        <span class="absolute inset-0 bg-gradient-to-r from-indigo-600 via-fuchsia-500 to-emerald-500 bg-[length:200%_100%] animate-shimmer"></span>
+        <span id="w-next-label" class="relative flex items-center gap-1.5 text-sm">Suivant</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+
 <div id="client-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
   <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" data-close-modal></div>
   <div class="relative card rounded-2xl shadow-2xl w-full max-w-lg fade-in overflow-hidden">
@@ -697,7 +700,7 @@
 <!-- ===== TOAST ===== -->
 <div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] px-4 py-2.5 bg-zinc-900/95 border border-zinc-700 text-sm rounded-xl shadow-2xl flex items-center gap-2 fade-in"></div>
 
-<script type="module" src="./firebase-config.js"></script>
-<script type="module" src="./app.js"></script>
+<script type="module" src="./firebase-config.js?v=2026-09-03-5"></script>
+<script type="module" src="./app.js?v=2026-09-03-5"></script>
 </body>
 </html>

@@ -14,38 +14,22 @@ import {
   Timestamp,
   serverTimestamp,
   onSnapshot,
-} from './firebase-config.js';
+} from './firebase-config.js?v=2026-09-03-5';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
 // =============================================================
+// L'app ne fait plus que deux choses : compter les heures et dire ce qu'il y a
+// à facturer. Plus de TVA, d'INASTI, d'IPP, de charges fixes ni d'avance de
+// démarrage : ces provisions estimaient des montants qu'on ne peut de toute
+// façon pas calculer correctement sans les frais professionnels réels.
 const NESSY = {
   socleFlat: 2000,
   socleHours: 25,
   regieRate: 80,
   minGaranti: 3500,
   minHoursEq: 43.75,
-  phase2Min: 3000,
-  phase2HoursEq: 37.5,
-  phase2StartMonth: 12, // Mois 13 (index 12)
-  avanceFrom: 3,        // Mois 4 (index 3)
-  avanceTo: 10,         // Mois 11 (index 10)
-  avanceDeduct: 625,
 };
-
-const TRESORERIE = {
-  tva: 0.21,
-  creditTVA: 56.40,   // € HT crédit leasing 650€ TTC
-  inasti: 0.18,
-  ipp: 0.25,
-  charges: {
-    leasing: 650,
-    logement: 625,
-    outils: 125,
-    comptable: 125,
-  },
-};
-const TOTAL_CHARGES = Object.values(TRESORERIE.charges).reduce((a, b) => a + b, 0);
 
 // =============================================================
 // 🗓️ ÉTAT GLOBAL
@@ -90,13 +74,32 @@ function HHdecimal(totalMinutes) {
 }
 function firstDayOfMonth(y, m) { return new Date(y, m, 1, 0, 0, 0, 0); }
 function lastDayOfMonth(y, m)  { return new Date(y, m + 1, 0, 23, 59, 59, 999); }
+/**
+ * Convertit en Date tout ce que Firestore peut renvoyer.
+ * On NE teste PAS `instanceof Timestamp` : selon la façon dont le SDK est chargé,
+ * l'objet renvoyé peut ne pas être une instance de NOTRE classe importée, et le
+ * test échouait silencieusement — la date devenait invalide et l'encodage
+ * disparaissait de tous les mois, donnant l'impression d'avoir perdu les données.
+ * On accepte donc aussi la forme `{seconds, nanoseconds}` et les chaînes ISO.
+ */
+function toDateSafe(v) {
+  if (!v) return null;
+  if (v instanceof Date) return v;
+  if (typeof v.toDate === 'function') return v.toDate();
+  if (typeof v.seconds === 'number') return new Date(v.seconds * 1000);
+  if (typeof v._seconds === 'number') return new Date(v._seconds * 1000);
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
 function fmtDateBE(tsOrDate) {
-  const d = tsOrDate instanceof Timestamp ? tsOrDate.toDate() : new Date(tsOrDate);
-  return d.toLocaleDateString('fr-BE', { day: '2-digit', month: 'short', year: 'numeric' });
+  const d = toDateSafe(tsOrDate);
+  return d ? d.toLocaleDateString('fr-BE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 }
 function fmtDateInput(tsOrDate) {
-  const d = tsOrDate instanceof Timestamp ? tsOrDate.toDate() : new Date(tsOrDate);
-  return d.toISOString().slice(0, 10);
+  const d = toDateSafe(tsOrDate) || new Date();
+  // getFullYear/Month/Date (heure locale) : toISOString décale d'un jour selon le fuseau.
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 // ★ Règle d'arrondi · 15 min SUPÉRIEURES
 function billedMinutes(realMin) {
@@ -199,7 +202,7 @@ function initApp() {
   if (!appBound) {
     buildPeriodSelectors();
     bindTopBar();
-    bindQuickForm();
+    bindHoursWizard();
     bindModals();
     appBound = true;
   }
@@ -263,10 +266,8 @@ let unsubLogs = null;
 let seedingDefaultProject = false;
 
 function toMillisSafe(tsOrDate) {
-  if (!tsOrDate) return 0;
-  if (tsOrDate instanceof Timestamp) return tsOrDate.toMillis();
-  const d = new Date(tsOrDate);
-  return isNaN(d.getTime()) ? 0 : d.getTime();
+  const d = toDateSafe(tsOrDate);
+  return d ? d.getTime() : 0;
 }
 
 function teardownData() {
@@ -322,7 +323,7 @@ async function createLog(payload) {
     project_name: '',
     createdAt: serverTimestamp(),
     ...payload,
-    date: payload.date instanceof Timestamp ? payload.date : Timestamp.fromDate(payload.date),
+    date: Timestamp.fromDate(toDateSafe(payload.date) || new Date()),
   };
   const ref = await addDoc(colTimeLogs(), d);
   return ref.id;
@@ -330,7 +331,7 @@ async function createLog(payload) {
 async function updateLog(id, patch) {
   if (!STATE.user) return;
   const norm = { ...patch };
-  if (norm.date && !(norm.date instanceof Timestamp)) norm.date = Timestamp.fromDate(norm.date);
+  if (norm.date) norm.date = Timestamp.fromDate(toDateSafe(norm.date) || new Date());
   await updateDoc(doc(db, 'time_logs', id), norm);
 }
 async function deleteLog(id) {
@@ -367,13 +368,6 @@ function getClient(id) {
 // =============================================================
 // 🧮 MOTEUR CALCUL · FACTURATION NESSY + MULTI-CLIENTS
 // =============================================================
-function computeContractMonthIdx() {
-  const s = STATE.contractStart;
-  return (STATE.selectedYear - s.getFullYear()) * 12 + (STATE.selectedMonth - s.getMonth());
-}
-function getMinGaranti(monthIdx) { return monthIdx >= NESSY.phase2StartMonth ? NESSY.phase2Min : NESSY.minGaranti; }
-function getMinHoursEq(monthIdx) { return monthIdx >= NESSY.phase2StartMonth ? NESSY.phase2HoursEq : NESSY.minHoursEq; }
-function isAvanceMonth(monthIdx)   { return monthIdx >= NESSY.avanceFrom && monthIdx <= NESSY.avanceTo; }
 
 /** Calcule tout le mois · objet agrégat
  * =========================================================================
@@ -393,7 +387,6 @@ function isAvanceMonth(monthIdx)   { return monthIdx >= NESSY.avanceFrom && mont
  * =========================================================================
  */
 function aggregateMonth() {
-  const monthIdx = computeContractMonthIdx();
 
   // Regroupements par projet
   const byClient = new Map(); // id -> { client, realMin, billedMin, eur, count }
@@ -460,7 +453,7 @@ function aggregateMonth() {
   const t2h = Math.min(Math.max(refundedH - socleHours, 0), heuresDette - socleHours); // Remboursement Régie Garantie
 
   // CA NESSY = MIN GARANTI (acquis) + SURPLUS RÉEL HORAIRE + FORFAITS
-  const minG = getMinGaranti(monthIdx);
+  const minG = NESSY.minGaranti;
   const hourlySurplusEur = Math.max(0, nessyHourlyEur - (heuresDette * NESSY.regieRate));
   const mainFlatEur = nessyFlatEur;
   const bonusEur = hourlySurplusEur + mainFlatEur;
@@ -480,15 +473,6 @@ function aggregateMonth() {
   const secondaryEur = externalEur;
   const globalCA = mainFinalCA + secondaryEur;
 
-  // ---- CASCADE TRÉSORERIE ----
-  const tvaCollectee = globalCA * TRESORERIE.tva;
-  const tvaNette = Math.max(0, tvaCollectee - TRESORERIE.creditTVA);
-  const inasti = globalCA * TRESORERIE.inasti;
-  const caApresInasti = globalCA - inasti;
-  const ipp = caApresInasti * TRESORERIE.ipp;
-  const avance = isAvanceMonth(monthIdx) ? NESSY.avanceDeduct : 0;
-  const netPocket = globalCA + TRESORERIE.creditTVA - TOTAL_CHARGES - inasti - ipp - avance;
-
   // Pour jauge · base = heures DETTE (43,75 h). On clamp 0→120%
   //   0%   = 0h encodées (dette ENTIÈRE)
   //   100% = 43,75h remboursées (dette soldée)
@@ -497,7 +481,7 @@ function aggregateMonth() {
   const gaugePct = Math.min(120, (hoursHourlyNessy / gaugeBaseHours) * 100);
 
   return {
-    monthIdx, minG, minApplied,
+    minG, minApplied,
     tiers: { t1: { h: t1h, eur: t1eur }, t2: { h: t2h, eur: t2eur }, t3: { h: t3h, eur: t3eur } },
     mainFlatEur,
     mainRevenusAvantMin,
@@ -510,11 +494,6 @@ function aggregateMonth() {
     globalRealMin,
     globalBilledMin,
     globalRawEur,
-    tvaCollectee, tvaNette,
-    inasti, ipp,
-    provisions: inasti + ipp,
-    avance,
-    netPocket,
     byClient,
     gaugePct,
     gaugeBaseHours,
@@ -552,12 +531,9 @@ function renderAll() {
   section('entête', renderHeader, agg);
   section('jauge', renderNessyGauge, agg);
   section('ville', renderCity, agg);
-  section('poche', renderPocket, agg);
   section('métriques', renderMetrics, agg);
-  section('cascade', renderWaterfall, agg);
   section('synthèse projets', renderClientsList, agg);
   section('encodages', renderLogs, agg);
-  section('suggestions', updateDescList, agg);
   if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
 }
 // Alias conservé pour tous les points d'appel existants (CRUD → re-rendu immédiat,
@@ -567,24 +543,17 @@ const refreshPeriod = renderAll;
 function renderHeader(agg) {
   const months = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   $('#period-title').textContent = `${months[STATE.selectedMonth]} ${STATE.selectedYear}`;
-  const idx = agg.monthIdx;
-  let phaseTxt = '', phaseBadge = '';
-  if (idx < 0) { phaseTxt = `Pré-démarrage (M${idx})`; phaseBadge = 'Pré-démarrage'; }
-  else if (idx < NESSY.phase2StartMonth) {
-    phaseTxt = `Mois ${idx + 1} / 24 · Phase 1 · Min garanti ${EUR(NESSY.minGaranti)}`;
-    phaseBadge = `Phase 1 · Mois ${idx + 1}/24`;
-  } else if (idx < 24) {
-    phaseTxt = `Mois ${idx + 1} / 24 · Phase 2 · Min garanti ${EUR(NESSY.phase2Min)}`;
-    phaseBadge = `Phase 2 · Mois ${idx + 1}/24`;
-  } else { phaseTxt = `Post-contrat (M${idx + 1})`; phaseBadge = 'Post-contrat'; }
-  if (agg.avance > 0) phaseTxt += ` · Remboursement avance −${EUR(NESSY.avanceDeduct)}`;
-  $('#period-sub').textContent = phaseTxt;
+  $('#period-sub').textContent = agg.hasAnyNessy
+    ? `Minimum garanti ${EUR(NESSY.minGaranti)} · ${FR(NESSY.minHoursEq)} h à prester`
+    : `Aucune heure encodée ce mois · minimum garanti ${EUR(NESSY.minGaranti)}`;
   const pb = $('#phase-badge');
-  pb.textContent = phaseBadge;
-  if (idx < 0) pb.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-zinc-800/80 text-zinc-400 text-[10px] font-semibold tracking-wider uppercase border border-zinc-700/70';
-  else if (idx < NESSY.phase2StartMonth) pb.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-fuchsia-500/10 text-fuchsia-300 text-[10px] font-semibold tracking-wider uppercase border border-fuchsia-500/30';
-  else if (idx < 24) pb.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 text-[10px] font-semibold tracking-wider uppercase border border-cyan-500/30';
-  else pb.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-300 text-[10px] font-semibold tracking-wider uppercase border border-amber-500/30';
+  if (pb) {
+    const surplus = agg.tiers.t3.h > 0.001;
+    pb.textContent = surplus ? 'Surplus facturable' : (agg.hasAnyNessy ? 'En cours' : 'À démarrer');
+    pb.className = surplus
+      ? 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 text-[10px] font-semibold tracking-wider uppercase border border-emerald-500/30'
+      : 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-zinc-800/80 text-zinc-400 text-[10px] font-semibold tracking-wider uppercase border border-zinc-700/70';
+  }
   $('#nessy-ca').textContent = EUR(agg.mainFinalCA);
 }
 
@@ -783,7 +752,7 @@ async function ensureCityLoaded() {
   if (cityStatus === 'ready' || cityStatus === 'loading' || cityStatus === 'failed') return;
   cityStatus = 'loading';
   try {
-    cityMod = await import('./city3d.js');
+    cityMod = await import('./city3d.js?v=2026-09-03-5');
     const canvas = document.getElementById('city-canvas');
     if (!canvas) throw new Error('canvas #city-canvas introuvable');
     cityMod.initCity(canvas);
@@ -846,62 +815,27 @@ function renderCity(agg) {
   }
 }
 
-function renderPocket(agg) {
-  $('#pocket-amount').textContent = EUR(agg.netPocket);
-  const charges = TOTAL_CHARGES + agg.inasti + agg.ipp + agg.avance;
-  $('#pocket-ca').textContent = EUR(agg.globalCA);
-  $('#pocket-charges').textContent = `−${EUR(charges)}`;
-  const lines = [
-    `<div>TVA collectée +${EUR(agg.tvaCollectee, 2)} · Crédit leasing ${EUR(TRESORERIE.creditTVA, 2)}</div>`,
-    `<div>INASTI ${EUR(agg.inasti)} · IPP ${EUR(agg.ipp)}${agg.avance ? ` · Avance −${EUR(agg.avance)}` : ''}</div>`,
-    `<div>Charges fixes ${EUR(TOTAL_CHARGES)} (Voiture 650 · Logement 625 · Outils 125 · Compta 125)</div>`,
-  ];
-  $('#pocket-detail').innerHTML = lines.join('');
-}
-
 function renderMetrics(agg) {
+  const restH = Math.max(0, agg.debtRemainH);
+  const surplusH = agg.tiers.t3.h;
+
   $('#m-ca').textContent = EUR(agg.globalCA);
-  $('#m-ca-detail').textContent = `Principal ${EUR(agg.mainFinalCA)} · Autres ${EUR(agg.secondaryEur)}`;
-  $('#m-tva').textContent = EUR(agg.tvaNette, 2);
-  $('#m-tva-detail').textContent = `Collectée ${EUR(agg.tvaCollectee, 2)} · Crédit −${EUR(TRESORERIE.creditTVA, 2)}`;
-  $('#m-impots').textContent = EUR(agg.provisions);
-  $('#m-impots-detail').textContent = `INASTI ${EUR(agg.inasti)} · IPP ${EUR(agg.ipp)}`;
-  $('#m-hours').textContent = `${HH(agg.globalBilledMin)}`;
-  $('#m-hours-detail').textContent = `Réel ${HH(agg.globalRealMin)} · Facturé ${HHdecimal(agg.globalBilledMin)} h`;
-}
+  $('#m-ca-detail').textContent = agg.secondaryEur > 0
+    ? `Nessy ${EUR(agg.mainFinalCA)} · Externes ${EUR(agg.secondaryEur)}`
+    : `Minimum garanti ${EUR(agg.minG)}`;
 
-function renderWaterfall(agg) {
-  const rows = [
-    { label: 'CA HTVA Cumulé (Tous clients)', val: agg.globalCA, type: 'in', icon: 'banknote', sub: `Principal ${EUR(agg.mainFinalCA)} · Autres ${EUR(agg.secondaryEur)}` },
-    { label: `TVA Collectée (${Math.round(TRESORERIE.tva * 100)}%)`, val: agg.tvaCollectee, type: 'neutral', icon: 'percent', sub: `Encaissée du client · 21% sur le CA` },
-    { label: `TVA Nette à reverser (${EUR(TRESORERIE.creditTVA, 2)} de crédit leasing déduit)`, val: -agg.tvaNette, type: 'out', icon: 'arrow-down-right' },
-    { label: `Provision INASTI · ${Math.round(TRESORERIE.inasti * 100)}% CA HTVA`, val: -agg.inasti, type: 'out', icon: 'building-2' },
-    { label: `Provision IPP · ${Math.round(TRESORERIE.ipp * 100)}% (CA − INASTI)`, val: -agg.ipp, type: 'out', icon: 'landmark' },
-    { label: `Charges Fixes · Structure + Perso (4 postes)`, val: -TOTAL_CHARGES, type: 'out', icon: 'layers', sub: `Leasing 650 · Logement 625 · Outils 125 · Comptable 125` },
-  ];
-  if (agg.avance > 0) rows.push({ label: `Remboursement Avance Démarrage (Mois ${NESSY.avanceFrom + 1}→${NESSY.avanceTo + 1})`, val: -agg.avance, type: 'out', icon: 'piggy-bank' });
-  rows.push({ label: 'RESTE NET DANS LA POCHE', val: agg.netPocket, type: 'net', icon: 'wallet' });
+  $('#m-hours').textContent = `${FR(agg.mainBilledMinutes / 60)} h`;
+  $('#m-hours-detail').textContent = `sur ${FR(NESSY.minHoursEq)} h · réel ${HH(agg.globalRealMin)}`;
 
-  const html = rows.map((r) => {
-    const sign = r.val >= 0 ? '' : '−';
-    const abs = Math.abs(r.val);
-    const cls = {
-      in:  { row: 'bg-indigo-500/5 border border-indigo-500/20', val: 'text-white', icon: 'text-indigo-300 bg-indigo-500/15 border border-indigo-500/30' },
-      neutral: { row: 'bg-zinc-900/50 border border-zinc-800', val: 'text-amber-300', icon: 'text-amber-300 bg-amber-500/15 border border-amber-500/30' },
-      out: { row: 'bg-rose-500/5 border border-rose-500/20', val: 'text-rose-300', icon: 'text-rose-300 bg-rose-500/15 border border-rose-500/30' },
-      net: { row: 'bg-emerald-500/10 border border-emerald-500/30', val: 'glow-gradient-text font-bold', icon: 'text-emerald-300 bg-emerald-500/20 border border-emerald-500/40 shadow-pocket' },
-    }[r.type];
-    const isNet = r.type === 'net';
-    return `<div class="rounded-lg px-3 py-2.5 ${cls.row} flex items-center gap-3 ${isNet ? 'mt-2' : ''}">
-      <div class="w-8 h-8 flex-none rounded-lg flex items-center justify-center ${cls.icon}"><i data-lucide="${r.icon}" class="w-4 h-4"></i></div>
-      <div class="flex-1 min-w-0">
-        <div class="text-sm ${isNet ? 'font-semibold text-emerald-100' : ''}">${r.label}</div>
-        ${r.sub ? `<div class="text-[11px] text-zinc-500 mt-0.5">${r.sub}</div>` : ''}
-      </div>
-      <div class="font-mono font-semibold chip ${cls.val} ${isNet ? 'text-xl' : ''}">${sign}${EUR(abs)}</div>
-    </div>`;
-  }).join('');
-  $('#waterfall').innerHTML = html;
+  $('#m-reste').textContent = restH > 0 ? `${FR(restH)} h` : 'Atteint';
+  $('#m-reste-detail').textContent = restH > 0
+    ? `avant d'atteindre ${EUR(agg.minG)}`
+    : `minimum garanti couvert`;
+
+  $('#m-bonus').textContent = `+ ${EUR(agg.bonusEur || 0)}`;
+  $('#m-bonus-detail').textContent = surplusH > 0.001
+    ? `${FR(surplusH)} h au-delà du garanti`
+    : `au-delà de ${FR(NESSY.minHoursEq)} h`;
 }
 
 function renderClientsList(agg) {
@@ -1043,128 +977,209 @@ function renderLogs(agg) {
 }
 
 // =============================================================
-// ⚡ SAISIE RAPIDE
+// ⚡ ASSISTANT « AJOUTER DES HEURES » (3 étapes)
 // =============================================================
 const LAST_CLIENT_KEY = 'kopek_last_client_id';
 
-function bindQuickForm() {
-  const form = $('#quick-form');
-  $('#q-date').value = fmtDateInput(new Date());
-  $('#q-min').addEventListener('input', updateQuickRoundInfo);
-  $('#q-type').addEventListener('change', syncQuickRateFromType);
-  $('#q-client').addEventListener('change', () => {
-    syncQuickRateFromClient();
-    localStorage.setItem(LAST_CLIENT_KEY, $('#q-client').value);
-    updateDescList();
-  });
-  $$('.q-preset').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      $('#q-min').value = btn.getAttribute('data-preset-min');
-      updateQuickRoundInfo();
-      $$('.q-preset').forEach((b) => b.classList.remove('border-indigo-500/70', 'text-indigo-200', 'bg-indigo-500/10'));
-      btn.classList.add('border-indigo-500/70', 'text-indigo-200', 'bg-indigo-500/10');
-      $('#q-desc').focus();
-    });
-  });
+const WIZ = { step: 1, minutes: 0, type: 'hourly' };
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const date = new Date($('#q-date').value + 'T12:00:00');
-    const client_id = $('#q-client').value;
-    const description = $('#q-desc').value.trim();
-    const mins = parseInt($('#q-min').value, 10);
-    const type = $('#q-type').value;
-    const rateVal = parseFloat($('#q-rate').value || '0');
-    // Messages séparés : « il manque un champ » n'aide pas quand la vraie cause
-    // est qu'aucun projet n'existe encore.
-    if (!client_id) {
-      toast("Aucun projet sélectionné · créez-en un via « Nouveau Projet »", 'alert-circle', 'warn');
-      return;
-    }
-    if (!description) { toast('Description manquante', 'alert-circle', 'warn'); return; }
-    if (!mins || mins <= 0 || isNaN(mins)) { toast('Durée manquante ou invalide', 'alert-circle', 'warn'); return; }
-    if (type === 'hourly' && (!rateVal || rateVal <= 0)) {
-      toast('Taux horaire invalide', 'alert-circle', 'warn');
-      return;
-    }
-    if (type === 'flat' && (!rateVal || rateVal <= 0)) {
-      toast('Prix forfait invalide', 'alert-circle', 'warn');
-      return;
-    }
-    const payload = {
-      client_id,
-      description,
-      real_minutes: mins,
-      billed_minutes: billedMinutes(mins),
-      rate_applied: type === 'hourly' ? rateVal : 0,
-      custom_price: type === 'flat' ? rateVal : null,
-      date,
-    };
-    try {
-      await createLog(payload);
-      hideErrorBanner();
-      toast('Encodage ajouté', 'check-circle');
-      // reset quick form (garde le projet + le tarif sélectionnés pour enchaîner vite)
-      $('#q-desc').value = ''; $('#q-min').value = '';
-      $$('.q-preset').forEach((b) => b.classList.remove('border-indigo-500/70', 'text-indigo-200', 'bg-indigo-500/10'));
-      updateQuickRoundInfo();
-      updateDescList();
-      refreshPeriod();
-      $('#q-desc').focus();
-      // NB: le feu d'artifice de confettis 3D se déclenche automatiquement dans
-      // renderCity() dès que ce nouvel encodage fait franchir le seuil du Bonus.
-    } catch (ex) {
-      showErrorBanner("Enregistrement de l'encodage impossible", ex);
-      toast('Encodage NON enregistré · voir le bandeau rouge', 'alert-circle', 'danger');
-    }
-  });
-}
-function updateQuickRoundInfo() {
-  const info = $('#q-round-info');
-  const raw = parseInt($('#q-min').value, 10);
-  if (!raw || raw <= 0) {
-    info.innerHTML = `<i data-lucide="info" class="w-3.5 h-3.5 text-zinc-600"></i><span>Saisissez la durée pour voir l'arrondi de facturation.</span>`;
-    if (window.lucide) lucide.createIcons();
+function openHoursWizard(prefill) {
+  if (STATE.clients.length === 0) {
+    toast("Créez d'abord un projet", 'alert-circle', 'warn');
+    openClientModal(null);
     return;
   }
-  const billed = billedMinutes(raw);
-  const diff = billed - raw;
-  if (diff > 0) {
-    info.innerHTML = `<i data-lucide="arrow-up" class="w-3.5 h-3.5 text-amber-400"></i>
-      <span><b class="text-zinc-200">${raw} min</b> réelles <span class="text-zinc-500">➔</span> <b class="text-amber-300">${billed} min (${HHdecimal(billed)} h)</b> facturées <span class="text-amber-400/80">(+${diff} min)</span></span>`;
-  } else {
-    info.innerHTML = `<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400"></i>
-      <span><b class="text-zinc-200">${raw} min</b> ➔ <b class="text-emerald-300">${billed} min · ${HHdecimal(billed)} h</b> (tranche respectée)</span>`;
-  }
+  WIZ.step = 1;
+  WIZ.minutes = prefill?.real_minutes || 0;
+  const isFlat = prefill?.custom_price != null && prefill.custom_price > 0;
+  WIZ.type = isFlat ? 'flat' : 'hourly';
+
+  populateWizardClients();
+  const last = localStorage.getItem(LAST_CLIENT_KEY);
+  const wanted = prefill?.client_id || last;
+  if (wanted && STATE.clients.some((c) => c.id === wanted)) $('#w-client').value = wanted;
+
+  $('#w-desc').value = prefill?.description || '';
+  $('#w-date').value = fmtDateInput(prefill?.date || new Date());
+  $('#w-min').value = WIZ.minutes || '';
+  $('#w-rate').value = isFlat ? prefill.custom_price : (prefill?.rate_applied || clientRate($('#w-client').value));
+  $('#w-error').classList.add('hidden');
+  $('#w-custom-wrap').classList.add('hidden');
+  markDurationButtons();
+  updateWizardDescList();
+  applyWizardType();
+  showWizardStep(1);
+  $('#hours-modal').classList.remove('hidden');
   if (window.lucide) lucide.createIcons();
 }
-function syncQuickRateFromType() {
-  const type = $('#q-type').value;
-  const unit = $('#q-rate-unit');
-  const rateInput = $('#q-rate');
-  if (type === 'flat') {
-    unit.textContent = '€';
-    rateInput.placeholder = '3200';
-    rateInput.value = rateInput.value || '';
-  } else {
-    unit.textContent = '€';
-    rateInput.placeholder = '80';
-    syncQuickRateFromClient();
-  }
-}
-function syncQuickRateFromClient() {
-  const type = $('#q-type').value;
-  if (type === 'flat') return; // on garde la valeur
-  const cid = $('#q-client').value;
-  const c = getClient(cid);
-  if (c) $('#q-rate').value = c.default_rate || 0;
+
+function clientRate(id) {
+  const c = getClient(id);
+  return c ? (c.default_rate || NESSY.regieRate) : NESSY.regieRate;
 }
 
-/** Suggestions de description (autocomplete) : dernières descriptions distinctes du projet sélectionné. */
-function updateDescList() {
-  const dl = $('#q-desc-list');
+function populateWizardClients() {
+  const list = STATE.clients.slice().sort((a, b) => {
+    if (!!a.is_external !== !!b.is_external) return a.is_external ? 1 : -1;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  $('#w-client').innerHTML = list
+    .map((c) => `<option value="${c.id}">${c.name}${c.is_external ? ' · Externe' : ''}</option>`)
+    .join('');
+}
+
+function showWizardStep(n) {
+  WIZ.step = n;
+  $$('#hours-modal [data-step]').forEach((el) => {
+    el.classList.toggle('hidden', Number(el.getAttribute('data-step')) !== n);
+  });
+  $$('#hours-modal [data-step-bar]').forEach((el) => {
+    const i = Number(el.getAttribute('data-step-bar'));
+    el.className = `h-1 flex-1 rounded-full ${i <= n ? 'bg-indigo-500' : 'bg-zinc-800'}`;
+  });
+  const labels = { 1: 'Étape 1 sur 3 · Projet et description', 2: 'Étape 2 sur 3 · Durée', 3: 'Étape 3 sur 3 · Prix' };
+  $('#hours-step-label').textContent = labels[n];
+  $('#w-back').classList.toggle('invisible', n === 1);
+  $('#w-next-label').textContent = n === 3 ? 'Enregistrer' : 'Suivant';
+  $('#w-error').classList.add('hidden');
+  if (n === 3) renderWizardSummary();
+}
+
+function markDurationButtons() {
+  $$('#hours-modal .w-dur').forEach((b) => {
+    const m = Number(b.getAttribute('data-min'));
+    const on = m !== 0 && m === WIZ.minutes;
+    b.className = `w-dur px-3 py-3.5 rounded-xl text-sm font-mono font-semibold transition border ${
+      on ? 'bg-indigo-500/20 border-indigo-500/60 text-indigo-100' : 'bg-zinc-900 border-zinc-800 hover:border-indigo-500/50'}`;
+  });
+  const info = $('#w-round');
+  if (!WIZ.minutes) { info.innerHTML = '<span class="text-zinc-600">Choisissez une durée.</span>'; return; }
+  const billed = billedMinutes(WIZ.minutes);
+  const diff = billed - WIZ.minutes;
+  info.innerHTML = diff > 0
+    ? `<b class="text-zinc-200">${WIZ.minutes} min</b> réelles → <b class="text-amber-300">${billed} min (${FR(billed / 60)} h)</b> facturées <span class="text-amber-400/80">(+${diff} min)</span>`
+    : `<b class="text-zinc-200">${WIZ.minutes} min</b> → <b class="text-emerald-300">${FR(billed / 60)} h</b> facturées`;
+}
+
+function applyWizardType() {
+  const hourly = WIZ.type === 'hourly';
+  $('#w-type-hourly').className = `px-3 py-3 rounded-xl text-sm font-semibold transition border ${
+    hourly ? 'bg-indigo-500/15 border-indigo-500/50 text-indigo-200' : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-indigo-500/40'}`;
+  $('#w-type-flat').className = `px-3 py-3 rounded-xl text-sm font-semibold transition border ${
+    !hourly ? 'bg-indigo-500/15 border-indigo-500/50 text-indigo-200' : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-indigo-500/40'}`;
+  $('#w-rate-label').textContent = hourly ? 'Taux horaire (€)' : 'Prix forfaitaire (€)';
+  $$('#hours-modal .w-rate').forEach((b) => b.classList.toggle('hidden', !hourly));
+  if (WIZ.step === 3) renderWizardSummary();
+}
+
+function renderWizardSummary() {
+  const billed = billedMinutes(WIZ.minutes);
+  const rate = parseFloat($('#w-rate').value || '0');
+  const total = WIZ.type === 'flat' ? rate : (billed / 60) * rate;
+  const client = getClient($('#w-client').value);
+  $('#w-summary').innerHTML = `
+    <div class="flex justify-between gap-3"><span class="text-zinc-500">Projet</span><span class="text-right font-medium truncate">${client?.name || '—'}</span></div>
+    <div class="flex justify-between gap-3"><span class="text-zinc-500">Durée facturée</span><span class="font-mono chip">${FR(billed / 60)} h</span></div>
+    <div class="flex justify-between gap-3 pt-1.5 border-t border-zinc-800">
+      <span class="text-zinc-400 font-semibold">Total</span>
+      <span class="font-mono chip font-bold text-emerald-300">${EUR(total, 2)}</span>
+    </div>`;
+}
+
+function bindHoursWizard() {
+  $('#btn-add-hours').addEventListener('click', () => openHoursWizard(null));
+  $('#w-new-client').addEventListener('click', () => {
+    $('#hours-modal').classList.add('hidden');
+    openClientModal(null);
+  });
+  $('#w-client').addEventListener('change', () => {
+    if (WIZ.type === 'hourly') $('#w-rate').value = clientRate($('#w-client').value);
+    updateWizardDescList();
+  });
+
+  $$('#hours-modal .w-dur').forEach((b) => b.addEventListener('click', () => {
+    const m = Number(b.getAttribute('data-min'));
+    if (m === 0) {
+      $('#w-custom-wrap').classList.remove('hidden');
+      $('#w-min').focus();
+      WIZ.minutes = parseInt($('#w-min').value, 10) || 0;
+    } else {
+      $('#w-custom-wrap').classList.add('hidden');
+      WIZ.minutes = m;
+      $('#w-min').value = m;
+    }
+    markDurationButtons();
+  }));
+  $('#w-min').addEventListener('input', () => {
+    WIZ.minutes = parseInt($('#w-min').value, 10) || 0;
+    markDurationButtons();
+  });
+
+  $('#w-type-hourly').addEventListener('click', () => {
+    WIZ.type = 'hourly';
+    $('#w-rate').value = clientRate($('#w-client').value);
+    applyWizardType();
+  });
+  $('#w-type-flat').addEventListener('click', () => { WIZ.type = 'flat'; applyWizardType(); });
+  $$('#hours-modal .w-rate').forEach((b) => b.addEventListener('click', () => {
+    $('#w-rate').value = b.getAttribute('data-rate');
+    renderWizardSummary();
+  }));
+  $('#w-rate').addEventListener('input', renderWizardSummary);
+
+  $('#w-back').addEventListener('click', () => showWizardStep(Math.max(1, WIZ.step - 1)));
+  $('#w-next').addEventListener('click', onWizardNext);
+}
+
+function wizardError(msg) {
+  const el = $('#w-error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+async function onWizardNext() {
+  if (WIZ.step === 1) {
+    if (!$('#w-client').value) return wizardError('Choisissez un projet.');
+    if (!$('#w-desc').value.trim()) return wizardError('Ajoutez une description.');
+    return showWizardStep(2);
+  }
+  if (WIZ.step === 2) {
+    if (!WIZ.minutes || WIZ.minutes <= 0) return wizardError('Choisissez une durée.');
+    return showWizardStep(3);
+  }
+
+  const rate = parseFloat($('#w-rate').value || '0');
+  if (!rate || rate <= 0) return wizardError(WIZ.type === 'flat' ? 'Indiquez le prix du forfait.' : 'Indiquez le taux horaire.');
+
+  const btn = $('#w-next');
+  btn.disabled = true;
+  try {
+    await createLog({
+      client_id: $('#w-client').value,
+      description: $('#w-desc').value.trim(),
+      real_minutes: WIZ.minutes,
+      billed_minutes: billedMinutes(WIZ.minutes),
+      rate_applied: WIZ.type === 'hourly' ? rate : 0,
+      custom_price: WIZ.type === 'flat' ? rate : null,
+      date: new Date($('#w-date').value + 'T12:00:00'),
+    });
+    localStorage.setItem(LAST_CLIENT_KEY, $('#w-client').value);
+    hideErrorBanner();
+    $('#hours-modal').classList.add('hidden');
+    toast('Heures ajoutées', 'check-circle');
+  } catch (ex) {
+    showErrorBanner("Enregistrement de l'encodage impossible", ex);
+    wizardError(explainFirebaseError(ex));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/** Suggestions de description : dernières descriptions distinctes du projet choisi. */
+function updateWizardDescList() {
+  const dl = $('#w-desc-list');
   if (!dl) return;
-  const cid = $('#q-client').value;
+  const cid = $('#w-client').value;
   const seen = new Set();
   const recent = [];
   for (let i = STATE.allLogs.length - 1; i >= 0 && recent.length < 12; i--) {
@@ -1178,60 +1193,17 @@ function updateDescList() {
   dl.innerHTML = recent.map((d) => `<option value="${d.replace(/"/g, '&quot;')}"></option>`).join('');
 }
 
-/** Pré-remplit la saisie rapide à partir d'un encodage existant (répéter une tâche similaire). */
+/** Le bouton « dupliquer » d'une ligne rouvre l'assistant pré-rempli. */
 function duplicateLogIntoQuickForm(log) {
-  $('#q-client').value = log.client_id;
-  syncQuickRateFromClient();
-  updateDescList();
-  $('#q-desc').value = log.description || '';
-  $('#q-min').value = '';
-  const isFlat = log.custom_price != null && log.custom_price > 0;
-  $('#q-type').value = isFlat ? 'flat' : 'hourly';
-  syncQuickRateFromType();
-  if (isFlat) $('#q-rate').value = log.custom_price;
-  else if (log.rate_applied) $('#q-rate').value = log.rate_applied;
-  updateQuickRoundInfo();
-  localStorage.setItem(LAST_CLIENT_KEY, log.client_id);
-  $('#quick-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
-  $('#q-min').focus();
-  toast('Encodage dupliqué · ajustez la durée', 'copy-plus');
+  openHoursWizard(log);
 }
 
-// =============================================================
-// 🗂️ POPULATE CLIENT DROPDOWNS
-// =============================================================
+// Le sélecteur de la modale d'édition suit la liste des projets.
 function populateClientSelects() {
   const list = STATE.clients.slice().sort((a, b) => {
-    if (!!a.is_external !== !!b.is_external) return a.is_external ? 1 : -1; // projets Nessy d'abord
+    if (!!a.is_external !== !!b.is_external) return a.is_external ? 1 : -1;
     return (a.name || '').localeCompare(b.name || '');
   });
-
-  // Saisie rapide : on préserve la sélection en cours pour ne pas la faire sauter
-  // à chaque mise à jour temps réel (onSnapshot) pendant que l'utilisateur tape.
-  const qSel = $('#q-client');
-  const prevVal = qSel.value;
-  if (list.length === 0) {
-    // Sans projet, l'encodage est impossible : on le dit dans le sélecteur
-    // plutôt que de laisser une liste vide inexplicable.
-    qSel.innerHTML = '<option value="">Aucun projet — cliquez sur « Nouveau Projet »</option>';
-    $('#e-client').innerHTML = '';
-    STATE.lastPopulatedClientId = null;
-    return;
-  }
-  qSel.innerHTML = list.map((c) => `<option value="${c.id}">${c.name}${c.is_external ? ' · Externe' : ''} · ${c.default_rate ?? 0}€/h</option>`).join('');
-  let nextVal = prevVal;
-  if (!list.some((c) => c.id === prevVal)) {
-    const lastUsed = localStorage.getItem(LAST_CLIENT_KEY);
-    nextVal = (lastUsed && list.some((c) => c.id === lastUsed)) ? lastUsed : (list[0]?.id || '');
-  }
-  qSel.value = nextVal;
-  if (nextVal !== STATE.lastPopulatedClientId) {
-    STATE.lastPopulatedClientId = nextVal;
-    syncQuickRateFromClient();
-    updateDescList();
-  }
-
-  // Edit modal
   const eSel = $('#e-client');
   const prevEVal = eSel.value;
   eSel.innerHTML = list.map((c) => `<option value="${c.id}">${c.name}${c.is_external ? ' · Externe' : ''}</option>`).join('');
@@ -1428,9 +1400,8 @@ function exportCSV() {
   rows.push(['TOTAL MOIS · ' + months[STATE.selectedMonth] + ' ' + STATE.selectedYear]);
   rows.push(['Heures réelles', '', '', agg.globalRealMin, agg.globalBilledMin, HHdecimal(agg.globalBilledMin), '', '', '']);
   rows.push(['', '', '', '', '', '', '', 'CA HTVA Facturé (brut)', agg.globalRawEur.toFixed(2)]);
-  rows.push(['', '', '', '', '', '', '', 'Min Garanti Principal appliqué', agg.minApplied ? 'OUI · ' + EUR(agg.minG) : 'NON']);
+  rows.push(['', '', '', '', '', '', '', 'Minimum garanti appliqué', agg.minApplied ? 'OUI · ' + EUR(agg.minG) : 'NON']);
   rows.push(['', '', '', '', '', '', '', 'CA HTVA FINAL (Tous clients)', agg.globalCA.toFixed(2)]);
-  rows.push(['', '', '', '', '', '', '', 'Reste NET Pocket', Math.round(agg.netPocket).toFixed(2)]);
 
   const csv = rows.map((r) => r.map((c) => {
     const s = String(c ?? '');

@@ -9,12 +9,27 @@ Aucune étape de build n'est nécessaire pour la faire tourner : `index.html` pe
 | Fichier | Rôle |
 |---|---|
 | `index.html` | Structure de la page (login + tableau de bord bento) |
-| `app.js` | Logique métier : paliers Nessy, cascade de trésorerie, CRUD Firestore, saisie rapide |
+| `app.js` | Logique métier : paliers Nessy, CRUD Firestore, assistant d'encodage |
 | `city3d.js` | Ville 3D low-poly (Three.js) pilotée par la jauge |
 | `firebase-config.js` | Initialisation Firebase Auth + Firestore |
 | `styles.css` | **Généré** — feuille Tailwind compilée (voir ci-dessous) |
 | `vendor/three/` | Three.js + OrbitControls vendorés (pas de CDN) |
 | `.nojekyll` | Empêche GitHub Pages de filtrer des dossiers comme `vendor/` |
+
+## Vider le cache après un déploiement
+
+Les navigateurs (surtout Safari iOS) gardent longtemps les anciens fichiers.
+Chaque ressource est donc appelée avec un numéro de version : `styles.css?v=…`,
+`app.js?v=…`, etc. **Après chaque modification, incrémentez cette version**
+(une simple date suffit) partout où elle apparaît :
+
+```bash
+grep -rl 'v=2026-09-03-5' index.html app.js city3d.js vendor/ \
+  | xargs sed -i 's/v=2026-09-03-5/v=2026-09-04-1/g'
+```
+
+Sans ça, un téléphone peut continuer à exécuter l'ancien JavaScript avec le
+nouveau HTML.
 
 ## Régénérer `styles.css`
 
@@ -60,3 +75,11 @@ match /{col}/{doc} {
                      && resource.data.userId == request.auth.uid;
 }
 ```
+
+## Périmètre volontairement restreint
+
+L'app ne calcule **que** la facturation : heures prestées, minimum garanti de
+3 500 € (25 h de socle puis régie à 80 €/h jusqu'à 43,75 h), et surplus
+facturable au-delà. Il n'y a volontairement ni TVA, ni INASTI, ni provision
+d'impôt, ni charges fixes : ces estimations demandaient des frais
+professionnels réels que l'app n'a pas, et donnaient un « reste net » trompeur.
