@@ -3,8 +3,8 @@
 // Pilotée par la progression des 3 paliers du contrat (Socle / Garantie / Bonus).
 // La composition (palette, formes, jitter) change chaque mois via un seed.
 // =============================================================================
-import * as THREE from './vendor/three/three.module.js?v=2026-09-03-11';
-import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-03-11';
+import * as THREE from './vendor/three/three.module.js?v=2026-09-03-12';
+import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-03-12';
 
 // ---- PRNG déterministe (mulberry32) — même seed = même ville ----
 function mulberry32(seed) {

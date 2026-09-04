@@ -14,7 +14,7 @@ import {
   serverTimestamp,
   setDoc,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-03-11';
+} from './firebase-config.js?v=2026-09-03-12';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -423,6 +423,19 @@ function writeInBackground(promise, label) {
   promise.catch((ex) => showErrorBanner(label, ex));
 }
 
+// Les écouteurs temps réel ne rappellent qu'au tour de boucle suivant. Le code
+// qui suit immédiatement une création — remplir une liste déroulante, y
+// sélectionner le nouvel élément — travaillerait donc sur un état périmé : la
+// sélection retombait dans le vide et le projet fraîchement créé n'apparaissait
+// qu'après avoir refermé la fenêtre. On l'insère donc localement tout de suite ;
+// l'instantané qui arrive ensuite porte le même identifiant et le remplace.
+function upsertLocal(list, item) {
+  const i = list.findIndex((x) => x.id === item.id);
+  if (i >= 0) list[i] = { ...list[i], ...item };
+  else list.push(item);
+  return item;
+}
+
 function createLog(payload) {
   if (!STATE.user) return null;
   const ref = doc(colTimeLogs());          // identifiant généré localement
@@ -434,6 +447,12 @@ function createLog(payload) {
     ...payload,
     date: Timestamp.fromDate(toDateSafe(payload.date) || new Date()),
   }), "Enregistrement de l'encodage impossible");
+  upsertLocal(STATE.allLogs, {
+    id: ref.id, userId: STATE.user.uid, custom_price: null, ...payload,
+    date: toDateSafe(payload.date) || new Date(),
+  });
+  STATE.allLogs.sort((a, b) => toMillisSafe(a.date) - toMillisSafe(b.date));
+  renderAll();
   return ref.id;
 }
 function updateLog(id, patch) {
@@ -454,6 +473,9 @@ function createClient(data) {
     createdAt: serverTimestamp(),
     ...data,
   }), 'Enregistrement du projet impossible');
+  upsertLocal(STATE.clients, { id: ref.id, userId: STATE.user.uid, ...data });
+  STATE.clients.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  renderAll();
   return ref.id;
 }
 function updateClient(id, patch) {
@@ -864,7 +886,7 @@ async function ensureCityLoaded() {
   if (cityStatus === 'ready' || cityStatus === 'loading' || cityStatus === 'failed') return;
   cityStatus = 'loading';
   try {
-    cityMod = await import('./city3d.js?v=2026-09-03-11');
+    cityMod = await import('./city3d.js?v=2026-09-03-12');
     const canvas = document.getElementById('city-canvas');
     if (!canvas) throw new Error('canvas #city-canvas introuvable');
     cityMod.initCity(canvas);

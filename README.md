@@ -31,7 +31,7 @@ Deux protections :
 fichiers** (une simple date suffit) :
 
 ```bash
-OLD=2026-09-03-11; NEW=2026-09-04-1
+OLD=2026-09-03-12; NEW=2026-09-04-1
 grep -rl "$OLD" index.html app.js city3d.js vendor/ version.json \
   | xargs sed -i "s/$OLD/$NEW/g"
 ```
@@ -86,7 +86,7 @@ tant que les règles ci-dessous ne sont pas **publiées**, l'app ne peut ni lire
 écrire. Un projet Firebase inexistant, lui, renvoie un `403` d'une forme
 différente (`CONSUMER_INVALID`) — c'est ce qui permet de distinguer les cas.
 
-Depuis `2026-09-03-11`, l'app diagnostique elle-même les deux situations :
+Depuis `2026-09-03-12`, l'app diagnostique elle-même les deux situations :
 elle affiche le code d'erreur réel dès qu'un écouteur le remonte, propose un
 bouton « Copier les règles Firestore », et débloque le bouton « Ajouter des
 heures » au lieu de le laisser définitivement inerte. Le chien de garde de
@@ -105,6 +105,24 @@ match /{col}/{doc} {
                      && resource.data.userId == request.auth.uid;
 }
 ```
+
+## Écritures optimistes · pourquoi le mock de test est asynchrone
+
+Les écouteurs `onSnapshot` ne rappellent **jamais** de façon synchrone, même
+pour une écriture servie par le cache local : le rappel arrive au tour de boucle
+suivant. Tout code qui enchaîne « je crée, puis je relis `STATE` » travaille donc
+sur un état périmé. C'est ce qui cassait la création d'un projet depuis
+l'assistant : la liste déroulante était repeuplée avant l'arrivée de
+l'instantané, le projet neuf n'y figurait pas, la sélection retombait dans le
+vide et l'assistant restait bloqué à l'étape 1.
+
+`createClient` et `createLog` insèrent donc l'objet dans `STATE` immédiatement
+(`upsertLocal`, dédoublonné par identifiant) avant de rendre la main.
+L'instantané qui suit porte le même identifiant et remplace simplement l'entrée.
+
+⚠️ Le mock utilisé par les tests notifie ses écouteurs via `setTimeout(…, 0)`,
+**délibérément**. Une notification synchrone masquait entièrement ce bug : la
+suite A→Z passait au vert alors que l'application réelle était inutilisable.
 
 ## Périmètre volontairement restreint
 
