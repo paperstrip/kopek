@@ -16,10 +16,11 @@
 // Ce module ne connaît PAS les règles du jeu : on lui passe une carte de tuiles,
 // il la dessine et signale la tuile touchée. Toute la logique vit dans game.js.
 // =============================================================================
-import * as THREE from './vendor/three/three.module.js?v=2026-09-03-14';
-import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-03-14';
-import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-03-14';
-import { axialToWorld, TERRAINS, CLANS, neighbors, tileKey } from './game.js?v=2026-09-03-14';
+import * as THREE from './vendor/three/three.module.js?v=2026-09-03-15';
+import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-03-15';
+import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-03-15';
+import { GLTFLoader } from './vendor/three/GLTFLoader.js?v=2026-09-03-15';
+import { axialToWorld, TERRAINS, CLANS, neighbors, tileKey } from './game.js?v=2026-09-03-15';
 
 const HEX = 1.0;                 // rayon d'un hexagone
 const GAP = 0.13;                // interstice : c'est lui qui fait « îles séparées »
@@ -238,12 +239,19 @@ function buildSharedGeometries() {
   });
   GEO.plinth.rotateX(-Math.PI / 2);
 
-  // Le sol de la tuile : une nappe subdivisée puis bosselée. C'est elle qui
-  // enlève l'aspect « plaque de plastique » d'un dessus parfaitement plat.
-  GEO.ground = new THREE.CircleGeometry((HEX - GAP) * 0.855 - 0.015, 26, 0, Math.PI * 2);
-  GEO.ground = subdivideCircle(GEO.ground);
-  bumpGround(GEO.ground, 0.115);
-  GEO.ground.rotateX(-Math.PI / 2);
+  // Le sol de la tuile : une nappe subdivisée puis sculptée. C'est elle qui
+  // porte le relief — sans quoi la carte reste un plateau de jeu en plastique.
+  const groundBase = subdivideCircle(new THREE.CircleGeometry((HEX - GAP) * 0.855 - 0.015, 26));
+  GEO.ground = {};
+  // Chaque terrain a son propre profil d'élévation. Une montagne qui n'est
+  // qu'un caillou posé sur une plaque plate ne lira jamais comme une montagne.
+  RELIEF.forEach(({ key, amp, peak, ridge }) => {
+    const g = groundBase.clone();
+    reliefGround(g, amp, peak, ridge, key);
+    g.rotateX(-Math.PI / 2);
+    GEO.ground[key] = g;
+  });
+  groundBase.dispose();
 
   // --- végétation : trois houppiers sculptés, jamais la même silhouette ---
   GEO.canopy = [0, 1, 2].map((i) => sculpt(
@@ -314,6 +322,11 @@ function buildSharedGeometries() {
   GEO.reach = new THREE.CircleGeometry((HEX - GAP) * 0.8, 24);
   GEO.reach.rotateX(-Math.PI / 2);
 
+  // Cible de sélection : un hexagone plat, invisible, posé sur la tuile.
+  GEO.pick = new THREE.CircleGeometry(HEX * 0.92, 6);
+  GEO.pick.rotateX(-Math.PI / 2);
+  GEO.pick.rotateY(Math.PI / 6);
+
   GEO.ring = new THREE.TorusGeometry(HEX - GAP - 0.02, 0.045, 10, 40);
   GEO.ring.rotateX(-Math.PI / 2);
 }
@@ -348,6 +361,55 @@ function subdivideCircle(circle) {
   out.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g.dispose();
   return out;
+}
+
+// amp : bosses de surface · peak : hauteur du sommet · ridge : rugosité des arêtes
+const RELIEF = [
+  { key: 'prairie',  amp: 0.07, peak: 0.00, ridge: 0.6 },
+  { key: 'sable',    amp: 0.05, peak: 0.00, ridge: 0.4 },
+  { key: 'foret',    amp: 0.11, peak: 0.10, ridge: 0.8 },
+  { key: 'colline',  amp: 0.14, peak: 0.42, ridge: 1.0 },
+  { key: 'montagne', amp: 0.18, peak: 1.15, ridge: 1.6 },
+];
+
+/**
+ * Sculpte la nappe : un dôme central dont la hauteur dépend du terrain, plus
+ * du bruit. Les bords restent au niveau de la tuile pour que les îles se
+ * raccordent proprement.
+ */
+function reliefGround(geo, amp, peak, ridge, seedKey) {
+  const seed = hashStr(seedKey) % 1000;
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i);
+    const d = Math.hypot(x, y);
+    const bord = Math.max(0, 1 - Math.pow(d / 0.78, 5));      // s'annule sur le pourtour
+    const dome = peak * Math.pow(Math.max(0, 1 - d / 0.8), 1.7);
+    const bruit = (fbm(x * 3 + seed, y * 3 + seed, 0.5, 4) - 0.5) * 2;
+    pos.setZ(i, (dome + bruit * amp * ridge) * bord);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+}
+
+/**
+ * Hauteur du relief en un point local de la tuile. Reprend exactement la
+ * formule de reliefGround : sans ça, les arbres flottent ou s'enfoncent.
+ */
+export function reliefHeight(terrain, dx, dz) {
+  const r = RELIEF.find((x) => x.key === terrain) || RELIEF[0];
+  const seed = hashStr(r.key) % 1000;
+  const d = Math.hypot(dx, dz);
+  const bord = Math.max(0, 1 - Math.pow(d / 0.78, 5));
+  const dome = r.peak * Math.pow(Math.max(0, 1 - d / 0.8), 1.7);
+  const bruit = (fbm(dx * 3 + seed, dz * 3 + seed, 0.5, 4) - 0.5) * 2;
+  return (dome + bruit * r.amp * r.ridge) * bord;
+}
+
+function hashStr(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+  return h;
 }
 
 function bumpGround(geo, amp) {
@@ -420,6 +482,15 @@ function applyRealTextures() {
   if (texturesReady) return;
   texturesReady = true;
 
+  // Un matcap encode matière ET éclairage dans une image. Teinté par matière,
+  // il donne à une géométrie simple l'aspect d'un rendu de studio — c'est
+  // exactement ce qui manquait pour sortir de l'aplat « low poly ».
+  const mcDoux = loadTex('matcap_doux.jpg', { srgb: true });
+  const mcDur = loadTex('matcap_dur.jpg', { srgb: true });
+  mcDoux.wrapS = mcDoux.wrapT = THREE.ClampToEdgeWrapping; mcDoux.repeat.set(1, 1);
+  mcDur.wrapS = mcDur.wrapT = THREE.ClampToEdgeWrapping; mcDur.repeat.set(1, 1);
+  MATCAP.doux = mcDoux; MATCAP.dur = mcDur;
+
   const rocheRelief = loadTex('roche_relief.jpg', { repeat: 3 });
   // La même image servie deux fois : en relief (linéaire) et en couleur (sRGB).
   // Réutiliser la brique pour la pierre donnait des rochers en maçonnerie.
@@ -443,44 +514,31 @@ function applyRealTextures() {
   const murRelief = loadTex('mur_relief.jpg', { repeat: 1.4 });
   const murRugosite = loadTex('mur_rugosite.jpg', { repeat: 1.4 });
 
-  Object.assign(MAT.wall, {
-    map: murCouleur, bumpMap: murRelief, roughnessMap: murRugosite,
-    bumpScale: 0.6, roughness: 1, color: new THREE.Color('#d9c9ad'),
-  });
-  MAT.wall.needsUpdate = true;
-
-  // Les toits réutilisent la brique, simplement teintée : la trame de la
-  // maçonnerie lit très bien comme une couverture à cette échelle.
-  [[MAT.roofRed, '#8c3626'], [MAT.roofBlue, '#3b5171']].forEach(([m, c]) => {
-    m.map = murCouleur; m.bumpMap = murRelief; m.bumpScale = 0.5;
-    m.color = new THREE.Color(c); m.roughness = 0.9; m.needsUpdate = true;
-  });
-
-  Object.assign(MAT.rock, {
-    map: rocheCouleur, bumpMap: rocheRelief, bumpScale: 2.4,
-    color: new THREE.Color('#b9b3a8'), roughness: 1, metalness: 0,
-  });
-  MAT.rock.needsUpdate = true;
-
   [[MAT.flanc, '#a97f52'], [MAT.flancSable, '#dcbe8c']].forEach(([m, c]) => {
     m.map = falaiseCouleur; m.bumpMap = rocheRelief; m.bumpScale = 2.6;
     m.color = new THREE.Color(c); m.roughness = 1; m.needsUpdate = true;
   });
 
-  const boisCouleur = loadTex('bois_couleur.jpg', { repeat: 1, srgb: true });
   const boisRelief = loadTex('bois_relief.jpg', { repeat: 1 });
-  [MAT.trunk, MAT.pole].forEach((m) => {
-    m.map = boisCouleur; m.bumpMap = boisRelief; m.bumpScale = 0.5;
-    m.color = new THREE.Color('#9a7550'); m.roughness = 1; m.needsUpdate = true;
-  });
 
   // Le feuillage garde sa teinte propre mais gagne le relief de la roche :
   // c'est ce qui casse l'aspect « boule de plastique ».
-  MAT.leaf.forEach((m) => {
-    m.bumpMap = rocheRelief; m.bumpScale = 1.6; m.roughness = 0.98;
-    m.color = new THREE.Color('#8fbf72');
+  // Le décor reçoit le matcap et sa carte de relief. Le sol reste en PBR pour
+  // continuer à recevoir les ombres portées : un matcap ne les reçoit pas.
+  const poser = (m, mc, bump, scale) => {
+    m.matcap = mc;
+    if (bump) { m.bumpMap = bump; m.bumpScale = scale; }
     m.needsUpdate = true;
-  });
+  };
+  poser(MAT.rock, mcDur, rocheRelief, 1.4);
+  poser(MAT.wall, mcDoux, murRelief, 0.5);
+  poser(MAT.roofRed, mcDoux, murRelief, 0.4);
+  poser(MAT.roofBlue, mcDoux, murRelief, 0.4);
+  poser(MAT.trunk, mcDur, boisRelief, 0.6);
+  poser(MAT.pole, mcDur, boisRelief, 0.5);
+  poser(MAT.gold, mcDoux, null, 0);
+  poser(MAT.canvasTent, mcDoux, null, 0);
+  MAT.leaf.forEach((m) => poser(m, mcDoux, rocheRelief, 1.2));
 
   if (seaMesh) {
     const vagues = loadTex('eau_normales.jpg', { repeat: 14 });
@@ -518,6 +576,17 @@ function loadEnvironment() {
   });
 }
 
+const MATCAP = {};
+
+/**
+ * Matière de décor. On la crée d'emblée en MeshMatcapMaterial : un matcap ne
+ * s'ajoute pas après coup sur une matière PBR, le shader ne le lirait pas.
+ * Tant que l'image n'est pas chargée, la teinte seule fait l'affaire.
+ */
+function matcapMat(tint, opts = {}) {
+  return new THREE.MeshMatcapMaterial({ color: new THREE.Color(tint), ...opts });
+}
+
 function buildSharedMaterials() {
   const groundBump = bumpTexture({ size: 256, blobs: 320, repeat: 5, contrast: 1 });
 
@@ -536,35 +605,21 @@ function buildSharedMaterials() {
   MAT.flanc = new THREE.MeshStandardMaterial({ map: strata, bumpMap: groundBump, bumpScale: 2.4, roughness: 1 });
   MAT.flancSable = new THREE.MeshStandardMaterial({ map: strataSand, bumpMap: groundBump, bumpScale: 2.2, roughness: 1 });
 
-  MAT.trunk = new THREE.MeshStandardMaterial({
-    map: grainTexture('#7a5433', '#9a6f47', '#513824', { repeat: 1, blobs: 160 }),
-    roughness: 1,
-  });
-  MAT.leaf = ['#5f9e50', '#4a8a45', '#78b45e'].map((c, i) => new THREE.MeshStandardMaterial({
-    map: grainTexture(c, '#9ed07f', '#2f6636', { repeat: 1.4, blobs: 260 }),
-    bumpMap: groundBump, bumpScale: 0.9,
-    roughness: 0.95, metalness: 0,
-  }));
-  MAT.rock = new THREE.MeshStandardMaterial({
-    map: grainTexture('#9a9287', '#c0b8ab', '#6b655c', { repeat: 1.3, blobs: 300 }),
-    bumpMap: groundBump, bumpScale: 1.8, roughness: 1,
-  });
-  MAT.wall = new THREE.MeshStandardMaterial({
-    map: grainTexture('#e3cfa8', '#f7ead0', '#b8a077', { repeat: 1.6, blobs: 220 }),
-    bumpMap: bumpTexture({ size: 192, blobs: 220, repeat: 4, contrast: 0.8 }), bumpScale: 1.1, roughness: 0.88,
-  });
-  MAT.roofRed = new THREE.MeshStandardMaterial({ map: roofTexture('#a8412f', '#71291d'), roughness: 0.85 });
-  MAT.roofBlue = new THREE.MeshStandardMaterial({ map: roofTexture('#41597f', '#2a3c56'), roughness: 0.85 });
-  MAT.gold = mat('#e8b93f', { roughness: 0.42, metalness: 0.35 });
-  MAT.pole = mat('#6b5641', { roughness: 1 });
-  MAT.canvasTent = new THREE.MeshStandardMaterial({
-    map: grainTexture('#e6dcc6', '#fffaf0', '#b7a988', { repeat: 1.2, blobs: 150 }), roughness: 0.95,
-  });
+  MAT.trunk = matcapMat('#7d5a38');
+  MAT.leaf = ['#6fae52', '#4f8f44', '#84c266'].map((c) => matcapMat(c));
+  MAT.rock = matcapMat('#a09a90');
+  MAT.wall = matcapMat('#e6d9bd');
+  MAT.roofRed = matcapMat('#a8412f');
+  MAT.roofBlue = matcapMat('#41597f');
+  MAT.gold = matcapMat('#e8b93f');
+  MAT.pole = matcapMat('#6b5641');
+  MAT.canvasTent = matcapMat('#e6dcc6');
   MAT.fog = mat('#63798c', { roughness: 1, transparent: true, opacity: 0.72 });
   MAT.fogSide = mat('#4a5c6e', { roughness: 1 });
   MAT.clan = {};
   CLANS.forEach((c) => { MAT.clan[c.key] = mat(c.color, { roughness: 0.6 }); });
   MAT.player = mat(PALETTE.joueur, { roughness: 0.5 });
+  MAT.pick = new THREE.MeshBasicMaterial({ visible: false });
   MAT.ringSel = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.9 });
   // Portée : bleu pour un déplacement, rouge pour un assaut. La couleur dit
   // ce qui va se passer avant qu'on touche.
@@ -636,6 +691,9 @@ export function initWorld(canvas, { onSelect } = {}) {
   buildSharedMaterials();
   loadEnvironment();
   applyRealTextures();
+  // Les modèles arrivent après coup : on force un redessin à leur arrivée,
+  // sinon la carte resterait vide jusqu'au prochain changement d'état.
+  loadModels(() => { lastSig = null; if (lastPayload) renderWorld(lastPayload, { force: true }); });
 
   worldGroup = new THREE.Group(); scene.add(worldGroup);
   decorGroup = new THREE.Group(); scene.add(decorGroup);
@@ -765,26 +823,24 @@ export function renderWorld(p, { force = false } = {}) {
     const rng = rngFrom(t.q, t.r);
     const hidden = !t.revealed;
 
-    // Chaque île flotte à sa propre hauteur : c'est ce léger désordre qui donne
-    // le relief des références, sans avoir à modéliser du terrain.
-    const bob = hidden ? -0.55 : (rng() - 0.5) * 0.34;
-
-    const top = new THREE.Mesh(GEO.tile, hidden ? MAT.fog : MAT.terrain[t.terrain]);
-    top.position.set(x, bob, z);
-    top.castShadow = true; top.receiveShadow = true;
-    top.userData.tile = { q: t.q, r: t.r };
-    worldGroup.add(top);
-    pickTargets.push(top);
-
-    const plinth = new THREE.Mesh(GEO.plinth, hidden ? MAT.fogSide : (t.terrain === 'sable' ? MAT.flancSable : MAT.flanc));
-    plinth.position.set(x, bob - 1.35, z);
-    plinth.scale.set(0.94, 1, 0.94);
-    plinth.receiveShadow = true;
-    worldGroup.add(plinth);
+    // La tuile elle-même vient du pack. L'eau sert de tuile inconnue : la
+    // brume devient une mer que l'on n'a pas encore franchie.
+    const socle = inst(hidden ? 'hex_water' : tileModel(t, rng), MODEL_SCALE, hidden ? 0 : rng() * Math.PI * 2);
+    if (socle) {
+      socle.position.set(x, hidden ? -0.06 : 0, z);
+      if (hidden) socle.traverse((n) => { if (n.isMesh) n.castShadow = false; });
+      worldGroup.add(socle);
+      // La sélection tape sur une cible plate invisible : viser les maillages
+      // du modèle rendrait le toucher imprécis selon le décor posé dessus.
+      const cible = new THREE.Mesh(GEO.pick, MAT.pick);
+      cible.position.set(x, 0.06, z);
+      cible.userData.tile = { q: t.q, r: t.r };
+      worldGroup.add(cible);
+      pickTargets.push(cible);
+    }
 
     if (hidden) return;
-    const y = bob + GEO.tileTop;
-    decorateTile(t, x, y, z, rng, p);
+    decorateTile(t, x, 0, z, rng, p);
   });
 
   drawArmies(p);
@@ -803,7 +859,7 @@ function drawArmies(p) {
     const t = tiles[tileKey(a.q, a.r)];
     if (!t || !t.revealed) return;                 // pas d'armée visible dans la brume
     const { x, z } = axialToWorld(a.q, a.r, HEX);
-    const y = GEO.tileTop + 0.02;
+    const y = 0.14;
     const mat = a.owner === 'joueur' ? MAT.player : (MAT.clan[a.owner] || MAT.player);
 
     const base = new THREE.Mesh(GEO.armyBase, MAT.armyBase);
@@ -842,212 +898,179 @@ function drawReach(p) {
   cells.forEach((info) => {
     const { x, z } = axialToWorld(info.q, info.r, HEX);
     const disc = new THREE.Mesh(GEO.reach, info.attack ? MAT.reachAttack : MAT.reachMove);
-    disc.position.set(x, GEO.tileTop + 0.03, z);
+    disc.position.set(x, 0.12, z);
     reachGroup.add(disc);
   });
 }
 
+// =============================================================================
+// MODÈLES · KayKit Medieval Hexagon Pack (CC0) — voir assets/LICENCES.md
+// -----------------------------------------------------------------------------
+// Le décor n'est plus généré par du code. Des maillages faits par un artiste
+// donnent des silhouettes qu'aucun bruit fractal ne produira : c'est la
+// silhouette qui se lit de loin, pas la matière.
+// =============================================================================
+const MODELS = {};
+let modelsReady = false;
+let onModelsReady = null;
+
+const MODEL_LIST = [
+  'hex_grass', 'hex_water',
+  'mountain_A_grass_trees', 'mountain_B_grass_trees', 'hills_A_trees', 'hill_single_A',
+  'rock_single_A', 'rock_single_B', 'tree_single_A', 'tree_single_B',
+  'building_home_A_blue', 'building_home_B_blue', 'building_castle_blue',
+  'building_church_blue', 'building_market_blue', 'building_tower_A_blue',
+  'building_mine_blue', 'building_windmill_blue',
+  'building_castle_red', 'building_home_A_red', 'building_tower_A_red',
+  'building_castle_green', 'building_home_A_green', 'building_tower_A_green',
+  'building_castle_yellow', 'building_home_A_yellow', 'building_tower_A_yellow',
+  'flag_blue', 'flag_red', 'flag_green', 'flag_yellow',
+];
+
+/** Couleur de bannière d'un propriétaire, pour choisir la variante du modèle. */
+const OWNER_COLOR = { joueur: 'blue', ombre: 'red', cendre: 'yellow', givre: 'blue', ronce: 'green' };
+function colorOf(owner) { return OWNER_COLOR[owner] || 'red'; }
+
+export function loadModels(onReady) {
+  onModelsReady = onReady;
+  const loader = new GLTFLoader();
+  let restants = MODEL_LIST.length;
+  MODEL_LIST.forEach((name) => {
+    loader.load(`./assets/models/${name}.gltf`, (gltf) => {
+      const racine = gltf.scene;
+      racine.traverse((n) => {
+        if (!n.isMesh) return;
+        n.castShadow = true;
+        n.receiveShadow = true;
+        // L'atlas du pack est en sRGB ; sans ça tout ressort délavé.
+        if (n.material && n.material.map) n.material.map.colorSpace = THREE.SRGBColorSpace;
+      });
+      MODELS[name] = racine;
+      if (--restants === 0) { modelsReady = true; if (onModelsReady) onModelsReady(); }
+    }, undefined, (e) => {
+      console.warn('[kopek] modèle non chargé', name, e);
+      if (--restants === 0) { modelsReady = true; if (onModelsReady) onModelsReady(); }
+    });
+  });
+}
+
+/**
+ * Modèle de la tuile elle-même. Montagnes et collines du pack embarquent leur
+ * propre socle hexagonal : les poser SUR une tuile d'herbe donnait des dalles
+ * grises flottantes. Elles remplacent donc la tuile.
+ */
+function tileModel(t, rng) {
+  if (t.terrain === 'montagne') return rng() < 0.5 ? 'mountain_A_grass_trees' : 'mountain_B_grass_trees';
+  if (t.terrain === 'colline') return 'hills_A_trees';
+  return 'hex_grass';
+}
+
+/** Copie d'un modèle, prête à être posée. Les matières sont partagées. */
+function inst(name, scale = 1, ry = 0) {
+  const src = MODELS[name];
+  if (!src) return null;
+  const o = src.clone(true);
+  o.scale.setScalar(scale);
+  o.rotation.y = ry;
+  return o;
+}
+
+// Le pack est calibré pour un hexagone de rayon 1 « pointy-top » ; notre grille
+// utilise le même repère, il n'y a donc qu'un facteur d'échelle global.
+const MODEL_SCALE = 1.0;
+
+/** Décor d'une tuile : relief, nature, bâti, bannière. */
 function decorateTile(t, x, y, z, rng, p) {
-  const put = (mesh, dx, dz, ry = 0) => {
-    mesh.position.set(x + dx, y, z + dz);
-    mesh.rotation.y = ry;
-    mesh.castShadow = true; mesh.receiveShadow = true;
-    decorGroup.add(mesh);
-    return mesh;
+  const poser = (o, dx = 0, dz = 0, dy = 0) => {
+    if (!o) return null;
+    o.position.set(x + dx, y + dy, z + dz);
+    decorGroup.add(o);
+    return o;
   };
 
-  // Nappe de sol bosselée posée sur la tuile : c'est elle qui porte la texture
-  // et casse l'aplat parfait du dessus extrudé.
-  const ground = new THREE.Mesh(GEO.ground, MAT.ground[t.terrain]);
-  ground.position.set(x, y + 0.008, z);
-  ground.rotation.y = rng() * Math.PI;
-  ground.receiveShadow = true;
-  decorGroup.add(ground);
-
-  const pickCanopy = () => GEO.canopy[Math.floor(rng() * GEO.canopy.length)];
-  const pickRock = () => GEO.rock[Math.floor(rng() * GEO.rock.length)];
-
-  /** Un arbre = un tronc évasé + deux houppiers sculptés décalés. */
-  const tree = (dx, dz, scale) => {
-    const trunk = new THREE.Mesh(GEO.trunk, MAT.trunk);
-    trunk.scale.set(scale * 1.05, scale * 2.5, scale * 1.05);
-    put(trunk, dx, dz, rng() * Math.PI);
-    const leafMat = MAT.leaf[Math.floor(rng() * MAT.leaf.length)];
-    const c1 = new THREE.Mesh(pickCanopy(), leafMat);
-    c1.scale.setScalar(scale * 1.15);
-    put(c1, dx, dz, rng() * Math.PI).position.y += scale * 2.35;
-    const c2 = new THREE.Mesh(pickCanopy(), leafMat);
-    c2.scale.setScalar(scale * 0.78);
-    put(c2, dx + (rng() - 0.5) * scale * 0.9, dz + (rng() - 0.5) * scale * 0.9, rng() * Math.PI)
-      .position.y += scale * (2.9 + rng() * 0.4);
-  };
-
-  if (t.terrain === 'foret') {
+  // Le relief est porté par la tuile elle-même (voir tileModel) ; ici on
+  // n'ajoute que ce qui se pose dessus.
+  if (t.terrain === 'montagne' || t.terrain === 'colline') {
+    if (rng() < 0.5) poser(inst('rock_single_A', 0.4, rng() * Math.PI * 2), (rng() - 0.5) * 0.8, (rng() - 0.5) * 0.8);
+  } else if (t.terrain === 'foret') {
     const n = 3 + Math.floor(rng() * 3);
     for (let i = 0; i < n; i++) {
-      const a = rng() * Math.PI * 2, d = rng() * 0.5;
-      tree(Math.cos(a) * d, Math.sin(a) * d, 0.2 + rng() * 0.07);
+      const a = rng() * Math.PI * 2, d = rng() * 0.55;
+      poser(inst(rng() < 0.5 ? 'tree_single_A' : 'tree_single_B', 0.55 + rng() * 0.2, rng() * Math.PI * 2),
+            Math.cos(a) * d, Math.sin(a) * d);
     }
-  } else if (t.terrain === 'montagne' || t.terrain === 'colline') {
-    const n = t.terrain === 'montagne' ? 3 : 2;
-    for (let i = 0; i < n; i++) {
-      const a = rng() * Math.PI * 2, d = rng() * 0.38;
-      const s = (t.terrain === 'montagne' ? 0.4 : 0.26) * (0.7 + rng() * 0.6);
-      const rock = new THREE.Mesh(pickRock(), MAT.rock);
-      rock.scale.set(s, s * (1.15 + rng() * 0.7), s * (0.85 + rng() * 0.3));
-      put(rock, Math.cos(a) * d, Math.sin(a) * d, rng() * Math.PI).position.y += s * 0.45;
-    }
-    if (t.terrain === 'colline' && rng() < 0.6) tree((rng() - 0.5) * 0.8, (rng() - 0.5) * 0.8, 0.16);
+  } else if (t.terrain === 'sable' && rng() < 0.45) {
+    poser(inst('rock_single_B', 0.5 + rng() * 0.25, rng() * Math.PI * 2),
+          (rng() - 0.5) * 0.9, (rng() - 0.5) * 0.9);
   } else if (t.terrain === 'prairie') {
-    if (rng() < 0.45) tree((rng() - 0.5) * 0.9, (rng() - 0.5) * 0.9, 0.17 + rng() * 0.05);
-    const tufts = 2 + Math.floor(rng() * 3);
-    for (let i = 0; i < tufts; i++) {
-      const s = 0.1 + rng() * 0.07;
-      const bush = new THREE.Mesh(GEO.bush, MAT.leaf[1]);
-      bush.scale.set(s * 1.7, s, s * 1.7);
-      put(bush, (rng() - 0.5) * 1.1, (rng() - 0.5) * 1.1, rng() * Math.PI).position.y += s * 0.3;
-    }
-  } else if (t.terrain === 'sable' && rng() < 0.5) {
-    const s = 0.13 + rng() * 0.08;
-    const rock = new THREE.Mesh(pickRock(), MAT.rock);
-    rock.scale.set(s * 1.4, s * 0.7, s * 1.2);
-    put(rock, (rng() - 0.5) * 1, (rng() - 0.5) * 1, rng() * Math.PI).position.y += s * 0.25;
+    if (rng() < 0.35) poser(inst('tree_single_A', 0.55, rng() * Math.PI * 2), (rng() - 0.5) * 0.9, (rng() - 0.5) * 0.9);
+    if (rng() < 0.25) poser(inst('rock_single_A', 0.45, rng() * Math.PI * 2), (rng() - 0.5) * 1, (rng() - 0.5) * 1);
   }
 
-  /** Une maison = corps enduit + toit à deux pans + cheminée. */
-  const house = (dx, dz, h, ry, blue, k = 1) => {
-    const body = new THREE.Mesh(GEO.house, MAT.wall);
-    body.scale.set(k, h * 1.3, k);
-    put(body, dx, dz, ry);
-    const wallTop = 0.5 * h * 1.3;
-    const roof = new THREE.Mesh(GEO.roof, blue ? MAT.roofBlue : MAT.roofRed);
-    roof.scale.set(k * 0.82, k * 0.9, k * 0.8);
-    put(roof, dx, dz, ry).position.y += wallTop;
-    if (rng() < 0.55) {
-      const ch = new THREE.Mesh(GEO.chimney, MAT.wall);
-      ch.scale.setScalar(k);
-      put(ch, dx + Math.cos(ry + 1) * 0.13 * k, dz + Math.sin(ry + 1) * 0.13 * k, ry)
-        .position.y += wallTop + 0.2 * k;
-    }
-  };
-
-  // --- la capitale grandit avec les heures encodées ---
+  // --- la capitale : une vraie ville qui grandit avec les heures ---
   if (t.capital) {
-    const progress = Math.max(0, Math.min(1.6, p.capitalProgress ?? 0));
-    town(x, y, z, rng, progress, put);
+    town(x, y, z, rng, Math.max(0, Math.min(1.6, p.capitalProgress ?? 0)), poser);
   } else if (t.building) {
-    if (t.building === 'rempart') {
-      // Le rempart cerne la tuile plutôt que de poser un cube au centre.
-      for (let i = 0; i < 6; i++) {
-        const a = (i / 6) * Math.PI * 2 + 0.5;
-        const seg = new THREE.Mesh(GEO.rock, MAT.rock);
-        seg.scale.set(0.3, 0.26, 0.16);
-        put(seg, Math.cos(a) * 0.68, Math.sin(a) * 0.68, a).position.y += 0.16;
-      }
-    } else {
-      house(0, 0, t.building === 'caserne' ? 0.55 : 0.45, rng() * Math.PI, t.building === 'caserne', 0.72);
-    }
+    const c = colorOf(t.owner);
+    const modele = {
+      caserne: `building_tower_A_${c}`,
+      ferme: 'building_windmill_blue',
+      scierie: 'building_market_blue',
+      mine: 'building_mine_blue',
+      rempart: `building_tower_A_${c}`,
+    }[t.building];
+    poser(inst(modele, SCALE_BUILDING, rng() * Math.PI * 2));
+  } else if (t.seat) {
+    poser(inst(`building_castle_${colorOf(t.owner)}`, SCALE_CASTLE, rng() * Math.PI * 2));
+  } else if (t.owner && t.owner !== 'joueur') {
+    poser(inst(`building_home_A_${colorOf(t.owner)}`, SCALE_BUILDING, rng() * Math.PI * 2));
   }
 
   // --- bannière du propriétaire ---
-  const ownerMat = t.owner === 'joueur' ? MAT.player : (MAT.clan[t.owner] || null);
-  if (ownerMat) {
-    const pole = new THREE.Mesh(GEO.pole, MAT.pole);
-    pole.scale.set(1, 0.95, 1);
-    put(pole, 0.55, 0.45).position.y += 0.02;
-    const flag = new THREE.Mesh(GEO.flag, ownerMat);
-    flag.material.side = THREE.DoubleSide;
-    put(flag, 0.72, 0.45, -0.6).position.y += 0.78;
+  if (t.owner) {
+    poser(inst(`flag_${colorOf(t.owner)}`, 0.6, rng() * 0.6), 0.52, 0.44);
   }
 
-  // --- campement : une tente par troupe, plafonné pour rester lisible ---
+  // --- garnison : de petites tours marquent la présence de troupes ---
   const troops = t.owner ? (t.garrison || 0) : (t.neutralGarrison || 0);
-  const shown = Math.min(5, troops);
-  for (let i = 0; i < shown; i++) {
-    const a = (i / 5) * Math.PI * 2 + 1.1;
-    const tent = new THREE.Mesh(GEO.tent, t.owner ? MAT.canvasTent : MAT.canvasTent);
-    const s = 0.3 + (i % 2) * 0.06;
-    tent.scale.setScalar(s);
-    put(tent, Math.cos(a) * 0.66, Math.sin(a) * 0.66 + 0.06, rng() * Math.PI);
+  if (troops > 0 && !t.capital) {
+    const c = t.owner ? colorOf(t.owner) : 'red';
+    poser(inst(`building_tower_A_${c}`, SCALE_TOWER * 0.8, rng() * Math.PI), -0.48, 0.44);
   }
 }
 
 /**
- * Un tissu urbain, pas un lotissement : des pavés serrés le long de rues, des
- * hauteurs très variées, un beffroi. C'est la variation de hauteur et la densité
- * qui font lire « ville » à distance — pas le nombre de petites maisons.
+ * La ville de la capitale. Le nombre de bâtiments suit les heures encodées :
+ * c'est le seul endroit où le travail réel se voit dans le paysage.
  */
-function town(x, y, z, rng, progress, put) {
-  const R = 0.68;                       // rayon bâtissable, marge de bord comprise
-  const square = new THREE.Mesh(GEO.ground, MAT.ground.colline);
-  square.scale.set(0.96, 1, 0.96);
-  square.position.set(x, y + 0.03, z);
-  square.receiveShadow = true;
-  decorGroup.add(square);
+// Le château du pack est conçu pour occuper plusieurs tuiles : à l'échelle 1
+// il écrase ses voisines. Ces facteurs le ramènent à la taille d'un hexagone.
+const SCALE_CASTLE = 0.42;
+const SCALE_BUILDING = 0.34;
+const SCALE_TOWER = 0.3;
 
-  // Implantation sur anneaux, avec un pas d'arc calculé à partir de l'emprise
-  // réelle des blocs. Sans ça les façades s'interpénètrent et la ville devient
-  // un tas de gravats plutôt qu'un tissu urbain.
-  const rings = 3;
-  const K_MIN = 0.26, K_MAX = 0.36;
-  const footprint = 0.5 * 2 * K_MAX * 1.12;      // largeur du bloc + une ruelle
-  const density = 0.72 + progress * 0.25;
-  let placed = 0;
+function town(x, y, z, rng, progress, poser) {
+  // Le château d'abord : il donne l'échelle et le centre.
+  poser(inst('building_castle_blue', SCALE_CASTLE, 0.3));
 
-  for (let ring = 1; ring <= rings; ring++) {
-    const rad = (ring / rings) * (R - footprint * 0.55);
-    const slots = Math.max(4, Math.floor((2 * Math.PI * rad) / footprint));
-    for (let i = 0; i < slots; i++) {
-      if (rng() > density) continue;
-      const a = (i / slots) * Math.PI * 2 + ring * 0.42;
-      const bx = Math.cos(a) * rad, bz = Math.sin(a) * rad;
-      // Le centre-ville est haut, les faubourgs s'écrasent : c'est cette
-      // silhouette décroissante qui fait lire « ville » de loin.
-      const falloff = 1 - (rad / R) * 0.3;
-      const h = (0.34 + rng() * 0.34) * falloff * (0.9 + progress * 0.5);
-      const k = K_MIN + rng() * (K_MAX - K_MIN);
-      const ry = a + Math.PI / 2;                 // les façades suivent la rue
-
-      const body = new THREE.Mesh(GEO.block, MAT.wall);
-      body.scale.set(k, h, k * (0.9 + rng() * 0.3));
-      put(body, bx, bz, ry);
-
-      if (rng() < 0.55) {
-        const roof = new THREE.Mesh(GEO.roof, rng() < 0.35 ? MAT.roofBlue : MAT.roofRed);
-        roof.scale.set(k * 0.94, k * 0.85, k * 0.64);
-        put(roof, bx, bz, ry).position.y += h;
-      } else {
-        const c = new THREE.Mesh(GEO.cornice, MAT.wall);
-        c.scale.set(k * 1.06, 1, k * 1.04);
-        put(c, bx, bz, ry).position.y += h - 0.02;
-      }
-      placed++;
-    }
+  const batiments = ['building_home_A_blue', 'building_home_B_blue', 'building_market_blue',
+                     'building_church_blue', 'building_windmill_blue'];
+  const combien = 2 + Math.round(progress * 5);
+  for (let i = 0; i < combien; i++) {
+    const a = (i / Math.max(3, combien)) * Math.PI * 2 + 0.7;
+    const d = 0.42 + (i % 2) * 0.16;
+    poser(inst(batiments[i % batiments.length], SCALE_BUILDING, a + Math.PI), Math.cos(a) * d, Math.sin(a) * d);
   }
-
-  // Beffroi central : le repère qui donne l'échelle à tout le reste.
-  const th = 0.8 + progress * 0.5;
-  const tower = new THREE.Mesh(GEO.tower, MAT.wall);
-  tower.scale.set(0.4, th, 0.4);
-  put(tower, 0, 0, rng() * Math.PI);
-  const belfry = new THREE.Mesh(GEO.roof, MAT.roofBlue);
-  belfry.scale.set(0.22, 0.26, 0.22);
-  put(belfry, 0, 0, 0.4).position.y += th * 0.93;
-
-  // Donjon doré : la garantie mensuelle atteinte se voit de loin.
-  if (progress >= 1) {
-    const keep = new THREE.Mesh(GEO.tower, MAT.gold);
-    keep.scale.set(0.4, 0.85, 0.4);
-    put(keep, -0.3, 0.3, 0);
-  }
-  return placed;
+  // Le donjon doré des références n'existe pas dans le pack : la garantie
+  // atteinte se marque par l'église, visible de loin.
+  if (progress >= 1) poser(inst('building_church_blue', SCALE_BUILDING * 1.25, -0.4), 0.05, -0.5);
 }
 
 function placeSelection(sel, tiles) {
   if (!selectedRing) return;
   if (!sel || !tiles[tileKey(sel.q, sel.r)]) { selectedRing.visible = false; return; }
   const { x, z } = axialToWorld(sel.q, sel.r, HEX);
-  selectedRing.position.set(x, GEO.tileTop + 0.05, z);
+  selectedRing.position.set(x, 0.14, z);
   selectedRing.visible = true;
 }
 
@@ -1120,7 +1143,7 @@ export function disposeWorld() {
 export function focusTile(q, r, distance = 5.5) {
   if (!controls || !camera) return;
   const { x, z } = axialToWorld(q, r, HEX);
-  controls.target.set(x, GEO.tileTop, z);
+  controls.target.set(x, 0.1, z);
   const azim = controls.getAzimuthalAngle();
   camera.position.setFromSphericalCoords(distance, Math.PI * 0.34, azim);
   camera.position.add(controls.target);

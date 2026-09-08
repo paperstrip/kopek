@@ -4,6 +4,34 @@ Ces fichiers ne sont pas de moi. Ils viennent de sources publiques et sont
 embarqués dans le dépôt parce que les CDN sont inaccessibles depuis la page.
 Chaque entrée indique l'origine exacte et la licence.
 
+## Modèles 3D · KayKit Medieval Hexagon Pack
+
+| Ce qui est embarqué | Origine | Licence |
+|---|---|---|
+| `models/*.gltf` + `.bin` (31 modèles) et `models/atlas.png` | [KayKit Medieval Hexagon Pack 1.0](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0) par Kay Lousberg | **CC0 1.0** — usage commercial autorisé, aucune attribution obligatoire |
+
+Le pack complet contient plus de 200 modèles ; seul un sous-ensemble est
+embarqué, pour tenir le poids de page :
+
+- **Tuiles** : `hex_grass`, `hex_water`
+- **Relief** : `mountain_A/B_grass_trees`, `hills_A_trees`, `hill_single_A`
+- **Nature** : `tree_single_A/B`, `rock_single_A/B`
+- **Bâti du joueur** (bleu) : château, logis A et B, église, marché, tour,
+  mine, moulin
+- **Bâti des clans** (rouge, vert, jaune) : château, logis, tour
+- **Bannières** dans les quatre couleurs
+
+⚠️ Les clans n'ont que trois types de bâtiment là où le joueur en a huit :
+quatre couleurs × huit types pesaient 4,5 Mo pour un détail qu'on ne voit
+jamais de chez soi. Le sous-ensemble actuel fait **2,7 Mo**.
+
+Tous les modèles partagent **un seul atlas** (`atlas.png`, 16 ko) : c'est ce qui
+rend 31 modèles aussi légers. Le chemin de la texture a été réécrit dans chaque
+`.gltf` pour pointer vers cet atlas unique.
+
+**Pour changer de style**, remplacez les fichiers de `models/` en gardant les
+noms : le code ne connaît que les noms, pas les formes.
+
 ## Environnement lumineux
 
 | Fichier | Origine | Licence |

@@ -33,7 +33,7 @@ Deux protections :
 fichiers** (une simple date suffit) :
 
 ```bash
-OLD=2026-09-03-14; NEW=2026-09-04-1
+OLD=2026-09-03-15; NEW=2026-09-04-1
 grep -rl "$OLD" index.html app.js city3d.js vendor/ version.json \
   | xargs sed -i "s/$OLD/$NEW/g"
 ```
@@ -91,7 +91,7 @@ tant que les règles ci-dessous ne sont pas **publiées**, l'app ne peut ni lire
 écrire. Un projet Firebase inexistant, lui, renvoie un `403` d'une forme
 différente (`CONSUMER_INVALID`) — c'est ce qui permet de distinguer les cas.
 
-Depuis `2026-09-03-14`, l'app diagnostique elle-même les deux situations :
+Depuis `2026-09-03-15`, l'app diagnostique elle-même les deux situations :
 elle affiche le code d'erreur réel dès qu'un écouteur le remonte, propose un
 bouton « Copier les règles Firestore », et débloque le bouton « Ajouter des
 heures » au lieu de le laisser définitivement inerte. Le chien de garde de
@@ -147,6 +147,75 @@ carte vaste sans faire grossir la sauvegarde.
 Le rendu ne dessine que les tuiles révélées **et leur lisière** : sur 217
 tuiles, une partie neuve n'en affiche qu'une quarantaine. Le monde sort de la
 brume au lieu d'être un tapis d'hexagones gris.
+
+### Armées · le cœur du jeu
+
+Sans unité qu'on déplace soi-même, il n'y a pas de jeu : on touche un hexagone,
+on appuie sur un bouton, rien ne bouge. Une armée est une entité posée sur la
+carte (`state.armies`), avec des points de mouvement, qu'on sélectionne, dont on
+voit la portée en surbrillance, et qu'on déplace tuile par tuile.
+
+La boucle tient en une phrase : **recruter → lever une armée → la déplacer →
+entrer chez l'adversaire, c'est l'attaquer.**
+
+- `reachable()` fait un parcours en largeur borné par les points de mouvement.
+  Les cases hostiles sont marquées `attack` : on peut toujours frapper un
+  voisin, mais l'assaut consomme tout le mouvement restant — pas de raid en
+  chaîne dans le même tour.
+- Le rendu colore la portée : **bleu** pour un déplacement, **rouge** pour un
+  assaut. La couleur dit ce qui va se passer avant qu'on touche.
+- Lever une armée laisse toujours une troupe en garnison. Un territoire vidé
+  tomberait à la première incursion sans que le joueur comprenne pourquoi.
+- `clanTurn()` fait marcher les clans : ils lèvent des colonnes depuis leurs
+  places fortes et avancent d'un pas par tour vers le territoire joueur le plus
+  proche. Sans adversaire qui bouge, la carte est un décor.
+
+⚠️ Il n'y a **qu'un seul** système d'attaque. L'ancienne attaque de tuile à tuile
+depuis le panneau a été retirée : deux mécaniques concurrentes rendaient le jeu
+illisible.
+
+### Objectifs · ce qui rend le jeu compréhensible
+
+Un jeu sans but affiché n'est qu'une carte d'hexagones. `OBJECTIVES` enchaîne
+six étapes — coloniser, produire, lever une armée, prendre un repaire, toucher
+un clan, prendre son siège — chacune avec une **consigne concrète** et une
+récompense. `nextStepHint()` calcule à tout moment la phrase « que faire
+maintenant » à partir de l'état réel : elle change quand l'or manque.
+
+⚠️ Un objectif doit être hors de portée au premier chargement. Le seuil de
+garnison est à 9 parce que la capitale en démarre avec 6 : à 5, l'objectif se
+validait tout seul avant le premier clic, ce qui apprend au joueur que les
+objectifs ne veulent rien dire.
+
+Les combats renvoient leur rapport de force chiffré (`attack()` expose
+`result` et `bonus`). « Assaut repoussé » sans chiffres ne dit pas au joueur ce
+qu'il a raté.
+
+### Direction artistique · modèles réels
+
+**Le décor n'est plus généré par du code.** Trois tentatives successives —
+géométrie procédurale, textures PBR réelles, matcaps — ont buté sur la même
+limite : on peut habiller une forme, on ne peut pas lui inventer une silhouette.
+Or c'est la silhouette qui se lit de loin.
+
+Les modèles viennent du **KayKit Medieval Hexagon Pack** (CC0), embarqué dans
+`assets/models/` — voir `assets/LICENCES.md` pour le détail et la façon d'en
+changer.
+
+- `loadModels()` charge les 31 `.gltf` au démarrage du jeu et force un redessin
+  à leur arrivée : sans ça la carte resterait vide jusqu'au prochain coup joué.
+- ⚠️ Montagnes et collines du pack **embarquent leur propre socle hexagonal**.
+  Les poser sur une tuile d'herbe donnait des dalles grises flottantes : elles
+  remplacent la tuile (`tileModel()`), elles ne s'y ajoutent pas.
+- ⚠️ Le château est modélisé pour occuper plusieurs tuiles. À l'échelle 1 il
+  écrase ses voisines ; `SCALE_CASTLE` le ramène à un hexagone.
+- La sélection tape sur un hexagone plat invisible (`GEO.pick`), pas sur les
+  maillages du décor : viser un arbre ou un toit rendait le toucher imprévisible.
+- L'atlas du pack doit être déclaré en sRGB à l'import, sinon tout ressort
+  délavé.
+
+Les tuiles inconnues utilisent le modèle d'eau : le brouillard de guerre devient
+une mer qu'on n'a pas encore franchie, au lieu d'un tapis d'hexagones gris.
 
 ### Armées · le cœur du jeu
 

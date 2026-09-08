@@ -14,8 +14,8 @@ import {
   serverTimestamp,
   setDoc,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-03-14';
-import * as GAMEJS from './game.js?v=2026-09-03-14';
+} from './firebase-config.js?v=2026-09-03-15';
+import * as GAMEJS from './game.js?v=2026-09-03-15';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -949,7 +949,7 @@ async function ensureGameLoaded() {
   if (gameStatus !== 'idle') return;
   gameStatus = 'loading';
   try {
-    gameMod = await import('./world3d.js?v=2026-09-03-14');
+    gameMod = await import('./world3d.js?v=2026-09-03-15');
     const canvas = document.getElementById('game-canvas');
     if (!canvas) throw new Error('canvas #game-canvas introuvable');
     gameMod.initWorld(canvas, { onSelect: onTileSelected });
