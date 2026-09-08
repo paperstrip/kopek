@@ -775,8 +775,8 @@ function town(x, y, z, rng, progress, put) {
   // un tas de gravats plutôt qu'un tissu urbain.
   const rings = 3;
   const K_MIN = 0.26, K_MAX = 0.36;
-  const footprint = 0.5 * 2 * K_MAX * 1.35;      // largeur du bloc + une ruelle
-  const density = 0.55 + progress * 0.4;
+  const footprint = 0.5 * 2 * K_MAX * 1.12;      // largeur du bloc + une ruelle
+  const density = 0.72 + progress * 0.25;
   let placed = 0;
 
   for (let ring = 1; ring <= rings; ring++) {
@@ -788,8 +788,8 @@ function town(x, y, z, rng, progress, put) {
       const bx = Math.cos(a) * rad, bz = Math.sin(a) * rad;
       // Le centre-ville est haut, les faubourgs s'écrasent : c'est cette
       // silhouette décroissante qui fait lire « ville » de loin.
-      const falloff = 1 - (rad / R) * 0.5;
-      const h = (0.26 + rng() * 0.3) * falloff * (0.85 + progress * 0.45);
+      const falloff = 1 - (rad / R) * 0.3;
+      const h = (0.34 + rng() * 0.34) * falloff * (0.9 + progress * 0.5);
       const k = K_MIN + rng() * (K_MAX - K_MIN);
       const ry = a + Math.PI / 2;                 // les façades suivent la rue
 
@@ -811,9 +811,9 @@ function town(x, y, z, rng, progress, put) {
   }
 
   // Beffroi central : le repère qui donne l'échelle à tout le reste.
-  const th = 0.55 + progress * 0.45;
+  const th = 0.8 + progress * 0.5;
   const tower = new THREE.Mesh(GEO.tower, MAT.wall);
-  tower.scale.set(0.34, th, 0.34);
+  tower.scale.set(0.4, th, 0.4);
   put(tower, 0, 0, rng() * Math.PI);
   const belfry = new THREE.Mesh(GEO.roof, MAT.roofBlue);
   belfry.scale.set(0.22, 0.26, 0.22);
