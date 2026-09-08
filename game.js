@@ -13,7 +13,7 @@
 // ---------- Constantes de règles -----------------------------
 export const TICK_MS = 10 * 60 * 1000;      // un tour de production = 10 minutes réelles
 export const MAX_CATCHUP_TICKS = 144;       // on ne rattrape jamais plus de 24 h d'absence
-export const MAP_RADIUS = 4;                // rayon de l'archipel en hexagones (61 tuiles)
+export const MAP_RADIUS = 8;                // rayon de l'archipel (217 tuiles)
 
 export const TERRAINS = {
   prairie:  { label: 'Prairie',  or: 1, vivres: 2, def: 0,  color: '#7fb069' },
@@ -46,6 +46,7 @@ export const CLANS = [
   { key: 'ombre',  label: 'Clan de l’Ombre',  color: '#b4436c' },
   { key: 'cendre', label: 'Fils de Cendre',       color: '#c9752b' },
   { key: 'givre',  label: 'Marche de Givre',      color: '#3f8fb0' },
+  { key: 'ronce',  label: 'Seigneurs de Ronce',   color: '#5c8f3a' },
 ];
 
 // ---------- Utilitaires --------------------------------------
@@ -119,24 +120,38 @@ export function generateWorld(seedStr) {
 
   // Les clans occupent le pourtour, à distance égale les uns des autres, pour
   // qu'aucun ne soit collé au joueur au premier tour.
-  const rim = list.filter((t) => hexDistance(0, 0, t.q, t.r) === MAP_RADIUS);
+  // Chaque clan reçoit une capitale à mi-distance et un domaine autour d'elle.
+  // Les poser tous sur le bord laissait un immense no man's land au centre.
+  const seatRing = Math.round(MAP_RADIUS * 0.62);
   CLANS.forEach((clan, i) => {
-    const anchor = rim[Math.floor((i / CLANS.length) * rim.length)];
-    if (!anchor) return;
-    anchor.owner = clan.key;
-    anchor.garrison = 4 + Math.floor(rng() * 3);
-    anchor.fort = true;
-    neighbors(anchor.q, anchor.r).forEach(([nq, nr]) => {
-      const n = tiles[tileKey(nq, nr)];
-      if (n && !n.owner && rng() < 0.6) { n.owner = clan.key; n.garrison = 2 + Math.floor(rng() * 3); }
+    const angle = (i / CLANS.length) * Math.PI * 2 + 0.4;
+    const sq = Math.round(Math.cos(angle) * seatRing);
+    const sr = Math.round(Math.sin(angle) * seatRing);
+    const seat = tiles[tileKey(sq, sr)] || list.find((t) => hexDistance(0, 0, t.q, t.r) === seatRing);
+    if (!seat || seat.owner) return;
+    seat.owner = clan.key;
+    seat.garrison = 6 + Math.floor(rng() * 4);
+    seat.fort = true;
+    seat.seat = true;
+    list.forEach((t) => {
+      if (t.owner || t.capital) return;
+      const d = hexDistance(seat.q, seat.r, t.q, t.r);
+      if (d <= 2 && rng() < 0.75 - d * 0.15) {
+        t.owner = clan.key;
+        t.garrison = 2 + Math.floor(rng() * 3);
+      }
     });
   });
 
   // Quelques repaires neutres : de la résistance sans propriétaire, qui donne
   // au joueur de quoi s'entraîner avant d'affronter un clan.
+  // Repaires neutres : de la résistance sans propriétaire, plus dense loin du
+  // centre. C'est ce qui donne au joueur de quoi s'entraîner avant les clans.
   list.forEach((t) => {
-    if (t.owner || hexDistance(0, 0, t.q, t.r) < 2) return;
-    if (rng() < 0.22) { t.neutralGarrison = 2 + Math.floor(rng() * 4); }
+    if (t.owner) return;
+    const d = hexDistance(0, 0, t.q, t.r);
+    if (d < 2) return;
+    if (rng() < 0.14 + d * 0.02) t.neutralGarrison = 1 + Math.floor(rng() * 2 + d * 0.4);
   });
 
   return tiles;
@@ -151,6 +166,8 @@ export function newGameState(seedStr, nowMs = Date.now()) {
     lastTick: nowMs,
     or: 120,
     vivres: 40,
+    wonFights: 0,
+    objectivesDone: [],
     sceaux: 0,
     sceauxSpent: 0,
     changes: {},        // seules les tuiles modifiées sont persistées
@@ -206,6 +223,110 @@ export function rankOf(tiles, hoursTotal) {
   for (const r of RANKS) if (n >= r.tiles && hoursTotal >= r.hours) current = r;
   const idx = RANKS.indexOf(current);
   return { ...current, index: idx, next: RANKS[idx + 1] || null };
+}
+
+// ---------- Objectifs · ce qui donne un but ------------------
+// Sans objectif affiché, le joueur ouvre l'écran, voit des hexagones et referme.
+// Chaque objectif est une phrase, une condition vérifiable et une récompense.
+export const OBJECTIVES = [
+  {
+    key: 'coloniser',
+    label: 'Coloniser 3 territoires',
+    hint: 'Touchez un territoire libre voisin du vôtre, puis « Coloniser ».',
+    done: (st, tiles) => ownedTiles(tiles).length >= 3,
+    reward: { or: 60 },
+  },
+  {
+    key: 'produire',
+    label: 'Construire une ferme et une mine',
+    hint: 'Sélectionnez un de vos territoires : la ferme va en prairie, la mine en colline ou en montagne.',
+    done: (st, tiles) => {
+      const b = ownedTiles(tiles).map((t) => t.building);
+      return b.includes('ferme') && b.includes('mine');
+    },
+    reward: { or: 80, vivres: 20 },
+  },
+  {
+    key: 'armee',
+    label: 'Lever une garnison de 9 troupes',
+    hint: 'Recrutez depuis un territoire équipé d’une caserne — votre capitale en a une.',
+    done: (st, tiles) => ownedTiles(tiles).some((t) => (t.garrison || 0) >= 9),
+    reward: { or: 70 },
+  },
+  {
+    key: 'repaire',
+    label: 'Prendre un repaire hostile',
+    hint: 'Touchez un territoire gardé sans bannière, puis « Attaquer ». Il faut au moins 2 troupes à côté.',
+    done: (st, tiles) => (st.wonFights || 0) >= 1,
+    reward: { or: 120 },
+  },
+  {
+    key: 'frontiere',
+    label: 'Toucher le domaine d’un clan',
+    hint: 'Étendez-vous jusqu’à voir une bannière de couleur : c’est un clan adverse.',
+    done: (st, tiles) => ownedTiles(tiles).some((t) => neighbors(t.q, t.r)
+      .some(([q, r]) => { const n = tiles[tileKey(q, r)]; return n && n.owner && n.owner !== 'joueur'; })),
+    reward: { or: 100, vivres: 30 },
+  },
+  {
+    key: 'siege',
+    label: 'Prendre le siège d’un clan',
+    hint: 'Le siège est le territoire le mieux défendu d’un clan. Massez vos troupes avant l’assaut.',
+    done: (st, tiles) => Object.values(tiles).some((t) => t.seat && t.owner === 'joueur'),
+    reward: { or: 300, vivres: 80 },
+  },
+];
+
+/** Objectif courant : le premier non accompli. Renvoie aussi l'avancement. */
+export function currentObjective(state, tiles) {
+  const done = new Set(state.objectivesDone || []);
+  const next = OBJECTIVES.find((o) => !done.has(o.key));
+  return {
+    objective: next || null,
+    index: next ? OBJECTIVES.indexOf(next) : OBJECTIVES.length,
+    total: OBJECTIVES.length,
+  };
+}
+
+/**
+ * Valide les objectifs atteints et verse les récompenses.
+ * Renvoie la liste de ceux qui viennent d'être accomplis, pour l'annoncer.
+ */
+export function checkObjectives(state, tiles) {
+  state.objectivesDone = state.objectivesDone || [];
+  const done = new Set(state.objectivesDone);
+  const fresh = [];
+  for (const o of OBJECTIVES) {
+    if (done.has(o.key)) continue;
+    if (!o.done(state, tiles)) continue;
+    state.objectivesDone.push(o.key);
+    done.add(o.key);
+    state.or += o.reward.or || 0;
+    state.vivres += o.reward.vivres || 0;
+    pushLog(state, `Objectif accompli · ${o.label} (+${o.reward.or || 0} or)`, 'good');
+    fresh.push(o);
+  }
+  return fresh;
+}
+
+/**
+ * « Que faire maintenant ? » — une phrase, calculée à partir de l'état réel.
+ * C'est la réponse à « on ne comprend rien » : à tout moment, une action claire.
+ */
+export function nextStepHint(state, tiles) {
+  const { objective } = currentObjective(state, tiles);
+  const mine = ownedTiles(tiles);
+  const free = Object.values(tiles).filter((t) => !t.owner && !t.neutralGarrison
+    && t.revealed && isAdjacentToPlayer(tiles, t));
+
+  if (state.or < COLONISE_COST.or && !mine.some((t) => t.building)) {
+    return 'Il vous manque de l’or. Attendez la prochaine récolte, ou construisez une mine sur une colline.';
+  }
+  if (objective) {
+    if (objective.key === 'coloniser' && free.length) return objective.hint;
+    return objective.hint;
+  }
+  return 'Le domaine est stable. Étendez-vous vers un siège de clan pour l’emporter.';
 }
 
 // ---------- Le lien avec les heures encodées -----------------
@@ -431,6 +552,7 @@ export function attack(state, tiles, fromQ, fromR, toQ, toR, hoursMonth, rng = M
     to.revealed = true;
     revealAround(state, tiles, to);
     markChanged(state, to);
+    state.wonFights = (state.wonFights || 0) + 1;
     pushLog(state, `Victoire ! ${TERRAINS[to.terrain].label} conquise.`, 'good');
     const remaining = Object.values(tiles).some((x) => x.owner === wasClan);
     if (wasClan && !remaining) {

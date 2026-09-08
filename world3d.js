@@ -1,17 +1,25 @@
 // =============================================================================
 // 🏝️  LES MARCHES DE NESSY · rendu 3D de l'archipel
 // -----------------------------------------------------------------------------
-// Direction artistique : cartoon doux. Tout est arrondi — les tuiles ont des
-// coins adoucis et un biseau généreux, les arbres et les rochers sont des
-// volumes lisses, jamais des cônes facettés. La lumière est chaude et rasante,
-// avec une brume claire qui éloigne l'horizon.
+// Direction artistique : matières réelles, éclairage par image.
+//
+// Le rendu procédural (bruit + textures peintes dans un canvas) plafonnait au
+// « stylisé » : on ne fabrique pas de la matière crédible avec des taches
+// dessinées. Les matières viennent donc de vraies textures embarquées dans
+// assets/textures (voir assets/LICENCES.md), et l'éclairage d'une carte HDR
+// équirectangulaire passée au PMREM — c'est elle qui donne les reflets, les
+// dégradés d'ambiance et le poids des ombres, bien plus qu'une lampe de plus.
+//
+// Les fonctions procédurales sont conservées : elles servent de repli quand un
+// fichier ne se charge pas, pour que la scène ne soit jamais nue.
 //
 // Ce module ne connaît PAS les règles du jeu : on lui passe une carte de tuiles,
 // il la dessine et signale la tuile touchée. Toute la logique vit dans game.js.
 // =============================================================================
-import * as THREE from './vendor/three/three.module.js?v=2026-09-03-13';
-import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-03-13';
-import { axialToWorld, TERRAINS, CLANS, neighbors, tileKey } from './game.js?v=2026-09-03-13';
+import * as THREE from './vendor/three/three.module.js?v=2026-09-03-14';
+import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-03-14';
+import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-03-14';
+import { axialToWorld, TERRAINS, CLANS, neighbors, tileKey } from './game.js?v=2026-09-03-14';
 
 const HEX = 1.0;                 // rayon d'un hexagone
 const GAP = 0.13;                // interstice : c'est lui qui fait « îles séparées »
@@ -31,6 +39,8 @@ const PALETTE = {
 
 let renderer, scene, camera, controls, clock, raf = null;
 let canvasEl, worldGroup, decorGroup, markerGroup, seaMesh;
+let seaWaves = null;
+let envReady = false;
 let sun, hemi;
 let picker = new THREE.Raycaster();
 let pointer = new THREE.Vector2();
@@ -372,6 +382,133 @@ const TERRAIN_DARK = {
   montagne: '#6a6258', sable: '#c9ab6a',
 };
 
+const TEX_BASE = './assets/textures/';
+const texLoader = new THREE.TextureLoader();
+let texturesReady = false;
+
+/**
+ * Charge une texture et la configure pour être répétée sur une surface.
+ * En cas d'échec (fichier absent, réseau coupé) on ne casse rien : la matière
+ * garde la texture procédurale posée à la construction.
+ */
+function loadTex(file, { repeat = 1, srgb = false } = {}) {
+  const t = texLoader.load(TEX_BASE + file, undefined, undefined, (e) => {
+    console.warn('[kopek] texture non chargée', file, e);
+  });
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(repeat, repeat);
+  t.anisotropy = 8;
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/**
+ * Remplace les matières procédurales par les vraies textures. Appelé après la
+ * construction, de façon asynchrone : la scène s'affiche tout de suite avec le
+ * rendu de repli, puis se « densifie » quand les fichiers arrivent.
+ */
+function applyRealTextures() {
+  if (texturesReady) return;
+  texturesReady = true;
+
+  const rocheRelief = loadTex('roche_relief.jpg', { repeat: 3 });
+  // La même image servie deux fois : en relief (linéaire) et en couleur (sRGB).
+  // Réutiliser la brique pour la pierre donnait des rochers en maçonnerie.
+  const rocheCouleur = loadTex('roche_relief.jpg', { repeat: 2.4, srgb: true });
+  const falaiseCouleur = loadTex('roche_relief.jpg', { repeat: 1.6, srgb: true });
+
+  // Sol : une seule photo d'herbe, teintée par terrain. Une texture par type
+  // aurait quadruplé le poids pour un gain nul à cette distance.
+  const herbe = loadTex('sol_herbe.jpg', { repeat: 2.2, srgb: true });
+  Object.keys(TERRAINS).forEach((k) => {
+    const m = MAT.ground[k];
+    m.map = herbe;
+    m.color = new THREE.Color(GROUND_TINT[k]);
+    m.bumpMap = rocheRelief;
+    m.bumpScale = k === 'montagne' || k === 'colline' ? 1.4 : 0.8;
+    m.roughness = 0.95;
+    m.needsUpdate = true;
+  });
+
+  const murCouleur = loadTex('mur_couleur.jpg', { repeat: 1.4, srgb: true });
+  const murRelief = loadTex('mur_relief.jpg', { repeat: 1.4 });
+  const murRugosite = loadTex('mur_rugosite.jpg', { repeat: 1.4 });
+
+  Object.assign(MAT.wall, {
+    map: murCouleur, bumpMap: murRelief, roughnessMap: murRugosite,
+    bumpScale: 0.6, roughness: 1, color: new THREE.Color('#d9c9ad'),
+  });
+  MAT.wall.needsUpdate = true;
+
+  // Les toits réutilisent la brique, simplement teintée : la trame de la
+  // maçonnerie lit très bien comme une couverture à cette échelle.
+  [[MAT.roofRed, '#8c3626'], [MAT.roofBlue, '#3b5171']].forEach(([m, c]) => {
+    m.map = murCouleur; m.bumpMap = murRelief; m.bumpScale = 0.5;
+    m.color = new THREE.Color(c); m.roughness = 0.9; m.needsUpdate = true;
+  });
+
+  Object.assign(MAT.rock, {
+    map: rocheCouleur, bumpMap: rocheRelief, bumpScale: 2.4,
+    color: new THREE.Color('#b9b3a8'), roughness: 1, metalness: 0,
+  });
+  MAT.rock.needsUpdate = true;
+
+  [[MAT.flanc, '#a97f52'], [MAT.flancSable, '#dcbe8c']].forEach(([m, c]) => {
+    m.map = falaiseCouleur; m.bumpMap = rocheRelief; m.bumpScale = 2.6;
+    m.color = new THREE.Color(c); m.roughness = 1; m.needsUpdate = true;
+  });
+
+  const boisCouleur = loadTex('bois_couleur.jpg', { repeat: 1, srgb: true });
+  const boisRelief = loadTex('bois_relief.jpg', { repeat: 1 });
+  [MAT.trunk, MAT.pole].forEach((m) => {
+    m.map = boisCouleur; m.bumpMap = boisRelief; m.bumpScale = 0.5;
+    m.color = new THREE.Color('#9a7550'); m.roughness = 1; m.needsUpdate = true;
+  });
+
+  // Le feuillage garde sa teinte propre mais gagne le relief de la roche :
+  // c'est ce qui casse l'aspect « boule de plastique ».
+  MAT.leaf.forEach((m) => {
+    m.bumpMap = rocheRelief; m.bumpScale = 1.6; m.roughness = 0.98;
+    m.color = new THREE.Color('#8fbf72');
+    m.needsUpdate = true;
+  });
+
+  if (seaMesh) {
+    const vagues = loadTex('eau_normales.jpg', { repeat: 14 });
+    seaMesh.material.normalMap = vagues;
+    seaMesh.material.normalScale = new THREE.Vector2(0.55, 0.55);
+    seaMesh.material.roughness = 0.12;
+    seaMesh.material.metalness = 0.05;
+    seaMesh.material.needsUpdate = true;
+    seaWaves = vagues;
+  }
+}
+
+/** L'herbe est monochrome : la teinte fait la différence entre les terrains. */
+const GROUND_TINT = {
+  prairie: '#7cb54a', foret: '#4a7d3c', colline: '#9c8452',
+  montagne: '#7d766a', sable: '#d9bb7c',
+};
+
+/**
+ * Éclairage par image. Sans lui, une matière PBR reste plate quel que soit le
+ * nombre de lampes : c'est l'environnement qui porte les reflets et l'ambiance.
+ */
+function loadEnvironment() {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  pmrem.compileEquirectangularShader();
+  new RGBELoader().load('./assets/env/ciel_venise_1k.hdr', (hdr) => {
+    const env = pmrem.fromEquirectangular(hdr).texture;
+    scene.environment = env;
+    hdr.dispose();
+    pmrem.dispose();
+    envReady = true;
+  }, undefined, (e) => {
+    console.warn('[kopek] environnement HDR non chargé, éclairage de repli', e);
+    pmrem.dispose();
+  });
+}
+
 function buildSharedMaterials() {
   const groundBump = bumpTexture({ size: 256, blobs: 320, repeat: 5, contrast: 1 });
 
@@ -450,7 +587,7 @@ export function initWorld(canvas, { onSelect } = {}) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 0.88;
 
   scene = new THREE.Scene();
   scene.background = skyTexture();
@@ -469,10 +606,10 @@ export function initWorld(canvas, { onSelect } = {}) {
   controls.maxPolarAngle = Math.PI * 0.42;
   controls.enablePan = false;
 
-  hemi = new THREE.HemisphereLight('#cfe4f5', '#5b4c3c', 0.78);
+  hemi = new THREE.HemisphereLight('#cfe4f5', '#4a3d30', 0.2);
   scene.add(hemi);
   // Soleil bas et chaud : c'est ce qui donne les ombres longues des références.
-  sun = new THREE.DirectionalLight('#ffd39a', 1.75);
+  sun = new THREE.DirectionalLight('#ffe4bc', 1.9);
   sun.position.set(-9, 13, 7);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1536, 1536);
@@ -483,14 +620,16 @@ export function initWorld(canvas, { onSelect } = {}) {
 
   buildSharedGeometries();
   buildSharedMaterials();
+  loadEnvironment();
+  applyRealTextures();
 
   worldGroup = new THREE.Group(); scene.add(worldGroup);
   decorGroup = new THREE.Group(); scene.add(decorGroup);
   markerGroup = new THREE.Group(); scene.add(markerGroup);
 
   seaMesh = new THREE.Mesh(
-    new THREE.CircleGeometry(70, 64),
-    new THREE.MeshStandardMaterial({ color: PALETTE.mer, roughness: 0.28, metalness: 0.05 }),
+    new THREE.CircleGeometry(90, 96),
+    new THREE.MeshStandardMaterial({ color: PALETTE.mer, roughness: 0.15, metalness: 0.05 }),
   );
   seaMesh.rotation.x = -Math.PI / 2;
   seaMesh.position.y = -1.55;
@@ -509,6 +648,7 @@ export function initWorld(canvas, { onSelect } = {}) {
   }, false);
   canvas.addEventListener('webglcontextrestored', () => {
     buildSharedGeometries(); buildSharedMaterials();
+    texturesReady = false; applyRealTextures(); loadEnvironment();
     lastSig = null;
     if (lastPayload) renderWorld(lastPayload, { force: true });
     if (!raf) raf = requestAnimationFrame(tick);
@@ -877,6 +1017,12 @@ function tick() {
   if (selectedRing && selectedRing.visible) {
     selectedRing.material.opacity = 0.55 + Math.sin(hoverTime * 3.4) * 0.35;
     selectedRing.scale.setScalar(1 + Math.sin(hoverTime * 3.4) * 0.02);
+  }
+  // Les vagues défilent en décalant la carte de normales : aucun maillage à
+  // recalculer, la mer bouge pour le prix d'une soustraction.
+  if (seaWaves) {
+    seaWaves.offset.x = hoverTime * 0.012;
+    seaWaves.offset.y = hoverTime * 0.008;
   }
   // Respiration très lente des îles : ça suffit à rendre la scène vivante sans
   // donner le mal de mer ni coûter en batterie.

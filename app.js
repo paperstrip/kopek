@@ -14,8 +14,8 @@ import {
   serverTimestamp,
   setDoc,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-03-13';
-import * as GAMEJS from './game.js?v=2026-09-03-13';
+} from './firebase-config.js?v=2026-09-03-14';
+import * as GAMEJS from './game.js?v=2026-09-03-14';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -937,6 +937,7 @@ function adoptGameState(remote) {
     GAME.loaded = true;
   }
   GAME.selected = null;
+  GAMEJS.checkObjectives(GAME.state, GAME.tiles);
   runCatchUp();
   ensureGameLoaded();
   drawGame();
@@ -947,7 +948,7 @@ async function ensureGameLoaded() {
   if (gameStatus !== 'idle') return;
   gameStatus = 'loading';
   try {
-    gameMod = await import('./world3d.js?v=2026-09-03-13');
+    gameMod = await import('./world3d.js?v=2026-09-03-14');
     const canvas = document.getElementById('game-canvas');
     if (!canvas) throw new Error('canvas #game-canvas introuvable');
     gameMod.initWorld(canvas, { onSelect: onTileSelected });
@@ -1003,6 +1004,18 @@ function renderGameHud() {
       : 'border-white/10 text-zinc-400'}`;
   }
 
+  // L'objectif est la première chose à lire : sans lui, l'écran n'est qu'une
+  // carte d'hexagones sans enjeu.
+  const { objective, index, total } = GAMEJS.currentObjective(GAME.state, GAME.tiles);
+  const goalLabel = document.getElementById('g-goal-label');
+  const goalHint = document.getElementById('g-goal-hint');
+  const goalCount = document.getElementById('g-goal-count');
+  if (goalLabel) {
+    goalLabel.textContent = objective ? objective.label : 'Tous les objectifs sont accomplis';
+    goalCount.textContent = `${index}/${total}`;
+    goalHint.textContent = GAMEJS.nextStepHint(GAME.state, GAME.tiles);
+  }
+
   const body = document.getElementById('g-log-body');
   if (body) {
     const entries = GAME.state.log || [];
@@ -1029,8 +1042,17 @@ function renderTilePanel() {
   if (!panel || !GAME.tiles) return;
   const sel = GAME.selected;
   const t = sel ? GAME.tiles[GAMEJS.tileKey(sel.q, sel.r)] : null;
-  if (!t) { panel.classList.add('hidden'); return; }
+  // Sur téléphone, l'objectif et le panneau du territoire se disputent l'écran
+  // et il ne reste plus de carte entre les deux. Ils s'excluent : l'objectif
+  // guide quand rien n'est sélectionné, le panneau prend le relais ensuite.
+  const goal = document.getElementById('g-goal');
+  if (!t) {
+    panel.classList.add('hidden');
+    if (goal) goal.classList.remove('max-sm:hidden');
+    return;
+  }
   panel.classList.remove('hidden');
+  if (goal) goal.classList.add('max-sm:hidden');
 
   const ter = GAMEJS.TERRAINS[t.terrain];
   const ownerLabel = t.capital ? 'Votre capitale'
@@ -1079,9 +1101,17 @@ function runGameAction(a, t) {
   else if (a.kind === 'colonise') res = GAMEJS.colonise(GAME.state, GAME.tiles, t.q, t.r);
   else if (a.kind === 'attack') {
     if (!a.from) { gameToast('Aucune troupe voisine pour lancer l\'assaut.', false); return; }
+    const troops = Math.max(0, (GAME.tiles[GAMEJS.tileKey(a.from.q, a.from.r)]?.garrison || 0) - 1);
+    const defenders = a.defenders;
     res = GAMEJS.attack(GAME.state, GAME.tiles, a.from.q, a.from.r, t.q, t.r, monthBilledHours(lastAggForGame));
     if (res.ok) {
-      gameToast(res.win ? 'Territoire conquis !' : 'Assaut repoussé…', res.win);
+      // « Assaut repoussé » sans chiffres ne dit pas au joueur ce qu'il a raté.
+      // On expose le rapport de force qui a décidé du sort du combat.
+      const bonus = res.bonus.pct ? ` · bonus heures +${res.bonus.pct} %` : '';
+      const survivants = res.win
+        ? `${res.result.attackerLeft} survivant${res.result.attackerLeft > 1 ? 's' : ''}`
+        : `il leur reste ${res.result.defenderLeft}`;
+      gameToast(`${troops} contre ${defenders}${bonus} → ${res.win ? 'victoire' : 'échec'}, ${survivants}`, res.win);
     }
   }
   if (!res) return;
@@ -1092,18 +1122,42 @@ function runGameAction(a, t) {
 
 /** Un seul point de sortie après toute modification : redessiner puis sauver. */
 function afterGameChange() {
+  const fresh = GAMEJS.checkObjectives(GAME.state, GAME.tiles);
   drawGame();
   renderGameHud();
   renderTilePanel();
   scheduleGameSave();
+  // Un objectif franchi doit s'annoncer : c'est la seule récompense visible
+  // du jeu, et elle arrive souvent au milieu d'une autre action.
+  if (fresh.length) {
+    gameToast(`Objectif accompli · ${fresh[fresh.length - 1].label}`, true);
+  }
 }
 
 // Les actions s'enchaînent vite (construire, recruter, attaquer) : on regroupe
-// les écritures plutôt que d'en envoyer une par clic.
+// les écritures plutôt que d'en envoyer une par clic. Le délai reste court —
+// à 900 ms, fermer l'onglet juste après un coup pouvait le perdre.
+const SAVE_DEBOUNCE_MS = 350;
+
 function scheduleGameSave() {
   clearTimeout(gameSaveTimer);
-  gameSaveTimer = setTimeout(saveGameNow, 900);
+  gameSaveTimer = setTimeout(() => { gameSaveTimer = null; saveGameNow(); }, SAVE_DEBOUNCE_MS);
 }
+
+/** Écrit sans attendre le délai. Appelé quand la page peut disparaître. */
+function flushGameSave() {
+  if (!gameSaveTimer) return;
+  clearTimeout(gameSaveTimer);
+  gameSaveTimer = null;
+  saveGameNow();
+}
+
+// Sur téléphone, quitter l'application ne déclenche pas toujours « unload » :
+// c'est « pagehide » et le passage en arrière-plan qui font foi.
+window.addEventListener('pagehide', flushGameSave);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushGameSave();
+});
 
 function saveGameNow() {
   if (!STATE.user || !GAME.state) return;
