@@ -14,8 +14,8 @@ import {
   serverTimestamp,
   setDoc,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-03-15';
-import * as GAMEJS from './game.js?v=2026-09-03-15';
+} from './firebase-config.js?v=2026-09-08-01';
+import * as GAMEJS from './game.js?v=2026-09-08-01';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -939,6 +939,11 @@ function adoptGameState(remote) {
   GAME.selected = null;
   GAME.army = null;
   GAMEJS.checkObjectives(GAME.state, GAME.tiles);
+  // Première visite : on montre les règles. Un jeu qu'on doit deviner n'est
+  // pas un jeu, et c'est exactement le reproche qui revenait.
+  try {
+    if (!localStorage.getItem(RULES_SEEN_KEY)) ouvrirRegles();
+  } catch { /* navigation privée : tant pis, pas d'ouverture automatique */ }
   runCatchUp();
   ensureGameLoaded();
   drawGame();
@@ -949,7 +954,7 @@ async function ensureGameLoaded() {
   if (gameStatus !== 'idle') return;
   gameStatus = 'loading';
   try {
-    gameMod = await import('./world3d.js?v=2026-09-03-15');
+    gameMod = await import('./world3d.js?v=2026-09-08-01');
     const canvas = document.getElementById('game-canvas');
     if (!canvas) throw new Error('canvas #game-canvas introuvable');
     gameMod.initWorld(canvas, { onSelect: onTileSelected });
@@ -987,6 +992,9 @@ function drawGame() {
     // La portée n'est calculée que pour l'armée sélectionnée : c'est elle qui
     // dit au joueur ce qu'il peut faire, et rien d'autre ne doit s'allumer.
     reach: army ? GAMEJS.reachable(GAME.state, GAME.tiles, army) : null,
+    // Les faits de guerre récents : c'est ce qui donne à la carte l'air d'un
+    // monde où il se passe quelque chose plutôt que d'un décor figé.
+    marques: GAMEJS.recentMarks(GAME.state, Date.now()),
   });
 }
 
@@ -1024,6 +1032,27 @@ function renderGameHud() {
     goalLabel.textContent = objective ? objective.label : 'Tous les objectifs sont accomplis';
     goalCount.textContent = `${index}/${total}`;
     goalHint.textContent = GAMEJS.nextStepHint(GAME.state, GAME.tiles);
+  }
+
+  // La menace : la seule information qui doit interrompre ce que le joueur est
+  // en train de faire. Sans elle, on perd un territoire sans avoir rien vu.
+  const menaces = GAMEJS.menaces(GAME.state, GAME.tiles);
+  const mBox = document.getElementById('g-menace');
+  const mTxt = document.getElementById('g-menace-text');
+  if (mBox && mTxt) {
+    const m = menaces[0];
+    if (!m) {
+      mBox.classList.add('hidden');
+    } else {
+      const clan = GAMEJS.CLANS.find((c) => c.key === m.clan)?.label || m.clan;
+      const ou = m.distance === 0 ? 'sur vos terres'
+        : m.distance === 1 ? 'au contact de vos terres'
+        : `à ${m.distance} cases de vos terres`;
+      mTxt.textContent = `${clan} · colonne de ${m.str} ${ou}`
+        + (menaces.length > 1 ? ` · ${menaces.length} colonnes en marche` : '');
+      mBox.classList.remove('hidden');
+      mBox._cible = { q: m.q, r: m.r };
+    }
   }
 
   const body = document.getElementById('g-log-body');
@@ -1117,27 +1146,40 @@ function renderTilePanel() {
 
   $('#g-tile-title').textContent = `${ter.label} · ${ownerLabel}`;
   const armeeIci = GAMEJS.armyAt(GAME.state, t.q, t.r);
+  // « Armée de 3 » sans dire à qui elle est, sur une case ennemie, se lit comme
+  // une bonne nouvelle. C'est exactement le contraire.
+  const armeeTxt = !armeeIci ? null
+    : armeeIci.owner === 'joueur'
+      ? `Votre armée de ${armeeIci.str} · ${armeeIci.mp} déplacement${armeeIci.mp > 1 ? 's' : ''}`
+      : `⚔ Colonne ${GAMEJS.CLANS.find((c) => c.key === armeeIci.owner)?.label || armeeIci.owner} de ${armeeIci.str}`;
   $('#g-tile-sub').textContent = [
-    armeeIci ? `Armée de ${armeeIci.str} · ${armeeIci.mp} déplacement${armeeIci.mp > 1 ? 's' : ''}` : null,
+    armeeTxt,
     `Défense +${GAMEJS.tileDefense(t)} %`,
     troops ? `${troops} troupe${troops > 1 ? 's' : ''}` : null,
     bName || null,
   ].filter(Boolean).join(' · ');
 
   const hoursTotal = totalBilledHours();
+  const bonusAssaut = GAMEJS.warBonus(monthBilledHours(lastAggForGame), NESSY.socleHours, NESSY.minHoursEq);
   const actions = GAMEJS.actionsFor(GAME.state, GAME.tiles, t, hoursTotal);
   const wrap = $('#g-tile-actions');
   wrap.innerHTML = actions.map((a, i) => {
     const cost = a.sceaux ? `${a.sceaux} sceaux`
       : a.troupes ? `${a.troupes} troupes de la garnison`
       : a.cost ? [a.cost.or ? `${a.cost.or} or` : null, a.cost.vivres ? `${a.cost.vivres} vivres` : null].filter(Boolean).join(' · ')
-      : a.defenders != null ? `${a.attackers || 0} contre ${a.defenders}` : '';
-    return `<button type="button" data-act="${i}" ${a.enabled ? '' : 'disabled'}
+      : a.defenders != null
+        ? `${a.attackers || 0} contre ${a.defenders} · terrain +${GAMEJS.tileDefense(t)} %`
+          + (bonusAssaut.pct ? ` · vos heures +${bonusAssaut.pct} %` : '')
+        : '';
+    // Un bouton grisé sans explication, c'est ce qui donne le sentiment de ne
+    // rien pouvoir faire. On affiche la raison à la place du coût.
+    const bas = a.enabled ? cost : (a.why || cost);
+    return `<button type="button" data-act="${i}" ${a.enabled ? '' : 'disabled'} title="${escapeHtml(a.why || '')}"
       class="rounded-xl px-2.5 py-2 text-left border transition text-[11px] font-semibold
              ${a.enabled ? 'bg-white/5 border-white/15 text-zinc-100 hover:bg-white/10 active:scale-[0.98]'
-                         : 'bg-white/[0.02] border-white/5 text-zinc-600 cursor-not-allowed'}">
+                         : 'bg-white/[0.02] border-white/10 text-zinc-500 cursor-not-allowed'}">
       <span class="block">${escapeHtml(a.label)}</span>
-      <span class="block text-[9px] font-mono opacity-70 mt-0.5">${escapeHtml(cost)}</span>
+      <span class="block text-[9px] ${a.enabled ? 'font-mono opacity-70' : 'text-amber-400/70'} mt-0.5 leading-tight">${escapeHtml(bas)}</span>
     </button>`;
   }).join('') || '<div class="col-span-2 text-[11px] text-zinc-500">Aucune action possible ici.</div>';
 
@@ -1245,22 +1287,61 @@ function saveGameNow() {
 /** Rattrape la production hors ligne, puis programme le prochain tour. */
 function runCatchUp() {
   if (!GAME.state || !GAME.tiles) return;
+  const avant = GAMEJS.menaces(GAME.state, GAME.tiles).length;
   const sum = GAMEJS.catchUp(GAME.state, GAME.tiles, Date.now());
   if (sum.ticks > 0) {
     afterGameChange();
+    const apres = GAMEJS.menaces(GAME.state, GAME.tiles);
+    const proche = apres[0];
     if (sum.attacks.some((a) => a.lost)) gameToast('Un territoire est tombé pendant votre absence.', false);
-    else if (sum.or > 0) gameToast(`+${sum.or} or récoltés en votre absence`, true);
+    else if (sum.attacks.length) gameToast('Une incursion a été repoussée sur vos terres.', true);
+    // Pendant une partie ouverte, annoncer « +3 or » toutes les trois minutes
+    // n'apprend rien ; ce qui compte, c'est la colonne qui approche.
+    else if (proche && (proche.distance <= 2 || apres.length > avant)) {
+      gameToast(proche.distance <= 1
+        ? `Colonne du clan ${proche.clan} au contact de vos terres !`
+        : `Colonne du clan ${proche.clan} à ${proche.distance} cases de vos terres.`, false);
+    } else if (sum.ticks >= 2 && sum.or > 0) gameToast(`+${sum.or} or récoltés en votre absence`, true);
   }
   clearTimeout(gameTickTimer);
   const msLeft = GAMEJS.TICK_MS - ((Date.now() - GAME.state.lastTick) % GAMEJS.TICK_MS);
   gameTickTimer = setTimeout(runCatchUp, Math.max(5000, msLeft));
 }
 
+const RULES_SEEN_KEY = 'kopek_regles_vues';
+
+function ouvrirRegles() {
+  const panneau = document.getElementById('g-rules');
+  const corps = document.getElementById('g-rules-body');
+  if (!panneau || !corps) return;
+  corps.innerHTML = GAMEJS.RULES.map((r) => `
+    <div class="rounded-xl p-3 bg-white/[0.04] border border-white/10">
+      <div class="text-[13px] font-bold text-indigo-300">${escapeHtml(r.titre)}</div>
+      <div class="text-[12px] text-zinc-300 leading-relaxed mt-1">${escapeHtml(r.texte)}</div>
+    </div>`).join('');
+  panneau.classList.remove('hidden');
+  if (window.lucide) lucide.createIcons();
+}
+
+function fermerRegles() {
+  document.getElementById('g-rules')?.classList.add('hidden');
+  try { localStorage.setItem(RULES_SEEN_KEY, '1'); } catch { /* navigation privée */ }
+}
+
 function bindGameUi() {
+  $('#g-help')?.addEventListener('click', ouvrirRegles);
+  $('#g-rules-close')?.addEventListener('click', fermerRegles);
+  $('#g-rules-ok')?.addEventListener('click', fermerRegles);
   $('#g-tile-close')?.addEventListener('click', () => {
     GAME.selected = null;
     if (gameMod && gameStatus === 'ready') gameMod.setSelected(null);
     document.getElementById('g-tile-panel')?.classList.add('hidden');
+  });
+  $('#g-menace-go')?.addEventListener('click', () => {
+    const cible = document.getElementById('g-menace')?._cible;
+    if (!cible) return;
+    onTileSelected(cible);
+    document.getElementById('game-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
   $('#g-log-toggle')?.addEventListener('click', () => {
     document.getElementById('g-log-body')?.classList.toggle('hidden');

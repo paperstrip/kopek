@@ -11,8 +11,11 @@
 // =============================================================
 
 // ---------- Constantes de règles -----------------------------
-export const TICK_MS = 10 * 60 * 1000;      // un tour de production = 10 minutes réelles
-export const MAX_CATCHUP_TICKS = 144;       // on ne rattrape jamais plus de 24 h d'absence
+// Un tour toutes les trois minutes : assez lent pour qu'une absence compte,
+// assez rapide pour qu'on voie le monde bouger en le regardant. À dix minutes,
+// une partie ouverte dix minutes ne montrait strictement rien.
+export const TICK_MS = 3 * 60 * 1000;
+export const MAX_CATCHUP_TICKS = 480;       // on ne rattrape jamais plus de 24 h d'absence
 export const MAP_RADIUS = 8;                // rayon de l'archipel (217 tuiles)
 
 export const TERRAINS = {
@@ -256,6 +259,28 @@ export function armyById(state, id) {
   return (state.armies || []).find((a) => a.id === id);
 }
 
+/**
+ * Les colonnes ennemies en marche, de la plus proche à la plus lointaine, avec
+ * le nombre de tours qui les sépare de vos terres. Le joueur doit pouvoir voir
+ * arriver un assaut : se faire prendre un territoire sans l'avoir vu venir,
+ * c'est ce qui donne l'impression qu'il ne se passe rien puis que tout casse.
+ */
+export function menaces(state, tiles) {
+  const mine = ownedTiles(tiles);
+  if (!mine.length) return [];
+  return (state.armies || [])
+    .filter((a) => a.owner !== 'joueur')
+    .map((a) => {
+      let d = Infinity, cible = null;
+      mine.forEach((t) => {
+        const dd = hexDistance(a.q, a.r, t.q, t.r);
+        if (dd < d) { d = dd; cible = t; }
+      });
+      return { army: a, clan: a.owner, str: a.str, q: a.q, r: a.r, distance: d, cible };
+    })
+    .sort((x, y) => x.distance - y.distance);
+}
+
 /** Sort des troupes de la garnison pour en faire une armée mobile. */
 export function raiseArmy(state, tiles, q, r, count = 2) {
   const t = tiles[tileKey(q, r)];
@@ -369,6 +394,7 @@ export function moveArmy(state, tiles, id, toQ, toR, hoursMonth = 0, rng = Math.
     revealAround(state, tiles, to);
     markChanged(state, to);
     state.wonFights = (state.wonFights || 0) + 1;
+    pushMark(state, toQ, toR, 'victoire');
     pushLog(state, `Victoire ! ${TERRAINS[to.terrain].label} prise à l’assaut.`, 'good');
     if (wasClan && !Object.values(tiles).some((x) => x.owner === wasClan)) {
       state.defeated = [...new Set([...(state.defeated || []), wasClan])];
@@ -381,6 +407,7 @@ export function moveArmy(state, tiles, id, toQ, toR, hoursMonth = 0, rng = Math.
   if (to.owner) to.garrison = res.defenderLeft; else to.neutralGarrison = res.defenderLeft;
   to.revealed = true;
   markChanged(state, to);
+  pushMark(state, toQ, toR, 'defaite');
   pushLog(state, `Assaut brisé sur ${TERRAINS[to.terrain].label}.`, 'bad');
   return { ok: true, attacked: true, win: false, result: res, bonus, attackers: 0, defenders };
 }
@@ -394,16 +421,19 @@ function clanTurn(state, tiles, rng) {
   const mine = ownedTiles(tiles);
   if (!mine.length) return;
 
-  // Levée : une place forte bien garnie envoie une colonne.
+  // Levée : une place forte bien garnie envoie une colonne. Le seuil et la
+  // fréquence sont volontairement bas — un adversaire qui ne sort jamais de
+  // chez lui ne se distingue pas d'un décor, et c'était le reproche.
   const clanArmies = state.armies.filter((a) => a.owner !== 'joueur');
-  if (clanArmies.length < 4 && rng() < 0.25) {
-    const forts = Object.values(tiles).filter((t) => t.owner && t.owner !== 'joueur' && (t.garrison || 0) >= 5);
+  if (clanArmies.length < 5 && (clanArmies.length === 0 || rng() < 0.5)) {
+    const forts = Object.values(tiles).filter((t) => t.owner && t.owner !== 'joueur' && (t.garrison || 0) >= 4);
     if (forts.length) {
       const from = forts[Math.floor(rng() * forts.length)];
       const str = 2 + Math.floor(rng() * 3);
       from.garrison -= str;
       markChanged(state, from);
       state.armies.push({ id: nextArmyId(state), owner: from.owner, q: from.q, r: from.r, str, mp: 0 });
+      pushLog(state, `Le clan ${from.owner} lève une colonne de ${str}.`, 'info');
     }
   }
 
@@ -423,9 +453,11 @@ function clanTurn(state, tiles, rng) {
         target.garrison = Math.max(1, res.attackerLeft);
         target.building = target.capital ? target.building : null;
         a.q = target.q; a.r = target.r; a.str = 0;
+        pushMark(state, target.q, target.r, 'perte');
         pushLog(state, `${TERRAINS[target.terrain].label} tombée aux mains du clan ${a.owner}.`, 'bad');
       } else {
         target.garrison = res.defenderLeft;
+        pushMark(state, target.q, target.r, 'defense');
         pushLog(state, `Colonne du clan ${a.owner} brisée devant vos lignes.`, 'good');
       }
       markChanged(state, target);
@@ -449,6 +481,28 @@ function refreshArmies(state, ticks) {
     a.mp = Math.min(ARMY_MP_MAX, (a.mp || 0) + MP_PER_TICK * ticks);
   });
 }
+
+// ---------- Les règles, écrites une seule fois ---------------
+// L'interface et la documentation lisent la même source : deux textes séparés
+// finissent toujours par se contredire.
+export const RULES = [
+  { titre: 'Le but',
+    texte: 'Étendre votre domaine et prendre le château d’un clan adverse. Votre rang monte avec le nombre de territoires ET les heures que vous encodez.' },
+  { titre: 'Deux ressources',
+    texte: 'L’or et les vivres tombent tout seuls, toutes les 3 minutes, même application fermée. Chaque territoire produit ; les bâtiments produisent plus.' },
+  { titre: 'S’étendre',
+    texte: 'Touchez un territoire libre voisin du vôtre, puis « Coloniser ». Un territoire gardé ne se colonise pas : il se prend par les armes.' },
+  { titre: 'Faire la guerre',
+    texte: 'Levez une armée depuis un territoire à vous — il faut 3 troupes en garnison. Touchez-la : les cases à sa portée s’allument, bleu pour se déplacer, rouge pour attaquer. Touchez une case pour l’y envoyer.' },
+  { titre: 'Le combat',
+    texte: 'On compare vos troupes aux défenseurs, plus le terrain : une montagne défend bien mieux qu’une prairie. Un assaut perdu détruit l’armée. Le rapport de force est affiché avant de frapper.' },
+  { titre: 'On vous attaque aussi',
+    texte: 'Les clans lèvent des colonnes et marchent vers vos terres. Elles sont visibles sur la carte, même dans la brume, et le bandeau « Menace » annonce la plus proche. Une case défendue par une seule troupe tombe presque toujours : gardez 3 troupes sur vos frontières, ou un rempart.' },
+  { titre: 'Vos heures comptent',
+    texte: 'Chaque heure facturée donne un Sceau, qui lève une garde d’élite. Le socle (25 h) donne +12 % à l’assaut, la garantie (43,75 h) +25 %. Le jeu ne modifie jamais vos heures.' },
+  { titre: 'Pendant votre absence',
+    texte: 'Le monde continue de tourner sans vous : production, colonnes en marche, incursions. En revenant, vous rattrapez au maximum 24 heures. Les Chroniques racontent tout ce qui s’est passé.' },
+];
 
 // ---------- Objectifs · ce qui donne un but ------------------
 // Sans objectif affiché, le joueur ouvre l'écran, voit des hexagones et referme.
@@ -581,6 +635,22 @@ export function sceauxAvailable(state, hoursTotal) {
 }
 
 // ---------- Le tour de production ----------------------------
+/**
+ * Une marque posée sur la carte à l'endroit d'un fait de guerre. Sans elle, un
+ * combat qui se règle pendant l'absence ne laisse aucune trace visible : le
+ * territoire change de couleur et le joueur ne sait ni où ni quand.
+ */
+function pushMark(state, q, r, kind) {
+  state.marks = state.marks || [];
+  state.marks.unshift({ q, r, kind, t: Date.now() });
+  if (state.marks.length > 12) state.marks.length = 12;
+}
+
+/** Les marques récentes, celles qui méritent encore d'être signalées. */
+export function recentMarks(state, nowMs = Date.now(), maxAgeMs = 30 * 60 * 1000) {
+  return (state.marks || []).filter((m) => nowMs - m.t < maxAgeMs);
+}
+
 function pushLog(state, text, kind = 'info') {
   state.log = state.log || [];
   state.log.unshift({ t: Date.now(), text, kind });
@@ -629,9 +699,11 @@ export function catchUp(state, tiles, nowMs = Date.now()) {
           if (res.win) {
             target.owner = from.owner; target.garrison = res.attackerLeft; target.building = null;
             attacks.push({ clan: from.owner, q: target.q, r: target.r, lost: true });
+            pushMark(state, target.q, target.r, 'perte');
           } else {
             target.garrison = res.defenderLeft;
             attacks.push({ clan: from.owner, q: target.q, r: target.r, lost: false });
+            pushMark(state, target.q, target.r, 'defense');
           }
           markChanged(state, from); markChanged(state, target);
         }
@@ -674,6 +746,16 @@ export function resolveCombat(attack, defense, defPct, bonusPct, rng = Math.rand
 // ---------- Actions du joueur --------------------------------
 // Chacune renvoie { ok, error } et ne modifie l'état que si ok. L'appelant peut
 // donc afficher l'erreur sans avoir à annuler quoi que ce soit.
+/** Dit précisément ce qui manque, plutôt que de griser sans explication. */
+function manque(state, cost) {
+  const bouts = [];
+  const dOr = (cost.or || 0) - state.or;
+  const dV = (cost.vivres || 0) - state.vivres;
+  if (dOr > 0) bouts.push(`${Math.ceil(dOr)} or`);
+  if (dV > 0) bouts.push(`${Math.ceil(dV)} vivres`);
+  return bouts.length ? `Il vous manque ${bouts.join(' et ')}` : null;
+}
+
 function canPay(state, cost) {
   return (state.or >= (cost.or || 0)) && (state.vivres >= (cost.vivres || 0));
 }
@@ -788,6 +870,7 @@ export function attack(state, tiles, fromQ, fromR, toQ, toR, hoursMonth, rng = M
     revealAround(state, tiles, to);
     markChanged(state, to);
     state.wonFights = (state.wonFights || 0) + 1;
+    pushMark(state, to.q, to.r, 'victoire');
     pushLog(state, `Victoire ! ${TERRAINS[to.terrain].label} conquise.`, 'good');
     const remaining = Object.values(tiles).some((x) => x.owner === wasClan);
     if (wasClan && !remaining) {
@@ -800,6 +883,7 @@ export function attack(state, tiles, fromQ, fromR, toQ, toR, hoursMonth, rng = M
   if (to.owner) to.garrison = res.defenderLeft; else to.neutralGarrison = res.defenderLeft;
   to.revealed = true;
   markChanged(state, to);
+  pushMark(state, to.q, to.r, 'defaite');
   pushLog(state, `Assaut repoussé sur ${TERRAINS[to.terrain].label}.`, 'bad');
   return { ok: true, win: false, result: res, bonus };
 }
@@ -812,15 +896,19 @@ export function actionsFor(state, tiles, t, hoursTotal) {
     if (!t.building) {
       Object.entries(BUILDINGS).forEach(([key, b]) => {
         if (b.terrains && !b.terrains.includes(t.terrain)) return;
-        out.push({ kind: 'build', key, label: b.label, cost: b.cost, enabled: canPay(state, b.cost) });
+        const ok = canPay(state, b.cost);
+        out.push({ kind: 'build', key, label: b.label, cost: b.cost, enabled: ok, why: ok ? null : manque(state, b.cost) });
       });
     }
     if (t.building === 'caserne') {
-      out.push({ kind: 'recruit', label: 'Recruter', cost: TROOP_COST, enabled: canPay(state, TROOP_COST) });
+      const okRec = canPay(state, TROOP_COST);
+      out.push({ kind: 'recruit', label: 'Recruter', cost: TROOP_COST, enabled: okRec, why: okRec ? null : manque(state, TROOP_COST) });
     }
+    const sceaux = sceauxAvailable(state, hoursTotal);
     out.push({
       kind: 'elite', label: 'Garde d’élite', sceaux: SCEAUX_PAR_ELITE,
-      enabled: sceauxAvailable(state, hoursTotal) >= SCEAUX_PAR_ELITE,
+      enabled: sceaux >= SCEAUX_PAR_ELITE,
+      why: sceaux >= SCEAUX_PAR_ELITE ? null : `${SCEAUX_PAR_ELITE - sceaux} sceau(x) manquant(s) — encodez des heures`,
     });
     // Lever une armée est l'action qui fait entrer dans le jeu : c'est elle qui
     // met une unité sur la carte, avec une portée et des déplacements.
@@ -828,12 +916,16 @@ export function actionsFor(state, tiles, t, hoursTotal) {
       out.push({
         kind: 'raise', label: 'Lever une armée', troupes: 2,
         enabled: (t.garrison || 0) >= 3,
+        why: (t.garrison || 0) >= 3 ? null : `Il faut 3 troupes en garnison, vous en avez ${t.garrison || 0}`,
       });
     }
   } else if (!t.owner && !t.neutralGarrison) {
+    const voisin = isAdjacentToPlayer(tiles, t);
+    const payable = canPay(state, COLONISE_COST);
     out.push({
       kind: 'colonise', label: 'Coloniser', cost: COLONISE_COST,
-      enabled: isAdjacentToPlayer(tiles, t) && canPay(state, COLONISE_COST),
+      enabled: voisin && payable,
+      why: !voisin ? 'Ce territoire ne touche aucun des vôtres' : (payable ? null : manque(state, COLONISE_COST)),
     });
   } else {
     // On n'attaque plus depuis un panneau : on amène une armée sur la case.
@@ -842,6 +934,9 @@ export function actionsFor(state, tiles, t, hoursTotal) {
     out.push({
       kind: 'assault', label: 'Attaquer avec une armée',
       enabled: proches.length > 0,
+      why: proches.length ? null
+        : (armiesOf(state).length ? 'Aucune de vos armées n’est à portée'
+                                  : 'Vous n’avez pas d’armée — levez-en une sur un de vos territoires'),
       armyId: proches[0] ? proches[0].id : null,
       attackers: proches[0] ? proches[0].str : 0,
       defenders: t.owner ? (t.garrison || 0) : (t.neutralGarrison || 0),

@@ -16,11 +16,11 @@
 // Ce module ne connaît PAS les règles du jeu : on lui passe une carte de tuiles,
 // il la dessine et signale la tuile touchée. Toute la logique vit dans game.js.
 // =============================================================================
-import * as THREE from './vendor/three/three.module.js?v=2026-09-03-15';
-import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-03-15';
-import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-03-15';
-import { GLTFLoader } from './vendor/three/GLTFLoader.js?v=2026-09-03-15';
-import { axialToWorld, TERRAINS, CLANS, neighbors, tileKey } from './game.js?v=2026-09-03-15';
+import * as THREE from './vendor/three/three.module.js?v=2026-09-08-01';
+import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-08-01';
+import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-08-01';
+import { GLTFLoader } from './vendor/three/GLTFLoader.js?v=2026-09-08-01';
+import { axialToWorld, TERRAINS, CLANS, neighbors, tileKey } from './game.js?v=2026-09-08-01';
 
 const HEX = 1.0;                 // rayon d'un hexagone
 const GAP = 0.13;                // interstice : c'est lui qui fait « îles séparées »
@@ -31,7 +31,7 @@ const TILE_H = 0.42;
 const PALETTE = {
   ciel_haut: '#8fd3e8', ciel_bas: '#ffe6c4',
   mer: '#2e7d99', mer_profonde: '#1b4f66',
-  brume: '#9fc4d4',
+  brume: '#8fb3c9',
   flanc: '#8a6a4a',           // la roche sous la tuile
   flanc_sable: '#c2a06f',
   joueur: '#f2c14e',
@@ -39,7 +39,7 @@ const PALETTE = {
 };
 
 let renderer, scene, camera, controls, clock, raf = null;
-let canvasEl, worldGroup, decorGroup, markerGroup, armyGroup, reachGroup, seaMesh;
+let canvasEl, worldGroup, decorGroup, markerGroup, armyGroup, reachGroup, marqueGroup, seaMesh;
 let seaWaves = null;
 let envReady = false;
 let sun, hemi;
@@ -321,6 +321,9 @@ function buildSharedGeometries() {
   // Disque de portée posé à plat sur la tuile.
   GEO.reach = new THREE.CircleGeometry((HEX - GAP) * 0.8, 24);
   GEO.reach.rotateX(-Math.PI / 2);
+  // Deux lames croisées : le signe universel « ici on s'est battu ». Une simple
+  // pastille de couleur se confondait avec les cases à portée.
+  GEO.lame = new THREE.BoxGeometry(0.075, 0.075, 0.62);
 
   // Cible de sélection : un hexagone plat, invisible, posé sur la tuile.
   GEO.pick = new THREE.CircleGeometry(HEX * 0.92, 6);
@@ -625,6 +628,12 @@ function buildSharedMaterials() {
   // ce qui va se passer avant qu'on touche.
   MAT.reachMove = new THREE.MeshBasicMaterial({ color: '#5eb0ff', transparent: true, opacity: 0.35, depthWrite: false });
   MAT.reachAttack = new THREE.MeshBasicMaterial({ color: '#ff5a5a', transparent: true, opacity: 0.4, depthWrite: false });
+  MAT.marque = {
+    victoire: new THREE.MeshBasicMaterial({ color: '#6ee7a8', transparent: true, opacity: 0.95 }),
+    defense:  new THREE.MeshBasicMaterial({ color: '#6ee7a8', transparent: true, opacity: 0.95 }),
+    defaite:  new THREE.MeshBasicMaterial({ color: '#ff7b7b', transparent: true, opacity: 0.95 }),
+    perte:    new THREE.MeshBasicMaterial({ color: '#ff7b7b', transparent: true, opacity: 0.95 }),
+  };
   MAT.armyBase = mat('#3d3a35', { roughness: 0.9 });
 }
 
@@ -656,13 +665,13 @@ export function initWorld(canvas, { onSelect } = {}) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.88;
+  renderer.toneMappingExposure = 0.78;
 
   scene = new THREE.Scene();
   scene.background = skyTexture();
   scene.fog = new THREE.Fog(PALETTE.brume, 18, 46);
 
-  camera = new THREE.PerspectiveCamera(38, 1, 0.5, 160);
+  camera = new THREE.PerspectiveCamera(36, 1, 0.5, 260);
   camera.position.set(0, 16, 19);
 
   controls = new OrbitControls(camera, canvas);
@@ -675,16 +684,16 @@ export function initWorld(canvas, { onSelect } = {}) {
   controls.maxPolarAngle = Math.PI * 0.42;
   controls.enablePan = false;
 
-  hemi = new THREE.HemisphereLight('#cfe4f5', '#4a3d30', 0.2);
+  hemi = new THREE.HemisphereLight('#c3d8ea', '#4d4438', 0.42);
   scene.add(hemi);
   // Soleil bas et chaud : c'est ce qui donne les ombres longues des références.
-  sun = new THREE.DirectionalLight('#ffe4bc', 1.9);
+  sun = new THREE.DirectionalLight('#ffeacd', 1.45);
   sun.position.set(-9, 13, 7);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1536, 1536);
   sun.shadow.bias = -0.0012;
   const sc = sun.shadow.camera;
-  sc.left = -14; sc.right = 14; sc.top = 14; sc.bottom = -14; sc.near = 1; sc.far = 44;
+  sc.left = -26; sc.right = 26; sc.top = 26; sc.bottom = -26; sc.near = 1; sc.far = 80;
   scene.add(sun, sun.target);
 
   buildSharedGeometries();
@@ -698,6 +707,7 @@ export function initWorld(canvas, { onSelect } = {}) {
   worldGroup = new THREE.Group(); scene.add(worldGroup);
   decorGroup = new THREE.Group(); scene.add(decorGroup);
   markerGroup = new THREE.Group(); scene.add(markerGroup);
+  marqueGroup = new THREE.Group(); scene.add(marqueGroup);
   armyGroup = new THREE.Group(); scene.add(armyGroup);
   reachGroup = new THREE.Group(); scene.add(reachGroup);
 
@@ -743,19 +753,19 @@ function resize() {
   // Sur un écran étroit on recule et on redresse la caméra, sinon l'archipel
   // déborde des deux côtés et on ne voit plus que trois tuiles.
   const narrow = w / h < 1.15;
-  const dist = narrow ? 21 : 16;
-  const polar = narrow ? 0.28 : 0.30;
+  const dist = narrow ? 38 : 31;
+  const polar = narrow ? 0.26 : 0.28;
   camera.updateProjectionMatrix();
-  controls.minDistance = dist * 0.5;
-  controls.maxDistance = dist * 1.9;
+  controls.minDistance = dist * 0.22;
+  controls.maxDistance = dist * 1.6;
   if (!controls._userMoved) {
     const azim = controls.getAzimuthalAngle();
     camera.position.setFromSphericalCoords(dist, Math.PI * polar, azim);
     camera.position.add(controls.target);
     controls.update();
   }
-  scene.fog.near = dist * 0.75;
-  scene.fog.far = dist * 2.4;
+  scene.fog.near = dist * 0.55;
+  scene.fog.far = dist * 2.1;
 }
 
 // =============================================================================
@@ -786,6 +796,8 @@ function worldSignature(p) {
   let sig = Math.round((p.capitalProgress ?? 0) * 40) + '|';
   (p.armies || []).forEach((a) => { sig += `${a.id}${a.q},${a.r}:${a.str}:${a.mp};`; });
   sig += '|' + (p.reach ? [...p.reach.keys()].join(',') : '') + '|';
+  (p.marques || []).forEach((m) => { sig += `${m.q},${m.r}:${m.kind};`; });
+  sig += '|';
   const tiles = p.tiles || {};
   for (const k in tiles) {
     const t = tiles[k];
@@ -816,36 +828,47 @@ export function renderWorld(p, { force = false } = {}) {
   pickTargets = [];
 
   const tiles = p.tiles || {};
-  const visible = Object.values(tiles).filter((t) => t.revealed
-    || neighbors(t.q, t.r).some(([nq, nr]) => tiles[tileKey(nq, nr)]?.revealed));
+  // Tout le monde est dessiné. Ce qui n'est pas exploré l'est en sourdine :
+  // on voit le relief du pays et les bannières adverses, mais pas le détail.
+  // Cacher 180 territoires sur 217 rendait la carte incompréhensible et
+  // donnait l'impression d'un monde minuscule.
+  const visible = Object.values(tiles);
+  const socles = [];
   visible.forEach((t) => {
     const { x, z } = axialToWorld(t.q, t.r, HEX);
     const rng = rngFrom(t.q, t.r);
     const hidden = !t.revealed;
 
-    // La tuile elle-même vient du pack. L'eau sert de tuile inconnue : la
-    // brume devient une mer que l'on n'a pas encore franchie.
-    const socle = inst(hidden ? 'hex_water' : tileModel(t, rng), MODEL_SCALE, hidden ? 0 : rng() * Math.PI * 2);
-    if (socle) {
-      socle.position.set(x, hidden ? -0.06 : 0, z);
-      if (hidden) socle.traverse((n) => { if (n.isMesh) n.castShadow = false; });
-      worldGroup.add(socle);
-      // La sélection tape sur une cible plate invisible : viser les maillages
-      // du modèle rendrait le toucher imprécis selon le décor posé dessus.
-      const cible = new THREE.Mesh(GEO.pick, MAT.pick);
-      cible.position.set(x, 0.06, z);
-      cible.userData.tile = { q: t.q, r: t.r };
-      worldGroup.add(cible);
-      pickTargets.push(cible);
-    }
+    socles.push({
+      name: tileModel(t, rng), x, z,
+      y: hidden ? -0.05 : 0, ry: rng() * Math.PI * 2, fog: hidden,
+    });
 
-    if (hidden) return;
+    // La sélection tape sur une cible plate invisible : viser les maillages du
+    // décor rendrait le toucher imprécis selon ce qui se trouve dessus.
+    const cible = new THREE.Mesh(GEO.pick, MAT.pick);
+    cible.position.set(x, 0.06, z);
+    cible.userData.tile = { q: t.q, r: t.r };
+    worldGroup.add(cible);
+    pickTargets.push(cible);
+
+    if (hidden) {
+      // On montre quand même la bannière d'un siège de clan repéré : c'est ce
+      // qui donne au joueur une raison d'aller voir.
+      if (t.owner && t.owner !== 'joueur' && t.seat) {
+        const banniere = inst(`flag_${colorOf(t.owner)}`, 0.6, 0);
+        if (banniere) { banniere.position.set(x + 0.5, -0.05, z + 0.44); decorGroup.add(banniere); }
+      }
+      return;
+    }
     decorateTile(t, x, 0, z, rng, p);
   });
+  drawTilesInstanced(socles);
 
-  drawArmies(p);
-  drawReach(p);
   placeSelection(p.selected, tiles);
+  drawArmies(p);
+  drawMarques(p);
+  drawReach(p);
 }
 
 /**
@@ -857,9 +880,14 @@ function drawArmies(p) {
   const tiles = p.tiles || {};
   (p.armies || []).forEach((a) => {
     const t = tiles[tileKey(a.q, a.r)];
-    if (!t || !t.revealed) return;                 // pas d'armée visible dans la brume
+    if (!t) return;
+    // Une colonne ennemie doit se voir arriver, y compris dans la brume : la
+    // cacher jusqu'à ce qu'elle frappe donnait un monde qui semble mort, puis
+    // un territoire perdu sans prévenir. Dans la brume, on la pose plus bas et
+    // sans jetons : on voit qu'elle vient, pas encore sa force exacte.
+    const brume = !t.revealed;
     const { x, z } = axialToWorld(a.q, a.r, HEX);
-    const y = 0.14;
+    const y = brume ? 0.06 : 0.14;
     const mat = a.owner === 'joueur' ? MAT.player : (MAT.clan[a.owner] || MAT.player);
 
     const base = new THREE.Mesh(GEO.armyBase, MAT.armyBase);
@@ -880,13 +908,34 @@ function drawArmies(p) {
     armyGroup.add(flag);
 
     // Un jeton par troupe, en arc devant le fanion : la force se lit d'un coup.
-    for (let i = 0; i < Math.min(6, a.str); i++) {
+    const jetons = brume ? 0 : Math.min(6, a.str);
+    for (let i = 0; i < jetons; i++) {
       const ang = -0.9 + (i / 5) * 1.8;
       const pion = new THREE.Mesh(GEO.troop, mat);
       pion.position.set(x + Math.sin(ang) * 0.26, y + 0.16, z + Math.cos(ang) * 0.26 - 0.05);
       pion.castShadow = true;
       armyGroup.add(pion);
     }
+  });
+}
+
+/**
+ * Les faits de guerre récents : deux lames croisées plantées sur la case. Elles
+ * répondent à « on ne voit pas d'activité » — un combat qui s'est réglé pendant
+ * l'absence laisse enfin quelque chose à voir sur la carte.
+ */
+function drawMarques(p) {
+  clearGroup(marqueGroup);
+  (p.marques || []).forEach((m) => {
+    const { x, z } = axialToWorld(m.q, m.r, HEX);
+    const mat = MAT.marque[m.kind] || MAT.marque.defaite;
+    [0.7, -0.7].forEach((rot) => {
+      const lame = new THREE.Mesh(GEO.lame, mat);
+      lame.position.set(x, 0.62, z);
+      lame.rotation.set(0.45, 0, rot);
+      lame.castShadow = true;
+      marqueGroup.add(lame);
+    });
   });
 }
 
@@ -963,6 +1012,76 @@ function tileModel(t, rng) {
   if (t.terrain === 'montagne') return rng() < 0.5 ? 'mountain_A_grass_trees' : 'mountain_B_grass_trees';
   if (t.terrain === 'colline') return 'hills_A_trees';
   return 'hex_grass';
+}
+
+// Une matière assombrie par matière d'origine, mise en cache : sans ça on
+// recréerait des centaines de matières à chaque redessin.
+const fogCache = new Map();
+function fogMaterial(src) {
+  if (!src) return src;
+  if (fogCache.has(src.uuid)) return fogCache.get(src.uuid);
+  const m = src.clone();
+  m.color = new THREE.Color(0x7d93a8);
+  if (m.map) m.color.multiplyScalar(1);
+  m.roughness = 1;
+  m.metalness = 0;
+  fogCache.set(src.uuid, m);
+  return m;
+}
+
+/**
+ * Aplatit un modèle en une liste de (géométrie, matière, transformation locale).
+ * Calculé une fois par modèle : c'est la base de l'instanciation.
+ */
+const flatCache = new Map();
+function flatten(name) {
+  if (flatCache.has(name)) return flatCache.get(name);
+  const src = MODELS[name];
+  if (!src) return [];
+  src.updateMatrixWorld(true);
+  const parts = [];
+  src.traverse((n) => {
+    if (!n.isMesh) return;
+    parts.push({ geometry: n.geometry, material: n.material, matrix: n.matrixWorld.clone() });
+  });
+  flatCache.set(name, parts);
+  return parts;
+}
+
+/**
+ * Dessine toutes les tuiles en maillages instanciés : 217 hexagones posés un
+ * par un font autant d'appels de dessin et effondrent la fluidité sur
+ * téléphone. Regroupés par modèle, il en reste une poignée.
+ */
+function drawTilesInstanced(entries) {
+  const groupes = new Map();
+  entries.forEach((e) => {
+    const cle = e.name + (e.fog ? '#brume' : '');
+    if (!groupes.has(cle)) groupes.set(cle, { name: e.name, fog: e.fog, items: [] });
+    groupes.get(cle).items.push(e);
+  });
+
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const pos = new THREE.Vector3();
+  const un = new THREE.Vector3(1, 1, 1);
+
+  groupes.forEach(({ name, fog, items }) => {
+    flatten(name).forEach((part) => {
+      const mat = fog ? fogMaterial(part.material) : part.material;
+      const inst = new THREE.InstancedMesh(part.geometry, mat, items.length);
+      inst.castShadow = !fog;
+      inst.receiveShadow = true;
+      items.forEach((e, i) => {
+        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), e.ry);
+        pos.set(e.x, e.y, e.z);
+        m.compose(pos, q, un).multiply(part.matrix);
+        inst.setMatrixAt(i, m);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      worldGroup.add(inst);
+    });
+  });
 }
 
 /** Copie d'un modèle, prête à être posée. Les matières sont partagées. */
@@ -1157,6 +1276,12 @@ export function focusTile(q, r, distance = 5.5) {
  * la géométrie était juste, seules les proportions étaient trop basses. Mesurer
  * a réglé en un appel ce que trois hypothèses n'avaient pas trouvé.
  */
+/** Combien de maillages d'armée sont posés autour d'un point. Sert au test qui
+ *  vérifie qu'une colonne ennemie est bien dessinée, brume ou pas. */
+export function debugArmyMeshesAt(x = 0, z = 0, radius = 1) {
+  return armyGroup.children.filter((m) => Math.hypot(m.position.x - x, m.position.z - z) <= radius).length;
+}
+
 export function debugMeshesAt(x = 0, z = 0, radius = 1) {
   const out = [];
   const box = new THREE.Box3();

@@ -130,7 +130,8 @@ apportent :
 
 **2. Le temps passe même application fermée.** On ne stocke aucun compteur qui
 « tourne » : seule la date du dernier tour résolu (`lastTick`) est persistée, et
-`catchUp()` rattrape les tours écoulés au chargement. Le rattrapage est plafonné
+`catchUp()` rattrape les tours écoulés au chargement. Un tour dure trois
+minutes. Le rattrapage est plafonné
 à 24 h — au-delà, le nombre de tours ignorés est renvoyé plutôt que passé sous
 silence. Les clans adverses renforcent leurs garnisons et lancent des incursions
 pendant ces tours : revenir a un enjeu.
@@ -144,9 +145,13 @@ partent en base (`state.changes`). Un document de partie pèse quelques
 centaines d'octets, pas des dizaines de kilo-octets. C'est ce qui permet une
 carte vaste sans faire grossir la sauvegarde.
 
-Le rendu ne dessine que les tuiles révélées **et leur lisière** : sur 217
-tuiles, une partie neuve n'en affiche qu'une quarantaine. Le monde sort de la
-brume au lieu d'être un tapis d'hexagones gris.
+Le rendu dessine **les 217 tuiles**. Ce qui n'est pas exploré garde son relief
+mais passe en sourdine (`fogMaterial()`), un cran plus bas, avec la bannière des
+sièges de clan repérés. N'afficher que les tuiles révélées et leur lisière —
+une quarantaine — donnait un monde minuscule dont on ne comprenait ni l'échelle
+ni où se trouvaient les adversaires. Les socles partent en `InstancedMesh` par
+couple (modèle, brume) : tout dessiner coûte moins que ne dessiner qu'un tiers
+sans regroupement.
 
 ### Armées · le cœur du jeu
 
@@ -217,75 +222,49 @@ changer.
 Les tuiles inconnues utilisent le modèle d'eau : le brouillard de guerre devient
 une mer qu'on n'a pas encore franchie, au lieu d'un tapis d'hexagones gris.
 
-### Armées · le cœur du jeu
+### Voir ce qui se passe · le reproche le plus juste
 
-Sans unité qu'on déplace soi-même, il n'y a pas de jeu : on touche un hexagone,
-on appuie sur un bouton, rien ne bouge. Une armée est une entité posée sur la
-carte (`state.armies`), avec des points de mouvement, qu'on sélectionne, dont on
-voit la portée en surbrillance, et qu'on déplace tuile par tuile.
+« On ne voit pas d'activité, comment on attaque, comment on se fait attaquer ? »
+Le moteur faisait déjà tout cela ; rien n'en arrivait à l'écran. Quatre causes,
+toutes corrigées :
 
-La boucle tient en une phrase : **recruter → lever une armée → la déplacer →
-entrer chez l'adversaire, c'est l'attaquer.**
+- **Le tour durait dix minutes.** Une partie ouverte dix minutes ne montrait
+  donc rien. `TICK_MS` est passé à trois minutes.
+- **Les clans ne sortaient presque jamais de chez eux** : levée à 25 % depuis
+  les seules places à cinq troupes. Désormais la première colonne part
+  systématiquement, puis une chance sur deux, dès quatre troupes.
+- **Les colonnes ennemies étaient invisibles dans la brume** (`drawArmies()`
+  écartait les tuiles non révélées). On perdait un territoire sans avoir rien
+  vu venir. Elles sont maintenant dessinées, posées plus bas et sans jetons :
+  on voit qu'une colonne approche, pas encore sa force exacte.
+- **Aucune trace des combats.** `pushMark()` pose une marque datée sur la case ;
+  `recentMarks()` renvoie celles de la dernière demi-heure, que le rendu affiche
+  en deux lames croisées, vertes ou rouges.
 
-- `reachable()` fait un parcours en largeur borné par les points de mouvement.
-  Les cases hostiles sont marquées `attack` : on peut toujours frapper un
-  voisin, mais l'assaut consomme tout le mouvement restant — pas de raid en
-  chaîne dans le même tour.
-- Le rendu colore la portée : **bleu** pour un déplacement, **rouge** pour un
-  assaut. La couleur dit ce qui va se passer avant qu'on touche.
-- Lever une armée laisse toujours une troupe en garnison. Un territoire vidé
-  tomberait à la première incursion sans que le joueur comprenne pourquoi.
-- `clanTurn()` fait marcher les clans : ils lèvent des colonnes depuis leurs
-  places fortes et avancent d'un pas par tour vers le territoire joueur le plus
-  proche. Sans adversaire qui bouge, la carte est un décor.
+S'y ajoutent `menaces(state, tiles)` — les colonnes adverses triées par distance
+à vos terres — affichée dans le bandeau rouge `#g-menace`, qui sélectionne la
+colonne quand on le touche, et le journal des Chroniques désormais ouvert par
+défaut : replié, il ne racontait rien à personne.
 
-⚠️ Il n'y a **qu'un seul** système d'attaque. L'ancienne attaque de tuile à tuile
-depuis le panneau a été retirée : deux mécaniques concurrentes rendaient le jeu
-illisible.
-
-### Objectifs · ce qui rend le jeu compréhensible
-
-Un jeu sans but affiché n'est qu'une carte d'hexagones. `OBJECTIVES` enchaîne
-six étapes — coloniser, produire, lever une armée, prendre un repaire, toucher
-un clan, prendre son siège — chacune avec une **consigne concrète** et une
-récompense. `nextStepHint()` calcule à tout moment la phrase « que faire
-maintenant » à partir de l'état réel : elle change quand l'or manque.
-
-⚠️ Un objectif doit être hors de portée au premier chargement. Le seuil de
-garnison est à 9 parce que la capitale en démarre avec 6 : à 5, l'objectif se
-validait tout seul avant le premier clic, ce qui apprend au joueur que les
-objectifs ne veulent rien dire.
-
-Les combats renvoient leur rapport de force chiffré (`attack()` expose
-`result` et `bonus`). « Assaut repoussé » sans chiffres ne dit pas au joueur ce
-qu'il a raté.
-
-### Direction artistique
-
-**Les matières sont réelles, l'éclairage vient d'une carte HDR.** Le rendu
-entièrement procédural plafonnait au « stylisé » : on ne fabrique pas de la
-matière crédible avec des taches dessinées dans un canvas. Les textures vivent
-donc dans `assets/textures/` et l'environnement dans `assets/env/`.
-
-- `loadEnvironment()` passe la carte HDR au `PMREMGenerator` et l'affecte à
-  `scene.environment`. C'est elle qui porte les reflets et l'ambiance ; sans
-  elle une matière PBR reste plate quel que soit le nombre de lampes.
-- `applyRealTextures()` remplace les matières après coup, de façon asynchrone :
-  la scène s'affiche immédiatement avec le rendu procédural, puis se densifie.
-  Si un fichier manque, **rien ne casse** — la version procédurale reste.
-- Une même image sert en relief (linéaire) et en couleur (sRGB) selon l'usage.
-  ⚠️ Ne pas réutiliser la texture de brique pour la pierre : les rochers
-  deviennent des tas de maçonnerie. La roche utilise `roche_relief.jpg`.
-- Les géométries restent générées : `sculpt()` déforme un icosaèdre par du bruit
-  fractal (houppiers, rochers), `lathe()` tourne un profil (troncs, tentes,
-  cheminées), les toits sont des prismes à deux pans.
-- La mer anime sa carte de normales par décalage d'UV : aucun maillage
-  recalculé, les vagues coûtent une soustraction.
+### Diagnostics du rendu
 
 `debugMeshesAt(x, z)` renvoie les dimensions monde des volumes posés autour d'un
-point. Écrit après une séance à supposer pourquoi le bâti paraissait plat : la
-géométrie était juste, seules les proportions étaient trop basses. Mesurer a
-tranché en un appel.
+point ; `debugArmyMeshesAt(x, z)` compte les maillages d'armée. Écrits après une
+séance à supposer pourquoi le bâti paraissait plat : la géométrie était juste,
+seules les proportions étaient trop basses. Mesurer a tranché en un appel.
+
+⚠️ **Le banc d'essai rend à moins d'une image par seconde** (GL logiciel
+swiftshader). Les aides de Playwright qui attendent deux images stables —
+`scrollIntoViewIfNeeded` en tête — expirent donc sans que l'application n'ait
+rien à se reprocher. Les suites scrollent au niveau du DOM. Ce plancher ne dit
+rien des performances sur un vrai GPU.
+
+### Le banc d'essai se régénère
+
+`_app_test.js` et `_index_test.html` sont **produits** à partir de `app.js` et
+`index.html` par `gen.mjs` (dans le dossier de travail, hors dépôt), qui y greffe
+la doublure Firebase et quelques sondes. Les recopier à la main revient tôt ou
+tard à tester une version périmée de l'application.
 
 ## Écritures optimistes · pourquoi le mock de test est asynchrone
 
