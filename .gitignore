@@ -1,0 +1,7 @@
+node_modules/
+package-lock.json
+
+# Harnais de test généré (voir README) — jamais versionné
+_app_test.js
+_index_test.html
+_mock-firebase-config.js

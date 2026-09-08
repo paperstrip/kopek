@@ -14,7 +14,8 @@ import {
   serverTimestamp,
   setDoc,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-03-12';
+} from './firebase-config.js?v=2026-09-03-13';
+import * as GAMEJS from './game.js?v=2026-09-03-13';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -262,6 +263,7 @@ function initApp() {
     bindTopBar();
     bindHoursWizard();
     bindModals();
+    bindGameUi();
     appBound = true;
   }
   subscribeData();
@@ -306,6 +308,11 @@ function navigateMonth(delta) {
 // =============================================================
 // 🗃️ FIRESTORE CRUD
 // =============================================================
+// Le jeu vit dans son propre document, séparé des prestations. Une partie
+// perdue ou corrompue ne peut donc rien casser côté facturation.
+const GAME = { state: null, tiles: null, selected: null, loaded: false, dirty: false };
+const gameDocRef = () => doc(db, 'game_state', STATE.user.uid);
+
 const colClients   = () => collection(db, 'clients');
 const colTimeLogs  = () => collection(db, 'time_logs');
 
@@ -322,6 +329,7 @@ const colTimeLogs  = () => collection(db, 'time_logs');
 let unsubClients = null;
 let unsubLogs = null;
 let seedingDefaultProject = false;
+let unsubGame = null;
 
 function toMillisSafe(tsOrDate) {
   const d = toDateSafe(tsOrDate);
@@ -331,6 +339,9 @@ function toMillisSafe(tsOrDate) {
 function teardownData() {
   if (unsubClients) { unsubClients(); unsubClients = null; }
   if (unsubLogs) { unsubLogs(); unsubLogs = null; }
+  if (unsubGame) { unsubGame(); unsubGame = null; }
+  clearTimeout(gameTickTimer); clearTimeout(gameSaveTimer);
+  GAME.state = null; GAME.tiles = null; GAME.selected = null; GAME.loaded = false;
   STATE.clients = []; STATE.allLogs = []; STATE.logs = [];
   STATE.clientsLoaded = false;
   STATE.dataTimeout = false;
@@ -387,6 +398,16 @@ function subscribeData() {
     }
     renderAll();
   }, (err) => onReadError('Lecture des projets impossible', err));
+
+  unsubGame = onSnapshot(gameDocRef(), (snap) => {
+    const remote = snap.exists() ? snap.data() : null;
+    adoptGameState(remote);
+  }, (err) => {
+    // Une partie illisible ne doit jamais empêcher d'encoder : on démarre une
+    // partie locale et on signale, sans bloquer le reste de l'application.
+    console.warn('[kopek] partie illisible', err);
+    adoptGameState(null);
+  });
 
   const qLogs = query(colTimeLogs(), where('userId', '==', uid));
   unsubLogs = onSnapshot(qLogs, (snap) => {
@@ -863,90 +884,268 @@ function renderNessyGauge(agg) {
 }
 
 // =================================================================
-// 🎮 KOPEK CITY · vraie 3D low-poly (Three.js) pilotée par la jauge
+// ⚔️  LES MARCHES DE NESSY · le jeu
+// -----------------------------------------------------------------
+// Règle intangible : le jeu LIT les heures encodées, il ne les écrit jamais.
+// Aucune action de jeu ne peut modifier une prestation, un projet ou la
+// facturation. Le sens unique est garanti ici, pas par convention.
 // =================================================================
-// Le module 3D est chargé DYNAMIQUEMENT et son échec est non-fatal : si WebGL est
-// indisponible ou si un fichier de vendor/three ne se sert pas (Jekyll, cache, réseau),
-// le time-tracking doit continuer à fonctionner normalement.
-let cityMod = null;
-let cityStatus = 'idle';   // idle | loading | ready | failed
-let cityInited = false;
-let lastBonusHFlag = 0;
-let lastAggForCity = null;
+let gameMod = null;
+let gameStatus = 'idle';      // idle | loading | ready | failed
+let gameSaveTimer = null;
+let gameTickTimer = null;
+let lastAggForGame = null;
 
-function showCityFallback(msg) {
-  const el = document.getElementById('city-fallback');
+function showGameFallback(msg) {
+  const el = document.getElementById('game-fallback');
   if (!el) return;
   el.classList.remove('hidden');
-  const detail = document.getElementById('city-fallback-detail');
+  const detail = document.getElementById('game-fallback-detail');
   if (detail && msg) detail.textContent = msg;
 }
 
-async function ensureCityLoaded() {
-  if (cityStatus === 'ready' || cityStatus === 'loading' || cityStatus === 'failed') return;
-  cityStatus = 'loading';
+function gameToast(msg, ok = true) {
+  const el = document.getElementById('g-toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `absolute left-1/2 -translate-x-1/2 top-24 sm:top-28 z-20 rounded-xl px-3.5 py-2 text-[12px] font-semibold backdrop-blur-xl border shadow-lg ${
+    ok ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-100'
+       : 'bg-red-500/20 border-red-400/40 text-red-100'}`;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.add('hidden'), 2600);
+}
+
+/**
+ * Adopte l'état venu de Firestore. Nos propres écritures nous reviennent par le
+ * même écouteur : sans garde, l'écho écraserait les coups joués entre-temps.
+ * On ne prend le distant que s'il est réellement plus récent que ce qu'on tient.
+ */
+function adoptGameState(remote) {
+  const valid = remote && typeof remote.seed === 'string' && remote.version === 1;
+  if (!valid) {
+    if (GAME.state) return;              // partie déjà en cours localement
+    GAME.state = GAMEJS.newGameState(STATE.user.uid, Date.now());
+    GAME.tiles = GAMEJS.hydrate(GAME.state);
+    GAME.loaded = true;
+    saveGameNow();                        // on grave la première partie tout de suite
+  } else {
+    const mine = GAME.state;
+    if (mine && (remote.savedAt || 0) <= (mine.savedAt || 0)) return;
+    const { userId, ...clean } = remote;
+    GAME.state = clean;
+    GAME.tiles = GAMEJS.hydrate(GAME.state);
+    GAME.loaded = true;
+  }
+  GAME.selected = null;
+  runCatchUp();
+  ensureGameLoaded();
+  drawGame();
+  renderGameHud();
+}
+
+async function ensureGameLoaded() {
+  if (gameStatus !== 'idle') return;
+  gameStatus = 'loading';
   try {
-    cityMod = await import('./city3d.js?v=2026-09-03-12');
-    const canvas = document.getElementById('city-canvas');
-    if (!canvas) throw new Error('canvas #city-canvas introuvable');
-    cityMod.initCity(canvas);
-    cityInited = true;
-    cityStatus = 'ready';
-    if (lastAggForCity) renderCity3D(lastAggForCity);
+    gameMod = await import('./world3d.js?v=2026-09-03-13');
+    const canvas = document.getElementById('game-canvas');
+    if (!canvas) throw new Error('canvas #game-canvas introuvable');
+    gameMod.initWorld(canvas, { onSelect: onTileSelected });
+    gameStatus = 'ready';
+    drawGame();
   } catch (ex) {
-    cityStatus = 'failed';
-    console.error('Kopek City 3D indisponible', ex);
-    showCityFallback(ex && ex.message ? ex.message : String(ex));
+    gameStatus = 'failed';
+    console.error('[kopek] archipel 3D indisponible', ex);
+    showGameFallback(ex && ex.message ? ex.message : String(ex));
   }
 }
 
-function renderCity3D(agg) {
-  if (cityStatus !== 'ready' || !cityMod) return;
-  try {
-    const caps = { socleH: NESSY.socleHours, garantieH: NESSY.minHoursEq };
-    // Seed stable par mois calendaire (indépendant du contrat) → thème/agencement
-    // différent chaque mois, mais identique si on revient sur le même mois.
-    const seedKey = STATE.selectedYear * 12 + STATE.selectedMonth;
-    cityMod.renderCityScene(agg, caps, seedKey);
-
-    const bonusH = agg.tiers?.t3?.h || 0;
-    if (bonusH > 0.01 && lastBonusHFlag <= 0.01) cityMod.celebrate();
-    lastBonusHFlag = bonusH;
-  } catch (ex) {
-    cityStatus = 'failed';
-    console.error('Kopek City 3D · erreur de rendu', ex);
-    showCityFallback(ex && ex.message ? ex.message : String(ex));
-  }
+/** Total d'heures facturées, toutes périodes confondues — la source des Sceaux. */
+function totalBilledHours() {
+  return STATE.allLogs.reduce((a, l) => a + (l.billed_minutes || 0), 0) / 60;
 }
 
-/** HUD = DOM pur : il doit toujours afficher les bons chiffres, même si la 3D échoue. */
-function renderCity(agg) {
-  lastAggForCity = agg;
-  ensureCityLoaded();
-  renderCity3D(agg);
+/** Heures du mois affiché — la source du bonus d'assaut. */
+function monthBilledHours(agg) {
+  return agg ? (agg.mainBilledMinutes || 0) / 60 : 0;
+}
 
-  const bonusH = agg.tiers?.t3?.h || 0;
+function drawGame() {
+  if (gameStatus !== 'ready' || !gameMod || !GAME.state || !GAME.tiles) return;
+  const agg = lastAggForGame;
+  // La capitale grandit exactement comme la ville d'avant : à la progression du
+  // mois vers la garantie. Le jeu ne change rien à ce calcul.
+  const progress = agg ? Math.min(1.6, (agg.refundedH || 0) / NESSY.minHoursEq) : 0;
+  gameMod.renderWorld({ tiles: GAME.tiles, capitalProgress: progress, selected: GAME.selected });
+}
+
+function renderGameHud() {
   const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  const socleH = NESSY.socleHours, fullH = NESSY.minHoursEq;
-  const refunded = agg.refundedH || 0;
-  const soclePct = Math.min(100, (refunded / socleH) * 100);
-  const garantiPct = refunded >= socleH ? Math.min(100, ((refunded - socleH) / (fullH - socleH)) * 100) : 0;
-  const population = Math.round(150 + refunded * 28 + bonusH * 60 + agg.secondaryEur / 8);
-  setText('hud-socle', `${soclePct.toFixed(0)} %`);
-  setText('hud-garanti', `${garantiPct.toFixed(0)} %`);
-  setText('hud-bonus', `+${FR(bonusH, 1)} h`);
-  setText('hud-pop', population.toLocaleString('fr-BE') + ' hab.');
-  setText('hud-acquis', EUR(agg.hasAnyNessy ? agg.minG : 0));
-  setText('hud-ca-bonus', EUR(agg.bonusEur || 0));
-  const bar = document.getElementById('hud-bar');
-  const pctForBar = Math.min(120, (refunded / fullH) * 100 + Math.min(30, (bonusH / 24) * 30));
-  if (bar) bar.style.width = `${pctForBar}%`;
-  const label = document.getElementById('hud-label');
-  if (label) {
-    if (!agg.hasAnyNessy) label.textContent = 'Contrat principal non activé sur la période';
-    else if (refunded < fullH) label.textContent = `Engagement ${FR(refunded)} / ${FR(fullH)} h · reste ${FR(agg.debtRemainH)} h`;
-    else label.textContent = `Engagement validé · Bonus ${EUR(agg.bonusEur || 0)} · Surplus ${FR(bonusH, 1)} h`;
+  if (!GAME.state || !GAME.tiles) return;
+  const hoursTotal = totalBilledHours();
+  const rank = GAMEJS.rankOf(GAME.tiles, hoursTotal);
+  setText('g-rank', rank.label);
+  const owned = GAMEJS.ownedTiles(GAME.tiles).length;
+  setText('g-rank-next', rank.next
+    ? `${owned} territoire${owned > 1 ? 's' : ''} · ${rank.next.label} à ${rank.next.tiles} territoires et ${FR(rank.next.hours, 0)} h`
+    : `${owned} territoires · rang maximal`);
+  setText('g-or', Math.floor(GAME.state.or));
+  setText('g-vivres', Math.floor(GAME.state.vivres));
+  setText('g-sceaux', GAMEJS.sceauxAvailable(GAME.state, hoursTotal));
+
+  const bonus = GAMEJS.warBonus(monthBilledHours(lastAggForGame), NESSY.socleHours, NESSY.minHoursEq);
+  const el = document.getElementById('g-bonus');
+  if (el) {
+    el.textContent = bonus.pct > 0 ? `Assaut +${bonus.pct} % · ${bonus.label}` : 'Aucun bonus · sous le socle';
+    el.className = `rounded-xl px-2.5 py-1 backdrop-blur-xl bg-zinc-950/70 border text-[10px] font-semibold ${
+      bonus.tier === 2 ? 'border-fuchsia-400/40 text-fuchsia-300'
+      : bonus.tier === 1 ? 'border-indigo-400/40 text-indigo-300'
+      : 'border-white/10 text-zinc-400'}`;
   }
+
+  const body = document.getElementById('g-log-body');
+  if (body) {
+    const entries = GAME.state.log || [];
+    body.innerHTML = entries.length
+      ? entries.slice(0, 20).map((e) => `<div class="text-[10px] leading-snug ${
+          e.kind === 'bad' ? 'text-red-300' : e.kind === 'good' ? 'text-emerald-300' : 'text-zinc-400'
+        }">${escapeHtml(e.text)}</div>`).join('')
+      : '<div class="text-[10px] text-zinc-500">Rien à raconter pour l\'instant.</div>';
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function onTileSelected(sel) {
+  GAME.selected = sel;
+  if (gameMod && gameStatus === 'ready') gameMod.setSelected(sel);
+  renderTilePanel();
+}
+
+function renderTilePanel() {
+  const panel = document.getElementById('g-tile-panel');
+  if (!panel || !GAME.tiles) return;
+  const sel = GAME.selected;
+  const t = sel ? GAME.tiles[GAMEJS.tileKey(sel.q, sel.r)] : null;
+  if (!t) { panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+
+  const ter = GAMEJS.TERRAINS[t.terrain];
+  const ownerLabel = t.capital ? 'Votre capitale'
+    : t.owner === 'joueur' ? 'À vous'
+    : t.owner ? (GAMEJS.CLANS.find((c) => c.key === t.owner)?.label || t.owner)
+    : t.neutralGarrison ? 'Repaire hostile'
+    : 'Territoire libre';
+  const troops = t.owner ? (t.garrison || 0) : (t.neutralGarrison || 0);
+  const bName = GAMEJS.BUILDINGS[t.building]?.label;
+
+  $('#g-tile-title').textContent = `${ter.label} · ${ownerLabel}`;
+  $('#g-tile-sub').textContent = [
+    `Défense +${GAMEJS.tileDefense(t)} %`,
+    troops ? `${troops} troupe${troops > 1 ? 's' : ''}` : null,
+    bName || null,
+  ].filter(Boolean).join(' · ');
+
+  const hoursTotal = totalBilledHours();
+  const actions = GAMEJS.actionsFor(GAME.state, GAME.tiles, t, hoursTotal);
+  const wrap = $('#g-tile-actions');
+  wrap.innerHTML = actions.map((a, i) => {
+    const cost = a.sceaux ? `${a.sceaux} sceaux`
+      : a.cost ? [a.cost.or ? `${a.cost.or} or` : null, a.cost.vivres ? `${a.cost.vivres} vivres` : null].filter(Boolean).join(' · ')
+      : a.defenders != null ? `${a.defenders} défenseur${a.defenders > 1 ? 's' : ''}` : '';
+    return `<button type="button" data-act="${i}" ${a.enabled ? '' : 'disabled'}
+      class="rounded-xl px-2.5 py-2 text-left border transition text-[11px] font-semibold
+             ${a.enabled ? 'bg-white/5 border-white/15 text-zinc-100 hover:bg-white/10 active:scale-[0.98]'
+                         : 'bg-white/[0.02] border-white/5 text-zinc-600 cursor-not-allowed'}">
+      <span class="block">${escapeHtml(a.label)}</span>
+      <span class="block text-[9px] font-mono opacity-70 mt-0.5">${escapeHtml(cost)}</span>
+    </button>`;
+  }).join('') || '<div class="col-span-2 text-[11px] text-zinc-500">Aucune action possible ici.</div>';
+
+  wrap.querySelectorAll('button[data-act]').forEach((b) => {
+    b.addEventListener('click', () => runGameAction(actions[Number(b.getAttribute('data-act'))], t));
+  });
+}
+
+function runGameAction(a, t) {
+  if (!a || !GAME.state) return;
+  const hoursTotal = totalBilledHours();
+  let res;
+  if (a.kind === 'build') res = GAMEJS.build(GAME.state, GAME.tiles, t.q, t.r, a.key);
+  else if (a.kind === 'recruit') res = GAMEJS.recruit(GAME.state, GAME.tiles, t.q, t.r, 1);
+  else if (a.kind === 'elite') res = GAMEJS.recruitElite(GAME.state, GAME.tiles, t.q, t.r, hoursTotal);
+  else if (a.kind === 'colonise') res = GAMEJS.colonise(GAME.state, GAME.tiles, t.q, t.r);
+  else if (a.kind === 'attack') {
+    if (!a.from) { gameToast('Aucune troupe voisine pour lancer l\'assaut.', false); return; }
+    res = GAMEJS.attack(GAME.state, GAME.tiles, a.from.q, a.from.r, t.q, t.r, monthBilledHours(lastAggForGame));
+    if (res.ok) {
+      gameToast(res.win ? 'Territoire conquis !' : 'Assaut repoussé…', res.win);
+    }
+  }
+  if (!res) return;
+  if (!res.ok) { gameToast(res.error, false); return; }
+  if (a.kind !== 'attack') gameToast(`${a.label} · fait`, true);
+  afterGameChange();
+}
+
+/** Un seul point de sortie après toute modification : redessiner puis sauver. */
+function afterGameChange() {
+  drawGame();
+  renderGameHud();
+  renderTilePanel();
+  scheduleGameSave();
+}
+
+// Les actions s'enchaînent vite (construire, recruter, attaquer) : on regroupe
+// les écritures plutôt que d'en envoyer une par clic.
+function scheduleGameSave() {
+  clearTimeout(gameSaveTimer);
+  gameSaveTimer = setTimeout(saveGameNow, 900);
+}
+
+function saveGameNow() {
+  if (!STATE.user || !GAME.state) return;
+  // On horodate AVANT d'écrire et on garde la même valeur en local : l'écho de
+  // notre propre écriture est ainsi reconnu comme « pas plus récent » et ignoré.
+  GAME.state.savedAt = Date.now();
+  writeInBackground(
+    setDoc(gameDocRef(), { userId: STATE.user.uid, ...GAME.state }),
+    'Sauvegarde de la partie impossible',
+  );
+}
+
+/** Rattrape la production hors ligne, puis programme le prochain tour. */
+function runCatchUp() {
+  if (!GAME.state || !GAME.tiles) return;
+  const sum = GAMEJS.catchUp(GAME.state, GAME.tiles, Date.now());
+  if (sum.ticks > 0) {
+    afterGameChange();
+    if (sum.attacks.some((a) => a.lost)) gameToast('Un territoire est tombé pendant votre absence.', false);
+    else if (sum.or > 0) gameToast(`+${sum.or} or récoltés en votre absence`, true);
+  }
+  clearTimeout(gameTickTimer);
+  const msLeft = GAMEJS.TICK_MS - ((Date.now() - GAME.state.lastTick) % GAMEJS.TICK_MS);
+  gameTickTimer = setTimeout(runCatchUp, Math.max(5000, msLeft));
+}
+
+function bindGameUi() {
+  $('#g-tile-close')?.addEventListener('click', () => {
+    GAME.selected = null;
+    if (gameMod && gameStatus === 'ready') gameMod.setSelected(null);
+    document.getElementById('g-tile-panel')?.classList.add('hidden');
+  });
+  $('#g-log-toggle')?.addEventListener('click', () => {
+    document.getElementById('g-log-body')?.classList.toggle('hidden');
+  });
+}
+
+/** Appelé à chaque rendu du tableau de bord. */
+function renderCity(agg) {
+  lastAggForGame = agg;
+  ensureGameLoaded();
+  if (GAME.state) { drawGame(); renderGameHud(); }
 }
 
 function renderMetrics(agg) {
