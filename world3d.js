@@ -38,7 +38,7 @@ const PALETTE = {
 };
 
 let renderer, scene, camera, controls, clock, raf = null;
-let canvasEl, worldGroup, decorGroup, markerGroup, seaMesh;
+let canvasEl, worldGroup, decorGroup, markerGroup, armyGroup, reachGroup, seaMesh;
 let seaWaves = null;
 let envReady = false;
 let sun, hemi;
@@ -305,6 +305,15 @@ function buildSharedGeometries() {
   GEO.flag = new THREE.PlaneGeometry(0.36, 0.22, 6, 4);
   wave(GEO.flag);
 
+  // Pion d'armée : un fanion sur socle, lisible de loin même à petite taille.
+  GEO.armyBase = new THREE.CylinderGeometry(0.3, 0.34, 0.1, 18);
+  GEO.armyMast = lathe([[0.035, 0], [0.03, 0.5], [0.025, 0.62]], 10);
+  GEO.armyFlag = new THREE.PlaneGeometry(0.42, 0.26, 8, 4);
+  wave(GEO.armyFlag);
+  // Disque de portée posé à plat sur la tuile.
+  GEO.reach = new THREE.CircleGeometry((HEX - GAP) * 0.8, 24);
+  GEO.reach.rotateX(-Math.PI / 2);
+
   GEO.ring = new THREE.TorusGeometry(HEX - GAP - 0.02, 0.045, 10, 40);
   GEO.ring.rotateX(-Math.PI / 2);
 }
@@ -557,6 +566,11 @@ function buildSharedMaterials() {
   CLANS.forEach((c) => { MAT.clan[c.key] = mat(c.color, { roughness: 0.6 }); });
   MAT.player = mat(PALETTE.joueur, { roughness: 0.5 });
   MAT.ringSel = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.9 });
+  // Portée : bleu pour un déplacement, rouge pour un assaut. La couleur dit
+  // ce qui va se passer avant qu'on touche.
+  MAT.reachMove = new THREE.MeshBasicMaterial({ color: '#5eb0ff', transparent: true, opacity: 0.35, depthWrite: false });
+  MAT.reachAttack = new THREE.MeshBasicMaterial({ color: '#ff5a5a', transparent: true, opacity: 0.4, depthWrite: false });
+  MAT.armyBase = mat('#3d3a35', { roughness: 0.9 });
 }
 
 function skyTexture() {
@@ -626,6 +640,8 @@ export function initWorld(canvas, { onSelect } = {}) {
   worldGroup = new THREE.Group(); scene.add(worldGroup);
   decorGroup = new THREE.Group(); scene.add(decorGroup);
   markerGroup = new THREE.Group(); scene.add(markerGroup);
+  armyGroup = new THREE.Group(); scene.add(armyGroup);
+  reachGroup = new THREE.Group(); scene.add(reachGroup);
 
   seaMesh = new THREE.Mesh(
     new THREE.CircleGeometry(90, 96),
@@ -710,6 +726,8 @@ function rngFrom(q, r) {
  *  n'y entrent, seulement la géographie et l'état des territoires. */
 function worldSignature(p) {
   let sig = Math.round((p.capitalProgress ?? 0) * 40) + '|';
+  (p.armies || []).forEach((a) => { sig += `${a.id}${a.q},${a.r}:${a.str}:${a.mp};`; });
+  sig += '|' + (p.reach ? [...p.reach.keys()].join(',') : '') + '|';
   const tiles = p.tiles || {};
   for (const k in tiles) {
     const t = tiles[k];
@@ -769,7 +787,64 @@ export function renderWorld(p, { force = false } = {}) {
     decorateTile(t, x, y, z, rng, p);
   });
 
+  drawArmies(p);
+  drawReach(p);
   placeSelection(p.selected, tiles);
+}
+
+/**
+ * Les armées sont dessinées dans leur propre groupe : elles bougent souvent,
+ * il serait absurde de reconstruire tout l'archipel à chaque pas.
+ */
+function drawArmies(p) {
+  clearGroup(armyGroup);
+  const tiles = p.tiles || {};
+  (p.armies || []).forEach((a) => {
+    const t = tiles[tileKey(a.q, a.r)];
+    if (!t || !t.revealed) return;                 // pas d'armée visible dans la brume
+    const { x, z } = axialToWorld(a.q, a.r, HEX);
+    const y = GEO.tileTop + 0.02;
+    const mat = a.owner === 'joueur' ? MAT.player : (MAT.clan[a.owner] || MAT.player);
+
+    const base = new THREE.Mesh(GEO.armyBase, MAT.armyBase);
+    base.position.set(x, y + 0.05, z);
+    base.castShadow = true;
+    armyGroup.add(base);
+
+    const mast = new THREE.Mesh(GEO.armyMast, MAT.pole);
+    mast.position.set(x, y + 0.1, z);
+    mast.castShadow = true;
+    armyGroup.add(mast);
+
+    const flag = new THREE.Mesh(GEO.armyFlag, mat);
+    flag.material.side = THREE.DoubleSide;
+    flag.position.set(x + 0.2, y + 0.58, z);
+    flag.rotation.y = -0.5;
+    flag.castShadow = true;
+    armyGroup.add(flag);
+
+    // Un jeton par troupe, en arc devant le fanion : la force se lit d'un coup.
+    for (let i = 0; i < Math.min(6, a.str); i++) {
+      const ang = -0.9 + (i / 5) * 1.8;
+      const pion = new THREE.Mesh(GEO.troop, mat);
+      pion.position.set(x + Math.sin(ang) * 0.26, y + 0.16, z + Math.cos(ang) * 0.26 - 0.05);
+      pion.castShadow = true;
+      armyGroup.add(pion);
+    }
+  });
+}
+
+/** Cases atteignables par l'armée sélectionnée. */
+function drawReach(p) {
+  clearGroup(reachGroup);
+  const cells = p.reach;
+  if (!cells) return;
+  cells.forEach((info) => {
+    const { x, z } = axialToWorld(info.q, info.r, HEX);
+    const disc = new THREE.Mesh(GEO.reach, info.attack ? MAT.reachAttack : MAT.reachMove);
+    disc.position.set(x, GEO.tileTop + 0.03, z);
+    reachGroup.add(disc);
+  });
 }
 
 function decorateTile(t, x, y, z, rng, p) {
@@ -1072,6 +1147,25 @@ export function debugMeshesAt(x = 0, z = 0, radius = 1) {
       yRange: [+box.min.y.toFixed(3), +box.max.y.toFixed(3)],
     });
   });
+  return out;
+}
+
+/** État réel des matières : la texture est-elle chargée, et à quelle teinte ? */
+export function debugMaterials() {
+  const out = {};
+  const put = (name, m) => {
+    if (!m) return;
+    out[name] = {
+      map: m.map ? (m.map.image ? `${m.map.image.width}x${m.map.image.height}` : 'en attente') : 'aucune',
+      bump: m.bumpMap ? (m.bumpMap.image ? 'chargé' : 'en attente') : 'aucun',
+      teinte: m.color ? '#' + m.color.getHexString() : '-',
+    };
+  };
+  Object.entries(MAT.ground || {}).forEach(([k, m]) => put('sol.' + k, m));
+  put('mur', MAT.wall); put('roche', MAT.rock); put('flanc', MAT.flanc);
+  put('feuillage', MAT.leaf && MAT.leaf[0]);
+  out._environnement = envReady ? 'HDR appliqué' : 'HDR absent';
+  out._texturesDemandees = texturesReady;
   return out;
 }
 

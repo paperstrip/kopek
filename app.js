@@ -310,7 +310,7 @@ function navigateMonth(delta) {
 // =============================================================
 // Le jeu vit dans son propre document, séparé des prestations. Une partie
 // perdue ou corrompue ne peut donc rien casser côté facturation.
-const GAME = { state: null, tiles: null, selected: null, loaded: false, dirty: false };
+const GAME = { state: null, tiles: null, selected: null, army: null, loaded: false, dirty: false };
 const gameDocRef = () => doc(db, 'game_state', STATE.user.uid);
 
 const colClients   = () => collection(db, 'clients');
@@ -937,6 +937,7 @@ function adoptGameState(remote) {
     GAME.loaded = true;
   }
   GAME.selected = null;
+  GAME.army = null;
   GAMEJS.checkObjectives(GAME.state, GAME.tiles);
   runCatchUp();
   ensureGameLoaded();
@@ -977,7 +978,16 @@ function drawGame() {
   // La capitale grandit exactement comme la ville d'avant : à la progression du
   // mois vers la garantie. Le jeu ne change rien à ce calcul.
   const progress = agg ? Math.min(1.6, (agg.refundedH || 0) / NESSY.minHoursEq) : 0;
-  gameMod.renderWorld({ tiles: GAME.tiles, capitalProgress: progress, selected: GAME.selected });
+  const army = GAME.army ? GAMEJS.armyById(GAME.state, GAME.army) : null;
+  gameMod.renderWorld({
+    tiles: GAME.tiles,
+    capitalProgress: progress,
+    selected: GAME.selected,
+    armies: GAME.state.armies || [],
+    // La portée n'est calculée que pour l'armée sélectionnée : c'est elle qui
+    // dit au joueur ce qu'il peut faire, et rien d'autre ne doit s'allumer.
+    reach: army ? GAMEJS.reachable(GAME.state, GAME.tiles, army) : null,
+  });
 }
 
 function renderGameHud() {
@@ -1032,9 +1042,51 @@ function escapeHtml(s) {
 }
 
 function onTileSelected(sel) {
+  if (!GAME.state) return;
+  const key = GAMEJS.tileKey(sel.q, sel.r);
+
+  // Une armée est sélectionnée : le toucher suivant est un ordre de marche.
+  // C'est la boucle entière du jeu — sélectionner, voir la portée, ordonner.
+  if (GAME.army) {
+    const army = GAMEJS.armyById(GAME.state, GAME.army);
+    if (army && (army.q !== sel.q || army.r !== sel.r)) {
+      const portee = GAMEJS.reachable(GAME.state, GAME.tiles, army);
+      if (portee.has(key)) { orderMove(army, sel); return; }
+    }
+    if (army && army.q === sel.q && army.r === sel.r) { deselectArmy(); return; }
+  }
+
+  const surPlace = GAMEJS.armyAt(GAME.state, sel.q, sel.r);
+  GAME.army = surPlace && surPlace.owner === 'joueur' ? surPlace.id : null;
   GAME.selected = sel;
   if (gameMod && gameStatus === 'ready') gameMod.setSelected(sel);
+  drawGame();
   renderTilePanel();
+}
+
+function deselectArmy() {
+  GAME.army = null;
+  drawGame();
+  renderTilePanel();
+}
+
+/** Exécute l'ordre et raconte ce qui s'est passé. */
+function orderMove(army, sel) {
+  const res = GAMEJS.moveArmy(GAME.state, GAME.tiles, army.id,
+    sel.q, sel.r, monthBilledHours(lastAggForGame));
+  if (!res.ok) { gameToast(res.error, false); return; }
+  if (res.attacked) {
+    const bonus = res.bonus.pct ? ` · bonus heures +${res.bonus.pct} %` : '';
+    gameToast(res.win
+      ? `${res.defenders} défenseurs balayés${bonus} · territoire pris, ${res.attackers} survivants`
+      : `Assaut brisé sur ${res.defenders} défenseurs${bonus} · armée perdue`, res.win);
+    if (!res.win) GAME.army = null;
+  } else {
+    GAME.selected = { q: sel.q, r: sel.r };
+    if (gameMod && gameStatus === 'ready') gameMod.setSelected(GAME.selected);
+    if (army.mp <= 0) gameToast('Armée à bout de souffle · elle repart au prochain tour', true);
+  }
+  afterGameChange();
 }
 
 function renderTilePanel() {
@@ -1064,7 +1116,9 @@ function renderTilePanel() {
   const bName = GAMEJS.BUILDINGS[t.building]?.label;
 
   $('#g-tile-title').textContent = `${ter.label} · ${ownerLabel}`;
+  const armeeIci = GAMEJS.armyAt(GAME.state, t.q, t.r);
   $('#g-tile-sub').textContent = [
+    armeeIci ? `Armée de ${armeeIci.str} · ${armeeIci.mp} déplacement${armeeIci.mp > 1 ? 's' : ''}` : null,
     `Défense +${GAMEJS.tileDefense(t)} %`,
     troops ? `${troops} troupe${troops > 1 ? 's' : ''}` : null,
     bName || null,
@@ -1075,8 +1129,9 @@ function renderTilePanel() {
   const wrap = $('#g-tile-actions');
   wrap.innerHTML = actions.map((a, i) => {
     const cost = a.sceaux ? `${a.sceaux} sceaux`
+      : a.troupes ? `${a.troupes} troupes de la garnison`
       : a.cost ? [a.cost.or ? `${a.cost.or} or` : null, a.cost.vivres ? `${a.cost.vivres} vivres` : null].filter(Boolean).join(' · ')
-      : a.defenders != null ? `${a.defenders} défenseur${a.defenders > 1 ? 's' : ''}` : '';
+      : a.defenders != null ? `${a.attackers || 0} contre ${a.defenders}` : '';
     return `<button type="button" data-act="${i}" ${a.enabled ? '' : 'disabled'}
       class="rounded-xl px-2.5 py-2 text-left border transition text-[11px] font-semibold
              ${a.enabled ? 'bg-white/5 border-white/15 text-zinc-100 hover:bg-white/10 active:scale-[0.98]'
@@ -1099,6 +1154,23 @@ function runGameAction(a, t) {
   else if (a.kind === 'recruit') res = GAMEJS.recruit(GAME.state, GAME.tiles, t.q, t.r, 1);
   else if (a.kind === 'elite') res = GAMEJS.recruitElite(GAME.state, GAME.tiles, t.q, t.r, hoursTotal);
   else if (a.kind === 'colonise') res = GAMEJS.colonise(GAME.state, GAME.tiles, t.q, t.r);
+  else if (a.kind === 'raise') {
+    res = GAMEJS.raiseArmy(GAME.state, GAME.tiles, t.q, t.r, a.troupes);
+    if (res.ok) {
+      // On sélectionne l'armée aussitôt : sinon le joueur ne fait pas le lien
+      // entre le bouton qu'il vient d'appuyer et le pion qui apparaît.
+      const nouvelle = GAMEJS.armyAt(GAME.state, t.q, t.r);
+      if (nouvelle) GAME.army = nouvelle.id;
+      gameToast('Armée levée · touchez une case bleue pour la déplacer', true);
+    }
+  }
+  else if (a.kind === 'assault') {
+    if (!a.armyId) { gameToast('Aucune armée à portée. Levez-en une et approchez-la.', false); return; }
+    const army = GAMEJS.armyById(GAME.state, a.armyId);
+    GAME.army = a.armyId;
+    orderMove(army, { q: t.q, r: t.r });
+    return;
+  }
   else if (a.kind === 'attack') {
     if (!a.from) { gameToast('Aucune troupe voisine pour lancer l\'assaut.', false); return; }
     const troops = Math.max(0, (GAME.tiles[GAMEJS.tileKey(a.from.q, a.from.r)]?.garrison || 0) - 1);

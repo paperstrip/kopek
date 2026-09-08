@@ -10,7 +10,7 @@ Aucune étape de build n'est nécessaire pour la faire tourner : `index.html` pe
 |---|---|
 | `index.html` | Structure de la page (login + tableau de bord bento) |
 | `app.js` | Logique métier : paliers Nessy, CRUD Firestore, assistant d'encodage |
-| `game.js` | Règles du jeu — carte, ressources, combat, tours hors ligne. Aucun DOM, aucun Firestore : testable dans node |
+| `game.js` | Règles du jeu — carte, armées, ressources, combat, objectifs, tours hors ligne. Aucun DOM, aucun Firestore : testable dans node |
 | `world3d.js` | Rendu 3D de l'archipel (Three.js) — matières réelles et éclairage par image |
 | `assets/` | Textures et carte HDR embarquées — provenance et licences dans `assets/LICENCES.md` |
 | `firebase-config.js` | Initialisation Firebase Auth + Firestore |
@@ -147,6 +147,32 @@ carte vaste sans faire grossir la sauvegarde.
 Le rendu ne dessine que les tuiles révélées **et leur lisière** : sur 217
 tuiles, une partie neuve n'en affiche qu'une quarantaine. Le monde sort de la
 brume au lieu d'être un tapis d'hexagones gris.
+
+### Armées · le cœur du jeu
+
+Sans unité qu'on déplace soi-même, il n'y a pas de jeu : on touche un hexagone,
+on appuie sur un bouton, rien ne bouge. Une armée est une entité posée sur la
+carte (`state.armies`), avec des points de mouvement, qu'on sélectionne, dont on
+voit la portée en surbrillance, et qu'on déplace tuile par tuile.
+
+La boucle tient en une phrase : **recruter → lever une armée → la déplacer →
+entrer chez l'adversaire, c'est l'attaquer.**
+
+- `reachable()` fait un parcours en largeur borné par les points de mouvement.
+  Les cases hostiles sont marquées `attack` : on peut toujours frapper un
+  voisin, mais l'assaut consomme tout le mouvement restant — pas de raid en
+  chaîne dans le même tour.
+- Le rendu colore la portée : **bleu** pour un déplacement, **rouge** pour un
+  assaut. La couleur dit ce qui va se passer avant qu'on touche.
+- Lever une armée laisse toujours une troupe en garnison. Un territoire vidé
+  tomberait à la première incursion sans que le joueur comprenne pourquoi.
+- `clanTurn()` fait marcher les clans : ils lèvent des colonnes depuis leurs
+  places fortes et avancent d'un pas par tour vers le territoire joueur le plus
+  proche. Sans adversaire qui bouge, la carte est un décor.
+
+⚠️ Il n'y a **qu'un seul** système d'attaque. L'ancienne attaque de tuile à tuile
+depuis le panneau a été retirée : deux mécaniques concurrentes rendaient le jeu
+illisible.
 
 ### Objectifs · ce qui rend le jeu compréhensible
 

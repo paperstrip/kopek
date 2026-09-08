@@ -168,6 +168,8 @@ export function newGameState(seedStr, nowMs = Date.now()) {
     vivres: 40,
     wonFights: 0,
     objectivesDone: [],
+    armies: [],
+    armySeq: 0,
     sceaux: 0,
     sceauxSpent: 0,
     changes: {},        // seules les tuiles modifiées sont persistées
@@ -225,6 +227,229 @@ export function rankOf(tiles, hoursTotal) {
   return { ...current, index: idx, next: RANKS[idx + 1] || null };
 }
 
+// =============================================================
+// ⚔️  ARMÉES · le cœur du jeu
+// -------------------------------------------------------------
+// Sans unité qu'on déplace soi-même, il n'y a pas de jeu : on touche un
+// hexagone, on appuie sur un bouton, rien ne bouge. Une armée est une entité
+// posée sur la carte, avec des points de mouvement, qu'on sélectionne, dont on
+// voit la portée, et qu'on déplace tuile par tuile. Entrer chez l'adversaire,
+// c'est l'attaquer.
+// =============================================================
+export const ARMY_MP_MAX = 3;        // portée d'une armée reposée
+export const MP_PER_TICK = 1;        // points regagnés à chaque tour de production
+export const ARMY_MIN = 1;
+
+let armySeq = 0;
+function nextArmyId(state) {
+  state.armySeq = (state.armySeq || 0) + 1;
+  return 'a' + state.armySeq;
+}
+
+export function armiesOf(state, owner = 'joueur') {
+  return (state.armies || []).filter((a) => a.owner === owner);
+}
+export function armyAt(state, q, r) {
+  return (state.armies || []).find((a) => a.q === q && a.r === r);
+}
+export function armyById(state, id) {
+  return (state.armies || []).find((a) => a.id === id);
+}
+
+/** Sort des troupes de la garnison pour en faire une armée mobile. */
+export function raiseArmy(state, tiles, q, r, count = 2) {
+  const t = tiles[tileKey(q, r)];
+  if (!t) return { ok: false, error: 'Territoire inconnu.' };
+  if (t.owner !== 'joueur') return { ok: false, error: 'Ce territoire n’est pas à vous.' };
+  if (armyAt(state, q, r)) return { ok: false, error: 'Une armée occupe déjà ce territoire.' };
+  // On laisse toujours une troupe en garnison : un territoire vidé tomberait
+  // à la première incursion, et le joueur ne comprendrait pas pourquoi.
+  const dispo = (t.garrison || 0) - 1;
+  if (dispo < count) return { ok: false, error: `Il faut ${count + 1} troupes en garnison pour lever une armée de ${count}.` };
+  t.garrison -= count;
+  markChanged(state, t);
+  state.armies = state.armies || [];
+  state.armies.push({ id: nextArmyId(state), owner: 'joueur', q, r, str: count, mp: ARMY_MP_MAX });
+  pushLog(state, `Armée de ${count} levée.`, 'good');
+  return { ok: true };
+}
+
+/** Remet l'armée en garnison sur un territoire à soi. */
+export function disbandArmy(state, tiles, id) {
+  const a = armyById(state, id);
+  if (!a || a.owner !== 'joueur') return { ok: false, error: 'Armée inconnue.' };
+  const t = tiles[tileKey(a.q, a.r)];
+  if (!t || t.owner !== 'joueur') return { ok: false, error: 'Il faut être sur un de vos territoires.' };
+  t.garrison = (t.garrison || 0) + a.str;
+  markChanged(state, t);
+  state.armies = state.armies.filter((x) => x.id !== id);
+  pushLog(state, `Armée dissoute · ${a.str} troupes en garnison.`, 'info');
+  return { ok: true };
+}
+
+/** Peut-on traverser cette tuile sans combattre ? */
+function passable(state, tiles, t) {
+  if (!t) return false;
+  if (t.neutralGarrison) return false;
+  if (t.owner && t.owner !== 'joueur') return false;
+  return true;
+}
+
+/**
+ * Tuiles atteignables par l'armée, avec le coût en points de mouvement.
+ * C'est ce que le rendu met en surbrillance : sans portée visible, le joueur
+ * ne sait pas ce qu'il peut faire et n'ose rien.
+ */
+export function reachable(state, tiles, army) {
+  const out = new Map();
+  if (!army || army.mp <= 0) return out;
+  const start = tileKey(army.q, army.r);
+  const dist = new Map([[start, 0]]);
+  const queue = [[army.q, army.r]];
+  while (queue.length) {
+    const [q, r] = queue.shift();
+    const d = dist.get(tileKey(q, r));
+    if (d >= army.mp) continue;
+    for (const [nq, nr] of neighbors(q, r)) {
+      const k = tileKey(nq, nr);
+      const t = tiles[k];
+      if (!t || dist.has(k)) continue;
+      const hostile = !!t.neutralGarrison || (t.owner && t.owner !== 'joueur');
+      if (hostile) {
+        // On peut toujours attaquer une tuile voisine, mais l'assaut consomme
+        // tout le mouvement restant : pas de raid en chaîne dans le même tour.
+        out.set(k, { cost: army.mp, attack: true, q: nq, r: nr });
+        continue;
+      }
+      if (armyAt(state, nq, nr)) continue;      // une seule armée par tuile
+      if (!passable(state, tiles, t)) continue;
+      dist.set(k, d + 1);
+      out.set(k, { cost: d + 1, attack: false, q: nq, r: nr });
+      queue.push([nq, nr]);
+    }
+  }
+  return out;
+}
+
+/**
+ * Déplace l'armée. Sur une tuile hostile, c'est un assaut ; sur une tuile
+ * libre, l'armée l'occupe et la révèle autour d'elle.
+ */
+export function moveArmy(state, tiles, id, toQ, toR, hoursMonth = 0, rng = Math.random) {
+  const army = armyById(state, id);
+  if (!army || army.owner !== 'joueur') return { ok: false, error: 'Armée inconnue.' };
+  const target = reachable(state, tiles, army).get(tileKey(toQ, toR));
+  if (!target) return { ok: false, error: 'Hors de portée de cette armée.' };
+  const to = tiles[tileKey(toQ, toR)];
+
+  if (!target.attack) {
+    army.q = toQ; army.r = toR;
+    army.mp -= target.cost;
+    if (!to.revealed) { to.revealed = true; markChanged(state, to); }
+    revealAround(state, tiles, to);
+    state.armyMoves = (state.armyMoves || 0) + 1;
+    return { ok: true, moved: true };
+  }
+
+  // --- assaut ---
+  const bonus = warBonus(hoursMonth);
+  const defenders = to.owner ? (to.garrison || 0) : (to.neutralGarrison || 0);
+  const res = resolveCombat(army.str, defenders, tileDefense(to), bonus.pct, rng);
+  army.mp = 0;
+
+  if (res.win) {
+    const wasClan = to.owner;
+    army.str = res.attackerLeft;
+    army.q = toQ; army.r = toR;
+    to.owner = 'joueur';
+    to.garrison = 1;
+    army.str = Math.max(ARMY_MIN, res.attackerLeft - 1);
+    to.neutralGarrison = null;
+    to.revealed = true;
+    revealAround(state, tiles, to);
+    markChanged(state, to);
+    state.wonFights = (state.wonFights || 0) + 1;
+    pushLog(state, `Victoire ! ${TERRAINS[to.terrain].label} prise à l’assaut.`, 'good');
+    if (wasClan && !Object.values(tiles).some((x) => x.owner === wasClan)) {
+      state.defeated = [...new Set([...(state.defeated || []), wasClan])];
+      pushLog(state, `Le clan ${wasClan} est éliminé.`, 'good');
+    }
+    return { ok: true, attacked: true, win: true, result: res, bonus, attackers: army.str + 1, defenders };
+  }
+
+  state.armies = state.armies.filter((x) => x.id !== id);   // l'armée est détruite
+  if (to.owner) to.garrison = res.defenderLeft; else to.neutralGarrison = res.defenderLeft;
+  to.revealed = true;
+  markChanged(state, to);
+  pushLog(state, `Assaut brisé sur ${TERRAINS[to.terrain].label}.`, 'bad');
+  return { ok: true, attacked: true, win: false, result: res, bonus, attackers: 0, defenders };
+}
+
+/**
+ * Les clans lèvent des armées et marchent sur le joueur. C'est ce qui crée la
+ * tension : sans adversaire qui bouge, la carte est un décor.
+ */
+function clanTurn(state, tiles, rng) {
+  state.armies = state.armies || [];
+  const mine = ownedTiles(tiles);
+  if (!mine.length) return;
+
+  // Levée : une place forte bien garnie envoie une colonne.
+  const clanArmies = state.armies.filter((a) => a.owner !== 'joueur');
+  if (clanArmies.length < 4 && rng() < 0.25) {
+    const forts = Object.values(tiles).filter((t) => t.owner && t.owner !== 'joueur' && (t.garrison || 0) >= 5);
+    if (forts.length) {
+      const from = forts[Math.floor(rng() * forts.length)];
+      const str = 2 + Math.floor(rng() * 3);
+      from.garrison -= str;
+      markChanged(state, from);
+      state.armies.push({ id: nextArmyId(state), owner: from.owner, q: from.q, r: from.r, str, mp: 0 });
+    }
+  }
+
+  // Marche : un pas par tour vers le territoire joueur le plus proche.
+  state.armies.filter((a) => a.owner !== 'joueur').forEach((a) => {
+    let best = null, bestD = Infinity;
+    mine.forEach((t) => {
+      const d = hexDistance(a.q, a.r, t.q, t.r);
+      if (d < bestD) { bestD = d; best = t; }
+    });
+    if (!best) return;
+    if (bestD === 1) {
+      const target = best;
+      const res = resolveCombat(a.str, target.garrison || 0, tileDefense(target), 0, rng);
+      if (res.win) {
+        target.owner = a.owner;
+        target.garrison = Math.max(1, res.attackerLeft);
+        target.building = target.capital ? target.building : null;
+        a.q = target.q; a.r = target.r; a.str = 0;
+        pushLog(state, `${TERRAINS[target.terrain].label} tombée aux mains du clan ${a.owner}.`, 'bad');
+      } else {
+        target.garrison = res.defenderLeft;
+        pushLog(state, `Colonne du clan ${a.owner} brisée devant vos lignes.`, 'good');
+      }
+      markChanged(state, target);
+      a.str = res.win ? Math.max(1, res.attackerLeft) : 0;
+      return;
+    }
+    // Un pas dans la bonne direction, sans traverser le joueur.
+    const step = neighbors(a.q, a.r)
+      .map(([q, r]) => ({ q, r, t: tiles[tileKey(q, r)], d: hexDistance(q, r, best.q, best.r) }))
+      .filter((c) => c.t && !c.t.neutralGarrison && c.t.owner !== 'joueur' && !armyAt(state, c.q, c.r))
+      .sort((x, y) => x.d - y.d)[0];
+    if (step) { a.q = step.q; a.r = step.r; }
+  });
+
+  state.armies = state.armies.filter((a) => a.str > 0);
+}
+
+/** Recharge les points de mouvement — appelé une fois par tour de production. */
+function refreshArmies(state, ticks) {
+  (state.armies || []).forEach((a) => {
+    a.mp = Math.min(ARMY_MP_MAX, (a.mp || 0) + MP_PER_TICK * ticks);
+  });
+}
+
 // ---------- Objectifs · ce qui donne un but ------------------
 // Sans objectif affiché, le joueur ouvre l'écran, voit des hexagones et referme.
 // Chaque objectif est une phrase, une condition vérifiable et une récompense.
@@ -252,6 +477,13 @@ export const OBJECTIVES = [
     hint: 'Recrutez depuis un territoire équipé d’une caserne — votre capitale en a une.',
     done: (st, tiles) => ownedTiles(tiles).some((t) => (t.garrison || 0) >= 9),
     reward: { or: 70 },
+  },
+  {
+    key: 'armee_mobile',
+    label: 'Lever une armée et la déplacer',
+    hint: 'Sur un territoire à vous, « Lever une armée ». Touchez-la ensuite : les cases à sa portée s’allument.',
+    done: (st) => (st.armyMoves || 0) >= 1,
+    reward: { or: 90 },
   },
   {
     key: 'repaire',
@@ -406,6 +638,9 @@ export function catchUp(state, tiles, nowMs = Date.now()) {
       }
     }
   }
+
+  refreshArmies(state, ticks);
+  for (let i = 0; i < Math.min(ticks, 12); i++) clanTurn(state, tiles, rng);
 
   state.lastTick = (state.lastTick ?? nowMs) + ticks * TICK_MS;
   const summary = { ticks, or: gainedOr, vivres: gainedVivres, attacks, skipped: wanted - ticks };
@@ -587,18 +822,28 @@ export function actionsFor(state, tiles, t, hoursTotal) {
       kind: 'elite', label: 'Garde d’élite', sceaux: SCEAUX_PAR_ELITE,
       enabled: sceauxAvailable(state, hoursTotal) >= SCEAUX_PAR_ELITE,
     });
+    // Lever une armée est l'action qui fait entrer dans le jeu : c'est elle qui
+    // met une unité sur la carte, avec une portée et des déplacements.
+    if (!armyAt(state, t.q, t.r)) {
+      out.push({
+        kind: 'raise', label: 'Lever une armée', troupes: 2,
+        enabled: (t.garrison || 0) >= 3,
+      });
+    }
   } else if (!t.owner && !t.neutralGarrison) {
     out.push({
       kind: 'colonise', label: 'Coloniser', cost: COLONISE_COST,
       enabled: isAdjacentToPlayer(tiles, t) && canPay(state, COLONISE_COST),
     });
   } else {
-    const froms = neighbors(t.q, t.r)
-      .map(([nq, nr]) => tiles[tileKey(nq, nr)])
-      .filter((n) => n && n.owner === 'joueur' && (n.garrison || 0) >= 2);
+    // On n'attaque plus depuis un panneau : on amène une armée sur la case.
+    // Deux systèmes d'attaque concurrents rendaient le jeu illisible.
+    const proches = armiesOf(state).filter((a) => reachable(state, tiles, a).has(tileKey(t.q, t.r)));
     out.push({
-      kind: 'attack', label: 'Attaquer', enabled: froms.length > 0,
-      from: froms[0] ? { q: froms[0].q, r: froms[0].r } : null,
+      kind: 'assault', label: 'Attaquer avec une armée',
+      enabled: proches.length > 0,
+      armyId: proches[0] ? proches[0].id : null,
+      attackers: proches[0] ? proches[0].str : 0,
       defenders: t.owner ? (t.garrison || 0) : (t.neutralGarrison || 0),
     });
   }
