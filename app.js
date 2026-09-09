@@ -15,7 +15,7 @@ import {
   setDoc,
   onSnapshot,
 } from './firebase-config.js?v=2026-09-09-01';
-import * as GAMEJS from './game.js?v=2026-09-09-01';
+import { initThreeGame, updateCity, triggerLogEffect } from './three-game.js';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -236,14 +236,12 @@ $('#btn-logout').addEventListener('click', async () => {
 });
 
 let appBound = false;
+let threeInitialized = false;
 onAuthStateChanged(auth, (user) => {
   STATE.user = user;
   if (user) {
     $('#login-screen').classList.add('hidden');
     $('#dashboard-screen').classList.remove('hidden');
-    // NB : la visibilité de #auth-status est gérée par ses classes responsive
-    // (masqué sous sm) — on ne force plus `flex` ici, sinon la barre du haut
-    // déborde sur trois lignes au téléphone.
     $('#auth-email').textContent = user.email || '';
     initApp();
   } else {
@@ -263,7 +261,14 @@ function initApp() {
     bindTopBar();
     bindHoursWizard();
     bindModals();
-    bindGameUi();
+    if (!threeInitialized) {
+      try {
+        initThreeGame();
+        threeInitialized = true;
+      } catch (ex) {
+        console.warn('[kopek] init threejs échouée', ex);
+      }
+    }
     appBound = true;
   }
   subscribeData();
@@ -308,11 +313,6 @@ function navigateMonth(delta) {
 // =============================================================
 // 🗃️ FIRESTORE CRUD
 // =============================================================
-// Le jeu vit dans son propre document, séparé des prestations. Une partie
-// perdue ou corrompue ne peut donc rien casser côté facturation.
-const GAME = { state: null, tiles: null, selected: null, army: null, loaded: false, dirty: false };
-const gameDocRef = () => doc(db, 'game_state', STATE.user.uid);
-
 const colClients   = () => collection(db, 'clients');
 const colTimeLogs  = () => collection(db, 'time_logs');
 
@@ -329,7 +329,6 @@ const colTimeLogs  = () => collection(db, 'time_logs');
 let unsubClients = null;
 let unsubLogs = null;
 let seedingDefaultProject = false;
-let unsubGame = null;
 
 function toMillisSafe(tsOrDate) {
   const d = toDateSafe(tsOrDate);
@@ -339,9 +338,6 @@ function toMillisSafe(tsOrDate) {
 function teardownData() {
   if (unsubClients) { unsubClients(); unsubClients = null; }
   if (unsubLogs) { unsubLogs(); unsubLogs = null; }
-  if (unsubGame) { unsubGame(); unsubGame = null; }
-  clearTimeout(gameTickTimer); clearTimeout(gameSaveTimer);
-  GAME.state = null; GAME.tiles = null; GAME.selected = null; GAME.loaded = false;
   STATE.clients = []; STATE.allLogs = []; STATE.logs = [];
   STATE.clientsLoaded = false;
   STATE.dataTimeout = false;
@@ -398,16 +394,6 @@ function subscribeData() {
     }
     renderAll();
   }, (err) => onReadError('Lecture des projets impossible', err));
-
-  unsubGame = onSnapshot(gameDocRef(), (snap) => {
-    const remote = snap.exists() ? snap.data() : null;
-    adoptGameState(remote);
-  }, (err) => {
-    // Une partie illisible ne doit jamais empêcher d'encoder : on démarre une
-    // partie locale et on signale, sans bloquer le reste de l'application.
-    console.warn('[kopek] partie illisible', err);
-    adoptGameState(null);
-  });
 
   const qLogs = query(colTimeLogs(), where('userId', '==', uid));
   unsubLogs = onSnapshot(qLogs, (snap) => {
@@ -884,484 +870,88 @@ function renderNessyGauge(agg) {
 }
 
 // =================================================================
-// ⚔️  LES MARCHES DE NESSY · le jeu
+// 🏙️  KOPEK · CITY BUILDER 3D · jeu Three.js SimCity
 // -----------------------------------------------------------------
-// Règle intangible : le jeu LIT les heures encodées, il ne les écrit jamais.
-// Aucune action de jeu ne peut modifier une prestation, un projet ou la
-// facturation. Le sens unique est garanti ici, pas par convention.
+// Le jeu LIT les heures encodées, il ne les écrit jamais.
+// Aucune action de jeu ne peut modifier une prestation, un projet
+// ou la facturation. Le sens unique est garanti ici, par convention.
 // =================================================================
-let gameMod = null;
-let gameStatus = 'idle';      // idle | loading | ready | failed
-let gameSaveTimer = null;
-let gameTickTimer = null;
-let lastAggForGame = null;
-
-function showGameFallback(msg) {
-  const el = document.getElementById('game-fallback');
-  if (!el) return;
-  el.classList.remove('hidden');
-  const detail = document.getElementById('game-fallback-detail');
-  if (detail && msg) detail.textContent = msg;
-}
-
-function gameToast(msg, ok = true) {
-  const el = document.getElementById('g-toast');
-  if (!el) return;
-  el.textContent = msg;
-  el.className = `absolute left-1/2 -translate-x-1/2 top-24 sm:top-28 z-20 rounded-xl px-3.5 py-2 text-[12px] font-semibold backdrop-blur-xl border shadow-lg ${
-    ok ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-100'
-       : 'bg-red-500/20 border-red-400/40 text-red-100'}`;
-  clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.add('hidden'), 2600);
-}
-
-/**
- * Adopte l'état venu de Firestore. Nos propres écritures nous reviennent par le
- * même écouteur : sans garde, l'écho écraserait les coups joués entre-temps.
- * On ne prend le distant que s'il est réellement plus récent que ce qu'on tient.
- */
-function adoptGameState(remote) {
-  const valid = remote && typeof remote.seed === 'string' && remote.version === 1;
-  if (!valid) {
-    if (GAME.state) return;              // partie déjà en cours localement
-    GAME.state = GAMEJS.newGameState(STATE.user.uid, Date.now());
-    GAME.tiles = GAMEJS.hydrate(GAME.state);
-    GAME.loaded = true;
-    saveGameNow();                        // on grave la première partie tout de suite
-  } else {
-    const mine = GAME.state;
-    if (mine && (remote.savedAt || 0) <= (mine.savedAt || 0)) return;
-    const { userId, ...clean } = remote;
-    GAME.state = clean;
-    GAME.tiles = GAMEJS.hydrate(GAME.state);
-    GAME.loaded = true;
-  }
-  GAME.selected = null;
-  GAME.army = null;
-  GAMEJS.checkObjectives(GAME.state, GAME.tiles);
-  // Première visite : on montre les règles. Un jeu qu'on doit deviner n'est
-  // pas un jeu, et c'est exactement le reproche qui revenait.
-  try {
-    if (!localStorage.getItem(RULES_SEEN_KEY)) ouvrirRegles();
-  } catch { /* navigation privée : tant pis, pas d'ouverture automatique */ }
-  runCatchUp();
-  ensureGameLoaded();
-  drawGame();
-  renderGameHud();
-}
-
-async function ensureGameLoaded() {
-  if (gameStatus !== 'idle') return;
-  gameStatus = 'loading';
-  try {
-    gameMod = await import('./world3d.js?v=2026-09-09-01');
-    const canvas = document.getElementById('game-canvas');
-    if (!canvas) throw new Error('canvas #game-canvas introuvable');
-    gameMod.initWorld(canvas, { onSelect: onTileSelected });
-    gameStatus = 'ready';
-    drawGame();
-  } catch (ex) {
-    gameStatus = 'failed';
-    console.error('[kopek] archipel 3D indisponible', ex);
-    showGameFallback(ex && ex.message ? ex.message : String(ex));
-  }
-}
-
-/** Total d'heures facturées, toutes périodes confondues — la source des Sceaux. */
-function totalBilledHours() {
-  return STATE.allLogs.reduce((a, l) => a + (l.billed_minutes || 0), 0) / 60;
-}
-
-/** Heures du mois affiché — la source du bonus d'assaut. */
-function monthBilledHours(agg) {
-  return agg ? (agg.mainBilledMinutes || 0) / 60 : 0;
-}
-
-function drawGame() {
-  if (gameStatus !== 'ready' || !gameMod || !GAME.state || !GAME.tiles) return;
-  const agg = lastAggForGame;
-  // La capitale grandit exactement comme la ville d'avant : à la progression du
-  // mois vers la garantie. Le jeu ne change rien à ce calcul.
-  const progress = agg ? Math.min(1.6, (agg.refundedH || 0) / NESSY.minHoursEq) : 0;
-  const army = GAME.army ? GAMEJS.armyById(GAME.state, GAME.army) : null;
-  gameMod.renderWorld({
-    tiles: GAME.tiles,
-    capitalProgress: progress,
-    selected: GAME.selected,
-    armies: GAME.state.armies || [],
-    // La portée n'est calculée que pour l'armée sélectionnée : c'est elle qui
-    // dit au joueur ce qu'il peut faire, et rien d'autre ne doit s'allumer.
-    reach: army ? GAMEJS.reachable(GAME.state, GAME.tiles, army) : null,
-    // Les faits de guerre récents : c'est ce qui donne à la carte l'air d'un
-    // monde où il se passe quelque chose plutôt que d'un décor figé.
-    marques: GAMEJS.recentMarks(GAME.state, Date.now()),
-  });
-}
-
-function renderGameHud() {
-  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  if (!GAME.state || !GAME.tiles) return;
-  const hoursTotal = totalBilledHours();
-  const rank = GAMEJS.rankOf(GAME.tiles, hoursTotal);
-  setText('g-rank', rank.label);
-  const owned = GAMEJS.ownedTiles(GAME.tiles).length;
-  setText('g-rank-next', rank.next
-    ? `${owned} territoire${owned > 1 ? 's' : ''} · ${rank.next.label} à ${rank.next.tiles} territoires et ${FR(rank.next.hours, 0)} h`
-    : `${owned} territoires · rang maximal`);
-  setText('g-or', Math.floor(GAME.state.or));
-  setText('g-vivres', Math.floor(GAME.state.vivres));
-  setText('g-sceaux', GAMEJS.sceauxAvailable(GAME.state, hoursTotal));
-
-  const bonus = GAMEJS.warBonus(monthBilledHours(lastAggForGame), NESSY.socleHours, NESSY.minHoursEq);
-  const el = document.getElementById('g-bonus');
-  if (el) {
-    el.textContent = bonus.pct > 0 ? `Assaut +${bonus.pct} % · ${bonus.label}` : 'Aucun bonus · sous le socle';
-    el.className = `rounded-xl px-2.5 py-1 backdrop-blur-xl bg-zinc-950/70 border text-[10px] font-semibold ${
-      bonus.tier === 2 ? 'border-fuchsia-400/40 text-fuchsia-300'
-      : bonus.tier === 1 ? 'border-indigo-400/40 text-indigo-300'
-      : 'border-white/10 text-zinc-400'}`;
-  }
-
-  // L'objectif est la première chose à lire : sans lui, l'écran n'est qu'une
-  // carte d'hexagones sans enjeu.
-  const { objective, index, total } = GAMEJS.currentObjective(GAME.state, GAME.tiles);
-  const goalLabel = document.getElementById('g-goal-label');
-  const goalHint = document.getElementById('g-goal-hint');
-  const goalCount = document.getElementById('g-goal-count');
-  if (goalLabel) {
-    goalLabel.textContent = objective ? objective.label : 'Tous les objectifs sont accomplis';
-    goalCount.textContent = `${index}/${total}`;
-    goalHint.textContent = GAMEJS.nextStepHint(GAME.state, GAME.tiles);
-  }
-
-  // La menace : la seule information qui doit interrompre ce que le joueur est
-  // en train de faire. Sans elle, on perd un territoire sans avoir rien vu.
-  const menaces = GAMEJS.menaces(GAME.state, GAME.tiles);
-  const mBox = document.getElementById('g-menace');
-  const mTxt = document.getElementById('g-menace-text');
-  if (mBox && mTxt) {
-    const m = menaces[0];
-    if (!m) {
-      mBox.classList.add('hidden');
-    } else {
-      const clan = GAMEJS.CLANS.find((c) => c.key === m.clan)?.label || m.clan;
-      const ou = m.distance === 0 ? 'sur vos terres'
-        : m.distance === 1 ? 'au contact de vos terres'
-        : `à ${m.distance} cases de vos terres`;
-      mTxt.textContent = `${clan} · colonne de ${m.str} ${ou}`
-        + (menaces.length > 1 ? ` · ${menaces.length} colonnes en marche` : '');
-      mBox.classList.remove('hidden');
-      mBox._cible = { q: m.q, r: m.r };
-    }
-  }
-
-  const body = document.getElementById('g-log-body');
-  if (body) {
-    const entries = GAME.state.log || [];
-    body.innerHTML = entries.length
-      ? entries.slice(0, 20).map((e) => `<div class="text-[10px] leading-snug ${
-          e.kind === 'bad' ? 'text-red-300' : e.kind === 'good' ? 'text-emerald-300' : 'text-zinc-400'
-        }">${escapeHtml(e.text)}</div>`).join('')
-      : '<div class="text-[10px] text-zinc-500">Rien à raconter pour l\'instant.</div>';
-  }
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
-function onTileSelected(sel) {
-  if (!GAME.state) return;
-  const key = GAMEJS.tileKey(sel.q, sel.r);
-
-  // Une armée est sélectionnée : le toucher suivant est un ordre de marche.
-  // C'est la boucle entière du jeu — sélectionner, voir la portée, ordonner.
-  if (GAME.army) {
-    const army = GAMEJS.armyById(GAME.state, GAME.army);
-    if (army && (army.q !== sel.q || army.r !== sel.r)) {
-      const portee = GAMEJS.reachable(GAME.state, GAME.tiles, army);
-      if (portee.has(key)) { orderMove(army, sel); return; }
-    }
-    if (army && army.q === sel.q && army.r === sel.r) { deselectArmy(); return; }
-  }
-
-  const surPlace = GAMEJS.armyAt(GAME.state, sel.q, sel.r);
-  GAME.army = surPlace && surPlace.owner === 'joueur' ? surPlace.id : null;
-  GAME.selected = sel;
-  if (gameMod && gameStatus === 'ready') gameMod.setSelected(sel);
-  drawGame();
-  renderTilePanel();
-}
-
-function deselectArmy() {
-  GAME.army = null;
-  drawGame();
-  renderTilePanel();
-}
-
-/** Exécute l'ordre et raconte ce qui s'est passé. */
-function orderMove(army, sel) {
-  const res = GAMEJS.moveArmy(GAME.state, GAME.tiles, army.id,
-    sel.q, sel.r, monthBilledHours(lastAggForGame));
-  if (!res.ok) { gameToast(res.error, false); return; }
-  if (res.attacked) {
-    const bonus = res.bonus.pct ? ` · bonus heures +${res.bonus.pct} %` : '';
-    gameToast(res.win
-      ? `${res.defenders} défenseurs balayés${bonus} · territoire pris, ${res.attackers} survivants`
-      : `Assaut brisé sur ${res.defenders} défenseurs${bonus} · armée perdue`, res.win);
-    if (!res.win) GAME.army = null;
-  } else {
-    GAME.selected = { q: sel.q, r: sel.r };
-    if (gameMod && gameStatus === 'ready') gameMod.setSelected(GAME.selected);
-    if (army.mp <= 0) gameToast('Armée à bout de souffle · elle repart au prochain tour', true);
-  }
-  afterGameChange();
-}
-
-function renderTilePanel() {
-  const panel = document.getElementById('g-tile-panel');
-  if (!panel || !GAME.tiles) return;
-  const sel = GAME.selected;
-  const t = sel ? GAME.tiles[GAMEJS.tileKey(sel.q, sel.r)] : null;
-  // Sur téléphone, l'objectif et le panneau du territoire se disputent l'écran
-  // et il ne reste plus de carte entre les deux. Ils s'excluent : l'objectif
-  // guide quand rien n'est sélectionné, le panneau prend le relais ensuite.
-  const goal = document.getElementById('g-goal');
-  if (!t) {
-    panel.classList.add('hidden');
-    if (goal) goal.classList.remove('max-sm:hidden');
-    return;
-  }
-  panel.classList.remove('hidden');
-  if (goal) goal.classList.add('max-sm:hidden');
-
-  const ter = GAMEJS.TERRAINS[t.terrain];
-  const ownerLabel = t.capital ? 'Votre capitale'
-    : t.owner === 'joueur' ? 'À vous'
-    : t.owner ? (GAMEJS.CLANS.find((c) => c.key === t.owner)?.label || t.owner)
-    : t.neutralGarrison ? 'Repaire hostile'
-    : 'Territoire libre';
-  const troops = t.owner ? (t.garrison || 0) : (t.neutralGarrison || 0);
-  const bName = GAMEJS.BUILDINGS[t.building]?.label;
-
-  // Une pastille à la couleur du camp, la même que la bordure sur la carte :
-  // le panneau et la carte doivent dire la même chose de la même façon.
-  const couleur = t.owner === 'joueur' ? '#f2c14e'
-    : t.owner ? (GAMEJS.CLANS.find((c) => c.key === t.owner)?.color || '#9aa7b0')
-    : '#9aa7b0';
-  $('#g-tile-title').innerHTML =
-    `<span class="inline-block w-2.5 h-2.5 rounded-full align-middle mr-1.5" style="background:${couleur}"></span>`
-    + escapeHtml(`${ter.label} · ${ownerLabel}`);
-  const armeeIci = GAMEJS.armyAt(GAME.state, t.q, t.r);
-  // « Armée de 3 » sans dire à qui elle est, sur une case ennemie, se lit comme
-  // une bonne nouvelle. C'est exactement le contraire.
-  const armeeTxt = !armeeIci ? null
-    : armeeIci.owner === 'joueur'
-      ? `Votre armée de ${armeeIci.str} · ${armeeIci.mp} déplacement${armeeIci.mp > 1 ? 's' : ''}`
-      : `⚔ Colonne ${GAMEJS.CLANS.find((c) => c.key === armeeIci.owner)?.label || armeeIci.owner} de ${armeeIci.str}`;
-  $('#g-tile-sub').textContent = [
-    armeeTxt,
-    `Défense +${GAMEJS.tileDefense(t)} %`,
-    troops ? `${troops} troupe${troops > 1 ? 's' : ''}` : null,
-    bName || null,
-  ].filter(Boolean).join(' · ');
-
-  const hoursTotal = totalBilledHours();
-  const bonusAssaut = GAMEJS.warBonus(monthBilledHours(lastAggForGame), NESSY.socleHours, NESSY.minHoursEq);
-  const actions = GAMEJS.actionsFor(GAME.state, GAME.tiles, t, hoursTotal);
-  const wrap = $('#g-tile-actions');
-  wrap.innerHTML = actions.map((a, i) => {
-    const cost = a.sceaux ? `${a.sceaux} sceaux`
-      : a.troupes ? `${a.troupes} troupes de la garnison`
-      : a.cost ? [a.cost.or ? `${a.cost.or} or` : null, a.cost.vivres ? `${a.cost.vivres} vivres` : null].filter(Boolean).join(' · ')
-      : a.defenders != null
-        ? `${a.attackers || 0} contre ${a.defenders} · terrain +${GAMEJS.tileDefense(t)} %`
-          + (bonusAssaut.pct ? ` · vos heures +${bonusAssaut.pct} %` : '')
-        : '';
-    // Un bouton grisé sans explication, c'est ce qui donne le sentiment de ne
-    // rien pouvoir faire. On affiche la raison à la place du coût.
-    const bas = a.enabled ? cost : (a.why || cost);
-    return `<button type="button" data-act="${i}" ${a.enabled ? '' : 'disabled'} title="${escapeHtml(a.why || '')}"
-      class="rounded-xl px-2.5 py-2 text-left border transition text-[11px] font-semibold
-             ${a.enabled ? 'bg-white/5 border-white/15 text-zinc-100 hover:bg-white/10 active:scale-[0.98]'
-                         : 'bg-white/[0.02] border-white/10 text-zinc-500 cursor-not-allowed'}">
-      <span class="block">${escapeHtml(a.label)}</span>
-      <span class="block text-[9px] ${a.enabled ? 'font-mono opacity-70' : 'text-amber-400/70'} mt-0.5 leading-tight">${escapeHtml(bas)}</span>
-    </button>`;
-  }).join('') || `<div class="col-span-2 text-[11px] text-zinc-400 leading-snug">${
-    escapeHtml(GAMEJS.situation(GAME.state, GAME.tiles, t))
-  } <span class="text-zinc-500">Approchez une armée pour pouvoir l’attaquer.</span></div>`;
-
-  wrap.querySelectorAll('button[data-act]').forEach((b) => {
-    b.addEventListener('click', () => runGameAction(actions[Number(b.getAttribute('data-act'))], t));
-  });
-}
-
-function runGameAction(a, t) {
-  if (!a || !GAME.state) return;
-  const hoursTotal = totalBilledHours();
-  let res;
-  if (a.kind === 'build') res = GAMEJS.build(GAME.state, GAME.tiles, t.q, t.r, a.key);
-  else if (a.kind === 'recruit') res = GAMEJS.recruit(GAME.state, GAME.tiles, t.q, t.r, 1);
-  else if (a.kind === 'elite') res = GAMEJS.recruitElite(GAME.state, GAME.tiles, t.q, t.r, hoursTotal);
-  else if (a.kind === 'colonise') res = GAMEJS.colonise(GAME.state, GAME.tiles, t.q, t.r);
-  else if (a.kind === 'raise') {
-    res = GAMEJS.raiseArmy(GAME.state, GAME.tiles, t.q, t.r, a.troupes);
-    if (res.ok) {
-      // On sélectionne l'armée aussitôt : sinon le joueur ne fait pas le lien
-      // entre le bouton qu'il vient d'appuyer et le pion qui apparaît.
-      const nouvelle = GAMEJS.armyAt(GAME.state, t.q, t.r);
-      if (nouvelle) GAME.army = nouvelle.id;
-      gameToast('Armée levée · touchez une case bleue pour la déplacer', true);
-    }
-  }
-  else if (a.kind === 'assault') {
-    if (!a.armyId) { gameToast('Aucune armée à portée. Levez-en une et approchez-la.', false); return; }
-    const army = GAMEJS.armyById(GAME.state, a.armyId);
-    GAME.army = a.armyId;
-    orderMove(army, { q: t.q, r: t.r });
-    return;
-  }
-  else if (a.kind === 'attack') {
-    if (!a.from) { gameToast('Aucune troupe voisine pour lancer l\'assaut.', false); return; }
-    const troops = Math.max(0, (GAME.tiles[GAMEJS.tileKey(a.from.q, a.from.r)]?.garrison || 0) - 1);
-    const defenders = a.defenders;
-    res = GAMEJS.attack(GAME.state, GAME.tiles, a.from.q, a.from.r, t.q, t.r, monthBilledHours(lastAggForGame));
-    if (res.ok) {
-      // « Assaut repoussé » sans chiffres ne dit pas au joueur ce qu'il a raté.
-      // On expose le rapport de force qui a décidé du sort du combat.
-      const bonus = res.bonus.pct ? ` · bonus heures +${res.bonus.pct} %` : '';
-      const survivants = res.win
-        ? `${res.result.attackerLeft} survivant${res.result.attackerLeft > 1 ? 's' : ''}`
-        : `il leur reste ${res.result.defenderLeft}`;
-      gameToast(`${troops} contre ${defenders}${bonus} → ${res.win ? 'victoire' : 'échec'}, ${survivants}`, res.win);
-    }
-  }
-  if (!res) return;
-  if (!res.ok) { gameToast(res.error, false); return; }
-  if (a.kind !== 'attack') gameToast(`${a.label} · fait`, true);
-  afterGameChange();
-}
-
-/** Un seul point de sortie après toute modification : redessiner puis sauver. */
-function afterGameChange() {
-  const fresh = GAMEJS.checkObjectives(GAME.state, GAME.tiles);
-  drawGame();
-  renderGameHud();
-  renderTilePanel();
-  scheduleGameSave();
-  // Un objectif franchi doit s'annoncer : c'est la seule récompense visible
-  // du jeu, et elle arrive souvent au milieu d'une autre action.
-  if (fresh.length) {
-    gameToast(`Objectif accompli · ${fresh[fresh.length - 1].label}`, true);
-  }
-}
-
-// Les actions s'enchaînent vite (construire, recruter, attaquer) : on regroupe
-// les écritures plutôt que d'en envoyer une par clic. Le délai reste court —
-// à 900 ms, fermer l'onglet juste après un coup pouvait le perdre.
-const SAVE_DEBOUNCE_MS = 350;
-
-function scheduleGameSave() {
-  clearTimeout(gameSaveTimer);
-  gameSaveTimer = setTimeout(() => { gameSaveTimer = null; saveGameNow(); }, SAVE_DEBOUNCE_MS);
-}
-
-/** Écrit sans attendre le délai. Appelé quand la page peut disparaître. */
-function flushGameSave() {
-  if (!gameSaveTimer) return;
-  clearTimeout(gameSaveTimer);
-  gameSaveTimer = null;
-  saveGameNow();
-}
-
-// Sur téléphone, quitter l'application ne déclenche pas toujours « unload » :
-// c'est « pagehide » et le passage en arrière-plan qui font foi.
-window.addEventListener('pagehide', flushGameSave);
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') flushGameSave();
-});
-
-function saveGameNow() {
-  if (!STATE.user || !GAME.state) return;
-  // On horodate AVANT d'écrire et on garde la même valeur en local : l'écho de
-  // notre propre écriture est ainsi reconnu comme « pas plus récent » et ignoré.
-  GAME.state.savedAt = Date.now();
-  writeInBackground(
-    setDoc(gameDocRef(), { userId: STATE.user.uid, ...GAME.state }),
-    'Sauvegarde de la partie impossible',
-  );
-}
-
-/** Rattrape la production hors ligne, puis programme le prochain tour. */
-function runCatchUp() {
-  if (!GAME.state || !GAME.tiles) return;
-  const avant = GAMEJS.menaces(GAME.state, GAME.tiles).length;
-  const sum = GAMEJS.catchUp(GAME.state, GAME.tiles, Date.now());
-  if (sum.ticks > 0) {
-    afterGameChange();
-    const apres = GAMEJS.menaces(GAME.state, GAME.tiles);
-    const proche = apres[0];
-    if (sum.attacks.some((a) => a.lost)) gameToast('Un territoire est tombé pendant votre absence.', false);
-    else if (sum.attacks.length) gameToast('Une incursion a été repoussée sur vos terres.', true);
-    // Pendant une partie ouverte, annoncer « +3 or » toutes les trois minutes
-    // n'apprend rien ; ce qui compte, c'est la colonne qui approche.
-    else if (proche && (proche.distance <= 2 || apres.length > avant)) {
-      gameToast(proche.distance <= 1
-        ? `Colonne du clan ${proche.clan} au contact de vos terres !`
-        : `Colonne du clan ${proche.clan} à ${proche.distance} cases de vos terres.`, false);
-    } else if (sum.ticks >= 2 && sum.or > 0) gameToast(`+${sum.or} or récoltés en votre absence`, true);
-  }
-  clearTimeout(gameTickTimer);
-  const msLeft = GAMEJS.TICK_MS - ((Date.now() - GAME.state.lastTick) % GAMEJS.TICK_MS);
-  gameTickTimer = setTimeout(runCatchUp, Math.max(5000, msLeft));
-}
-
-const RULES_SEEN_KEY = 'kopek_regles_vues';
-
-function ouvrirRegles() {
-  const panneau = document.getElementById('g-rules');
-  const corps = document.getElementById('g-rules-body');
-  if (!panneau || !corps) return;
-  corps.innerHTML = GAMEJS.RULES.map((r) => `
-    <div class="rounded-xl p-3 bg-white/[0.04] border border-white/10">
-      <div class="text-[13px] font-bold text-indigo-300">${escapeHtml(r.titre)}</div>
-      <div class="text-[12px] text-zinc-300 leading-relaxed mt-1">${escapeHtml(r.texte)}</div>
-    </div>`).join('');
-  panneau.classList.remove('hidden');
-  if (window.lucide) lucide.createIcons();
-}
-
-function fermerRegles() {
-  document.getElementById('g-rules')?.classList.add('hidden');
-  try { localStorage.setItem(RULES_SEEN_KEY, '1'); } catch { /* navigation privée */ }
-}
-
-function bindGameUi() {
-  $('#g-help')?.addEventListener('click', ouvrirRegles);
-  $('#g-rules-close')?.addEventListener('click', fermerRegles);
-  $('#g-rules-ok')?.addEventListener('click', fermerRegles);
-  $('#g-tile-close')?.addEventListener('click', () => {
-    GAME.selected = null;
-    if (gameMod && gameStatus === 'ready') gameMod.setSelected(null);
-    document.getElementById('g-tile-panel')?.classList.add('hidden');
-  });
-  $('#g-menace-go')?.addEventListener('click', () => {
-    const cible = document.getElementById('g-menace')?._cible;
-    if (!cible) return;
-    onTileSelected(cible);
-    document.getElementById('game-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  });
-  $('#g-log-toggle')?.addEventListener('click', () => {
-    document.getElementById('g-log-body')?.classList.toggle('hidden');
-  });
+let lastCityAgg = null;
+const CLAN_COLORS = [
+  '#6366f1', '#8b5cf6', '#d946ef', '#ec4899',
+  '#f43f5e', '#f97316', '#eab308', '#84cc16',
+  '#22c55e', '#10b981', '#14b8a6', '#06b6d4',
+  '#0ea5e9', '#3b82f6', '#a855f7', '#f59e0b',
+];
+function clanColor(id, idx = 0) {
+  if (!id) return CLAN_COLORS[idx % CLAN_COLORS.length];
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return CLAN_COLORS[h % CLAN_COLORS.length];
 }
 
 /** Appelé à chaque rendu du tableau de bord. */
 function renderCity(agg) {
-  lastAggForGame = agg;
-  ensureGameLoaded();
-  if (GAME.state) { drawGame(); renderGameHud(); }
+  lastCityAgg = agg;
+  if (!STATE.clients) return;
+  const clientHours = new Map();
+  const clientEur = new Map();
+  for (const l of STATE.allLogs) {
+    const cid = l.client_id;
+    if (!cid) continue;
+    const bm = l.billed_minutes || 0;
+    const eur = l.custom_price > 0
+      ? l.custom_price
+      : (bm / 60) * (l.rate_applied || 0);
+    clientHours.set(cid, (clientHours.get(cid) || 0) + bm);
+    clientEur.set(cid,   (clientEur.get(cid)   || 0) + eur);
+  }
+  const clansData = STATE.clients
+    .slice()
+    .sort((a, b) => {
+      if (!!a.is_external !== !!b.is_external) return a.is_external ? 1 : -1;
+      return (b.name || '').localeCompare(a.name || '');
+    })
+    .map((c, i) => ({
+      key: c.id,
+      name: c.name || 'Sans nom',
+      color: clanColor(c.id, i),
+      hours: (clientHours.get(c.id) || 0) / 60,
+      eur: clientEur.get(c.id) || 0,
+      is_main: !c.is_external,
+    }));
+  try {
+    updateCity(clansData, agg);
+  } catch (ex) {
+    console.warn('[kopek] updateCity échoué', ex);
+  }
+  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  const socleH = NESSY.socleHours;
+  const garantieH = NESSY.minHoursEq;
+  const bonusH = Math.max(0, agg.refundedH - garantieH);
+  const mainClientCount = STATE.clients.filter((c) => !c.is_external).length;
+  const population = Math.round(
+    ((STATE.allLogs.reduce((a, l) => a + (l.billed_minutes || 0), 0) / 60) * 120)
+    + STATE.clients.length * 30
+    + mainClientCount * 180
+  );
+  const progress = agg ? Math.min(100, agg.gaugePct || 0) : 0;
+  const acquis = Math.max(0, (agg.mainFinalCA || 0) - (agg.bonusEur || 0));
+  setText('hud-socle',  `${FR(socleH)} h · ${EUR(NESSY.socleFlat)}`);
+  setText('hud-garanti', `${FR(garantieH)} h · ${EUR(NESSY.minGaranti)}`);
+  setText('hud-bonus',  `${FR(bonusH, 1)} h · ${EUR(agg.bonusEur || 0)}`);
+  setText('hud-pop',    population.toLocaleString('fr-BE'));
+  setText('hud-acquis', EUR(acquis));
+  setText('hud-ca-bonus', `+ ${EUR(agg.bonusEur || 0)}`);
+  const bar = document.getElementById('hud-bar');
+  if (bar) bar.style.width = `${progress}%`;
+  const label = document.getElementById('hud-label');
+  if (label) {
+    const refunded = agg.refundedH || 0;
+    if (refunded < 0.001) label.textContent = `0 / ${FR(garantieH)} h · contrat en attente`;
+    else if (refunded <= garantieH + 0.001) label.textContent = `${FR(refunded)} / ${FR(garantieH)} h · minimum garanti`;
+    else label.textContent = `${FR(refunded)} h · surplus +${FR(bonusH, 1)} h x ${NESSY.regieRate} €`;
+  }
 }
 
 function renderMetrics(agg) {
@@ -1707,6 +1297,7 @@ async function onWizardNext() {
     hideErrorBanner();
     $('#hours-modal').classList.add('hidden');
     toast('Heures ajoutées', 'check-circle');
+    try { triggerLogEffect($('#w-client').value); } catch (_) {}
   } catch (ex) {
     showErrorBanner("Enregistrement de l'encodage impossible", ex);
     wizardError(explainFirebaseError(ex));
@@ -1920,6 +1511,7 @@ async function handleEditLogSubmit(e) {
   try {
     updateLog(id, patch);
     toast('Encodage mis à jour', 'check');
+    try { triggerLogEffect(client_id); } catch (_) {}
     $('#edit-modal').classList.add('hidden');
     refreshPeriod();
   } catch (ex) { showErrorBanner('Mise à jour impossible', ex); }
