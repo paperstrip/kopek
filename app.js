@@ -15,7 +15,7 @@ import {
   setDoc,
   onSnapshot,
 } from './firebase-config.js?v=2026-09-09-01';
-import { initThreeGame, updateCity, triggerLogEffect } from './three-game.js?v=2026-09-09-03';
+import { initThreeGame, updateCity, triggerLogEffect } from './three-game.js?v=2026-09-09-05';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -879,6 +879,7 @@ function renderNessyGauge(agg) {
 let lastCityAgg = null;
 let empireStateCache = null;
 let empireBound = false;
+let empireMobileView = 'actions';
 
 const CLAN_COLORS = [
   '#6366f1', '#8b5cf6', '#d946ef', '#ec4899',
@@ -1089,6 +1090,68 @@ function costLabel(cost) {
   return Object.entries(cost).map(([k, v]) => `${v} ${labels[k] || k}`).join(' · ');
 }
 
+function isCompactEmpireUi() {
+  return window.innerWidth < 640;
+}
+
+function setEmpireMobileView(view = 'war') {
+  empireMobileView = view;
+
+  const compact = isCompactEmpireUi();
+  const strategyChip = document.getElementById('empire-strategy-chip');
+  const resourceStrip = document.getElementById('empire-resource-strip');
+  const progressWrap = document.getElementById('empire-progress-mini-wrap');
+  const actionsPalette = document.getElementById('empire-actions-palette');
+  const advicePanel = document.getElementById('empire-advice-panel');
+  const empirePanel = document.getElementById('empire-empire-panel');
+  const inspector = document.getElementById('empire-inspector');
+  const dock = document.getElementById('empire-mobile-dock');
+
+  dock?.classList.toggle('hidden', !compact);
+
+  if (!compact) {
+    strategyChip?.classList.remove('hidden');
+    resourceStrip?.classList.remove('hidden');
+    progressWrap?.classList.remove('hidden');
+    actionsPalette?.classList.remove('hidden');
+    if (inspector && inspector.dataset.open === '1') inspector.classList.remove('hidden');
+  } else {
+    const mapMode = view === 'map';
+    const warMode = view === 'war';
+    const empireMode = view === 'empire';
+
+    strategyChip?.classList.toggle('hidden', !warMode && !empireMode);
+    resourceStrip?.classList.toggle('hidden', mapMode);
+    progressWrap?.classList.toggle('hidden', mapMode);
+    actionsPalette?.classList.toggle('hidden', !warMode);
+    advicePanel?.classList.toggle('hidden', !warMode || advicePanel?.dataset.open !== '1');
+    empirePanel?.classList.toggle('hidden', !empireMode || empirePanel?.dataset.open !== '1');
+    if (inspector) {
+      if (!mapMode && !empireMode) inspector.classList.add('hidden');
+      else if (inspector.dataset.open === '1') inspector.classList.remove('hidden');
+    }
+  }
+
+  $$('[data-empire-mobile-view]').forEach((btn) => {
+    const active = compact && btn.dataset.empireMobileView === empireMobileView;
+    const base = btn.dataset.empireMobileView === 'map'
+      ? 'border-amber-400/40'
+      : btn.dataset.empireMobileView === 'war'
+        ? 'border-emerald-400/30'
+        : 'border-indigo-400/40';
+    const activeGradient = btn.dataset.empireMobileView === 'map'
+      ? 'from-amber-500 via-yellow-400 to-orange-500'
+      : btn.dataset.empireMobileView === 'war'
+        ? 'from-emerald-500 via-teal-400 to-cyan-500'
+        : 'from-indigo-500 via-fuchsia-500 to-purple-500';
+    btn.className = `flex-1 rounded-full px-3 py-2 text-[10.5px] font-semibold tracking-[0.16em] uppercase transition ${
+      active
+        ? `text-white shadow-lg shadow-black/30 bg-gradient-to-r ${activeGradient}`
+        : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06]'
+    }`;
+  });
+}
+
 function advanceEmpireTurn(state, bonus, narrative) {
   const income = empireIncome(state, bonus);
   state.turn += 1;
@@ -1124,16 +1187,85 @@ function advanceEmpireTurn(state, bonus, narrative) {
 
 function bindEmpireUi() {
   if (empireBound) return;
+
+  const togglePanel = (panelId, btnId, closeId) => {
+    const panel = document.getElementById(panelId);
+    const btn = document.getElementById(btnId);
+    const closeBtn = closeId ? document.getElementById(closeId) : null;
+    const open = () => {
+      if (!panel) return;
+      panel.classList.remove('hidden');
+      panel.dataset.open = '1';
+    };
+    const hide = () => {
+      if (!panel) return;
+      panel.classList.add('hidden');
+      delete panel.dataset.open;
+    };
+    btn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!panel) return;
+      if (panel.classList.contains('hidden')) open();
+      else hide();
+    });
+    closeBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hide();
+    });
+  };
+
+  togglePanel('empire-advice-panel', 'empire-toggle-advice', 'empire-close-advice');
+  togglePanel('empire-empire-panel', 'empire-toggle-empire', 'empire-close-empire');
+
+  const toggleActionsBtn = document.getElementById('empire-toggle-actions');
+  toggleActionsBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const palette = document.getElementById('empire-actions-palette');
+    if (!palette) return;
+    if (palette.classList.contains('hidden')) {
+      palette.classList.remove('hidden');
+    } else {
+      palette.classList.add('hidden');
+    }
+  });
+
   document.addEventListener('click', (e) => {
+    const mobileBtn = e.target.closest('[data-empire-mobile-view]');
+    if (mobileBtn) {
+      setEmpireMobileView(mobileBtn.getAttribute('data-empire-mobile-view') || 'war');
+      return;
+    }
     const btn = e.target.closest('[data-empire-action]');
     if (btn) {
       runEmpireAction(btn.getAttribute('data-empire-action'));
       return;
     }
     if (e.target.closest('#empire-inspector-close')) {
-      $('#empire-inspector')?.classList.add('hidden');
+      const inspector = document.getElementById('empire-inspector');
+      inspector?.classList.add('hidden');
+      if (inspector) delete inspector.dataset.open;
+      return;
+    }
+    const panelAdvice = document.getElementById('empire-advice-panel');
+    const panelEmpire = document.getElementById('empire-empire-panel');
+    const toggleAdvice = document.getElementById('empire-toggle-advice');
+    const toggleEmpire = document.getElementById('empire-toggle-empire');
+    if (panelAdvice && !e.target.closest('#empire-advice-panel') && !e.target.closest('#empire-toggle-advice')) {
+      panelAdvice.classList.add('hidden');
+      delete panelAdvice.dataset.open;
+    }
+    if (panelEmpire && !e.target.closest('#empire-empire-panel') && !e.target.closest('#empire-toggle-empire')) {
+      panelEmpire.classList.add('hidden');
+      delete panelEmpire.dataset.open;
     }
   });
+  window.addEventListener('resize', () => setEmpireMobileView(empireMobileView));
+  document.addEventListener('kopek:province-selected', (e) => {
+    const inspector = document.getElementById('empire-inspector');
+    if (inspector) inspector.dataset.open = '1';
+    if (isCompactEmpireUi()) setEmpireMobileView('map');
+  });
+  setEmpireMobileView(empireMobileView);
   empireBound = true;
 }
 
@@ -1206,33 +1338,38 @@ function runEmpireAction(actionKey) {
 
   saveEmpireState(advanceEmpireTurn(state, bonus, narrative));
   toast(`${action.label} · ordre exécuté`, action.icon);
+  if (isCompactEmpireUi()) setEmpireMobileView('empire');
   refreshPeriod();
 }
 
 function updateEmpireHud(view) {
   const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
   const setHtml = (id, value) => { const el = document.getElementById(id); if (el) el.innerHTML = value; };
+  const setAttr = (id, attr, value) => { const el = document.getElementById(id); if (el) el.setAttribute(attr, value); };
   const state = view.state;
   const objective = view.objective;
 
   setText('empire-season', view.season);
+  setText('empire-turn', `Tour ${state.turn}`);
+  setText('empire-status', `${objective.status}`);
+  setText('empire-threat', `${state.rivalPressure}/10`);
+  setText('empire-progress-label-mini', `${objective.progress}% · ${objective.status}`);
+  const miniBar = document.getElementById('empire-progress-mini-bar');
+  if (miniBar) miniBar.style.width = `${clamp(objective.progress, 0, 100)}%`;
+
   setText('empire-goal', objective.title);
   setText('empire-goal-sub', objective.sub);
-  setText('empire-turn', `Tour ${state.turn}`);
-  setText('empire-status', `${objective.status} · ${view.military} de puissance`);
-  setText('empire-threat', `Pression rivale ${state.rivalPressure}/10`);
-
   setText('empire-treasury', `${state.treasury.toLocaleString('fr-BE')} or`);
   setText('empire-food', `${state.food.toLocaleString('fr-BE')} vivres`);
   setText('empire-stone', `${state.stone.toLocaleString('fr-BE')} pierre`);
   setText('empire-iron', `${state.iron.toLocaleString('fr-BE')} fer`);
   setText('empire-prestige', `${state.prestige.toLocaleString('fr-BE')} pts`);
-  setText('empire-command', `${state.influence} infl. · +${view.bonus.command} cmd`);
+  setText('empire-command', `${state.influence} infl.`);
 
   setText('empire-provinces', `${state.provinces} / 7`);
-  setText('empire-scouted', `${state.scouted} connues`);
-  setText('empire-legions', `${state.legions} cohortes`);
-  setText('empire-fleets', `${state.fleets} escadres`);
+  setText('empire-scouted', `${state.scouted}`);
+  setText('empire-legions', `${state.legions}`);
+  setText('empire-fleets', `${state.fleets}`);
   setText('empire-stability', `${state.stability}%`);
   setText('empire-wonders', `${state.wonders} / 2`);
 
@@ -1240,28 +1377,43 @@ function updateEmpireHud(view) {
   const progressBar = document.getElementById('empire-progress-bar');
   if (progressBar) progressBar.style.width = `${clamp(objective.progress, 0, 100)}%`;
   setText('empire-contract-acquis', EUR(view.contractAcquired));
-  setText('empire-contract-hours', `${FR(view.contractHours)} h remboursées sur ${FR(NESSY.minHoursEq)} h`);
-  setText('empire-contract-bonus', `Bonus métier : +${EUR(lastCityAgg?.bonusEur || 0)} · surplus +${FR(view.bonusHours, 1)} h`);
-  setHtml('empire-advice', `${objective.advice}<div class="mt-2 text-[11px] text-zinc-400">${state.lastAction}</div>`);
+  setText('empire-contract-hours', `${FR(view.contractHours)} h / ${FR(NESSY.minHoursEq)} h`);
+  setText('empire-contract-bonus', `+${EUR(lastCityAgg?.bonusEur || 0)} · +${FR(view.bonusHours, 1)} h`);
+  setHtml('empire-advice', `${objective.advice}<div class="mt-2 text-[10.5px]" style="color:#94a3b8;">${state.lastAction || ''}</div>`);
 
   const victory = document.getElementById('empire-victory');
   if (victory) victory.classList.toggle('hidden', !view.victoryReady);
 
   $$('[data-empire-action]').forEach((btn) => {
-    const action = EMPIRE_ACTIONS[btn.getAttribute('data-empire-action')];
+    const key = btn.getAttribute('data-empire-action');
+    const action = EMPIRE_ACTIONS[key];
     if (!action) return;
-    const meta = btn.querySelector('.empire-action-meta');
     const enabled = hasEnoughResources(state, action.cost)
-      && !(btn.dataset.empireAction === 'colony' && state.scouted <= state.provinces)
-      && !(btn.dataset.empireAction === 'wonder' && state.provinces < 3);
-    if (meta) meta.textContent = enabled ? costLabel(action.cost) : `Bloqué · ${costLabel(action.cost)}`;
+      && !(key === 'colony' && state.scouted <= state.provinces)
+      && !(key === 'wonder' && state.provinces < 3);
     btn.disabled = !enabled;
-    btn.className = `empire-action group rounded-2xl border px-3 py-3 text-left transition ${
-      enabled
-        ? 'border-white/10 bg-white/[0.04] hover:bg-white/[0.08]'
-        : 'border-white/5 bg-white/[0.02] opacity-50 cursor-not-allowed'
-    }`;
+    if (enabled) {
+      btn.style.opacity = '1';
+      btn.style.pointerEvents = '';
+      btn.style.filter = '';
+      const title = `${action.label} · ${costLabel(action.cost)}`;
+      btn.setAttribute('aria-label', title);
+      btn.setAttribute('title', title);
+    } else {
+      btn.style.opacity = '0.38';
+      btn.style.pointerEvents = 'none';
+      btn.style.filter = 'grayscale(0.4)';
+      btn.setAttribute('aria-label', `Bloqué · ${costLabel(action.cost)}`);
+      btn.setAttribute('title', `Bloqué · ${costLabel(action.cost)}`);
+    }
+    const tip = btn.querySelector('.empire-action-tip');
+    if (tip && enabled) {
+      const costLine = tip.querySelectorAll('span')[1] || tip.querySelector('span:last-child');
+      if (costLine) costLine.textContent = costLabel(action.cost);
+    }
   });
+
+  setEmpireMobileView(empireMobileView);
 }
 
 /** Appelé à chaque rendu du tableau de bord. */
