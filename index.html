@@ -12,7 +12,7 @@
   // se retrouve avec un vieux HTML qui charge du vieux JS. On compare donc la
   // version embarquée à celle publiée dans version.json (jamais mise en cache),
   // et on recharge une seule fois sur une URL différente si ça diffère.
-  window.KOPEK_VERSION = '2026-09-09-02';
+  window.KOPEK_VERSION = '2026-09-09-03';
   (function () {
     try {
       fetch('./version.json?t=' + Date.now(), { cache: 'no-store' })
@@ -36,7 +36,7 @@
 <!-- Feuille Tailwind compilée et commitée (styles.css) : le CDN cdn.tailwindcss.com
      est un outil de DEV qui recompile le CSS dans le navigateur à chaque chargement.
      Pour régénérer après avoir ajouté des classes : voir README.md -->
-<link rel="stylesheet" href="./styles.css?v=2026-09-09-01">
+<link rel="stylesheet" href="./styles.css?v=2026-09-09-03">
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 <script type="importmap">
   {
@@ -386,68 +386,216 @@
 
 
       <!-- ============================================================= -->
-      <!-- BENTO · KOPEK CITY · SIMCITY CARTOON PIXAR VIEW (tout en bas) -->
+      <!-- IMPERIUM KOPEK · CAMPAGNE 4X PREMIUM -->
       <!-- ============================================================= -->
       <section id="kopek-city" class="col-span-12 relative rounded-3xl card-hover overflow-hidden select-none"
-        style="background:#0b1120; border:1px solid rgba(129,140,248,0.3);
-               box-shadow: 0 40px 120px -40px rgba(99,102,241,0.55), inset 0 1px 0 rgba(255,255,255,0.05);
-               min-height: 680px;">
+        style="background:#070b12; border:1px solid rgba(168,85,247,0.28);
+               box-shadow: 0 60px 160px -60px rgba(15,23,42,0.95), 0 30px 100px -50px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.05);
+               min-height: 900px;">
         <canvas id="three-canvas" class="absolute inset-0 w-full h-full"></canvas>
-        
-        <!-- Game Header / Quick Legend -->
-        <div class="absolute top-4 left-4 z-10 flex items-center gap-3 flex-wrap pointer-events-none">
-          <div class="px-3.5 py-1.5 rounded-xl bg-zinc-950/80 border border-white/10 backdrop-blur-md flex items-center gap-2 shadow-lg">
-            <span class="w-2 h-2 rounded-full bg-emerald-400 badge-pulse"></span>
-            <span class="text-xs font-bold uppercase tracking-wider text-white">Simulation 3D Temps Réel</span>
-          </div>
-          <div class="hidden sm:flex items-center gap-2 text-[11px] text-zinc-400 bg-zinc-950/70 border border-white/10 backdrop-blur-md px-3 py-1.5 rounded-xl shadow-lg">
-            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-500"></span> Centre : Votre Métropole (Nessy)</span>
-            <span class="text-zinc-600">|</span>
-            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500"></span> Périphérie : Clans Clients</span>
-            <span class="text-zinc-600">|</span>
-            <span class="flex items-center gap-1 text-zinc-300">🖱️ Clic pour inspecter</span>
+        <div class="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/45 pointer-events-none"></div>
+        <div class="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/60 to-transparent pointer-events-none"></div>
+        <div class="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black/70 to-transparent pointer-events-none"></div>
+
+        <div id="empire-loader" class="absolute inset-0 z-30 flex items-center justify-center bg-black/65 backdrop-blur-md">
+          <div class="w-[22rem] max-w-[calc(100%-2rem)] rounded-3xl border border-white/10 bg-zinc-950/85 px-5 py-5 shadow-2xl">
+            <div class="flex items-center gap-3">
+              <div class="h-11 w-11 rounded-2xl bg-gradient-to-br from-amber-400 via-fuchsia-500 to-indigo-500 flex items-center justify-center shadow-lg">
+                <i data-lucide="castle" class="w-5 h-5 text-white"></i>
+              </div>
+              <div>
+                <div class="text-[11px] uppercase tracking-[0.22em] text-amber-300 font-semibold">Imperium Kopek</div>
+                <div class="text-white font-semibold">Chargement de la campagne stratégique…</div>
+              </div>
+            </div>
+            <div class="mt-4 h-2 rounded-full bg-zinc-800 overflow-hidden">
+              <div class="h-full w-1/2 animate-pulse bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-amber-400"></div>
+            </div>
+            <div id="empire-loader-text" class="mt-2 text-[11px] text-zinc-400">Préparation du monde impérial, des provinces et des routes maritimes…</div>
           </div>
         </div>
-        
-        <!-- HUD SIMCITY (info-bulle droite) -->
-        <div class="absolute right-4 bottom-4 w-[20rem] max-w-[calc(100%-2rem)] rounded-2xl p-3.5 backdrop-blur-xl
-                    bg-zinc-950/70 border border-white/10 shadow-[0_30px_60px_-10px_rgba(0,0,0,0.7)]
-                    grid grid-cols-2 gap-2.5 text-[11px] leading-tight z-10 pointer-events-none">
-          <div class="col-span-2 flex items-center gap-2 pb-2 mb-1 border-b border-white/10">
-            <i data-lucide="map" class="w-4 h-4 text-indigo-400"></i>
-            <div class="font-bold tracking-wider uppercase text-white text-[11px]">Kopek · City Builder</div>
-          </div>
-          <div class="rounded-xl bg-red-500/10 border border-red-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-red-300/90">Socle</div>
-            <div id="hud-socle" class="font-mono font-bold text-red-300 text-[13px] mt-0.5">—</div>
-          </div>
-          <div class="rounded-xl bg-fuchsia-500/10 border border-fuchsia-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-fuchsia-300/90">Garantie</div>
-            <div id="hud-garanti" class="font-mono font-bold text-fuchsia-300 text-[13px] mt-0.5">—</div>
-          </div>
-          <div class="rounded-xl bg-emerald-500/10 border border-emerald-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-emerald-300/90">Bonus</div>
-            <div id="hud-bonus" class="font-mono font-bold text-emerald-300 text-[13px] mt-0.5">—</div>
-          </div>
-          <div class="rounded-xl bg-indigo-500/10 border border-indigo-400/30 p-2">
-            <div class="text-[9px] uppercase tracking-wider text-indigo-300/90">Population</div>
-            <div id="hud-pop" class="font-mono font-bold text-indigo-300 text-[13px] mt-0.5">—</div>
-          </div>
-          <div class="col-span-2 rounded-xl bg-amber-500/10 border border-amber-400/30 p-2.5">
-            <div class="flex items-center justify-between">
-              <div>
-                <div class="text-[9px] uppercase tracking-wider text-amber-300/90">Acquis Contractuel (€ HT)</div>
-                <div id="hud-acquis" class="font-mono font-bold text-amber-300 text-[14px] mt-0.5">—</div>
+
+        <div class="absolute inset-x-0 top-0 z-10 p-3 sm:p-4 lg:p-5">
+          <div class="flex flex-col gap-3">
+            <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-3">
+              <div class="pointer-events-auto max-w-2xl rounded-3xl border border-white/10 bg-zinc-950/72 backdrop-blur-2xl shadow-2xl px-4 py-4">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="inline-flex items-center gap-2 rounded-full border border-amber-400/35 bg-amber-400/10 px-3 py-1 text-[10px] uppercase tracking-[0.22em] text-amber-200 font-semibold">
+                    <span class="h-2 w-2 rounded-full bg-amber-300 badge-pulse"></span>
+                    Imperium Kopek · 4X
+                  </span>
+                  <span id="empire-season" class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] uppercase tracking-[0.22em] text-zinc-300 font-semibold">Campagne impériale</span>
+                </div>
+                <div class="mt-3">
+                  <div id="empire-goal" class="text-xl sm:text-2xl font-semibold tracking-tight text-white">Forger un empire insulaire digne des grandes puissances.</div>
+                  <div id="empire-goal-sub" class="mt-1.5 text-sm text-zinc-300 max-w-xl">Explorez, fondez des provinces, fortifiez vos routes maritimes et transformez votre capitale en cité-monde monumentale.</div>
+                </div>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <span id="empire-status" class="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-[11px] text-emerald-200">Statut impérial</span>
+                  <span id="empire-threat" class="inline-flex items-center gap-2 rounded-full border border-red-400/25 bg-red-500/10 px-3 py-1 text-[11px] text-red-200">Pression rivale</span>
+                  <span id="empire-turn" class="inline-flex items-center gap-2 rounded-full border border-indigo-400/25 bg-indigo-500/10 px-3 py-1 text-[11px] text-indigo-200">Tour —</span>
+                </div>
               </div>
-              <div class="text-right">
-                <div class="text-[9px] uppercase tracking-wider text-zinc-400">+ Bonus</div>
-                <div id="hud-ca-bonus" class="font-mono font-bold text-emerald-400 text-[14px] mt-0.5">—</div>
+
+              <div class="pointer-events-auto grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
+                <div class="rounded-2xl border border-amber-400/20 bg-zinc-950/74 backdrop-blur-xl px-3 py-2 shadow-xl">
+                  <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Trésor</div>
+                  <div id="empire-treasury" class="mt-1 font-mono text-[15px] font-bold text-amber-300">—</div>
+                </div>
+                <div class="rounded-2xl border border-emerald-400/20 bg-zinc-950/74 backdrop-blur-xl px-3 py-2 shadow-xl">
+                  <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Vivres</div>
+                  <div id="empire-food" class="mt-1 font-mono text-[15px] font-bold text-emerald-300">—</div>
+                </div>
+                <div class="rounded-2xl border border-stone-400/20 bg-zinc-950/74 backdrop-blur-xl px-3 py-2 shadow-xl">
+                  <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Pierre</div>
+                  <div id="empire-stone" class="mt-1 font-mono text-[15px] font-bold text-stone-200">—</div>
+                </div>
+                <div class="rounded-2xl border border-sky-400/20 bg-zinc-950/74 backdrop-blur-xl px-3 py-2 shadow-xl">
+                  <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Fer</div>
+                  <div id="empire-iron" class="mt-1 font-mono text-[15px] font-bold text-sky-300">—</div>
+                </div>
+                <div class="rounded-2xl border border-fuchsia-400/20 bg-zinc-950/74 backdrop-blur-xl px-3 py-2 shadow-xl">
+                  <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Prestige</div>
+                  <div id="empire-prestige" class="mt-1 font-mono text-[15px] font-bold text-fuchsia-300">—</div>
+                </div>
+                <div class="rounded-2xl border border-indigo-400/20 bg-zinc-950/74 backdrop-blur-xl px-3 py-2 shadow-xl">
+                  <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Influence & bonus</div>
+                  <div id="empire-command" class="mt-1 font-mono text-[15px] font-bold text-indigo-300">—</div>
+                </div>
               </div>
             </div>
-            <div class="mt-2 h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
-              <div id="hud-bar" class="h-full bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-emerald-400" style="width:0%"></div>
+          </div>
+        </div>
+
+        <div class="absolute inset-x-0 bottom-0 z-10 p-3 sm:p-4 lg:p-5">
+          <div class="grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.95fr)] items-end">
+            <div class="pointer-events-auto rounded-3xl border border-white/10 bg-zinc-950/76 backdrop-blur-2xl shadow-2xl p-3 sm:p-4">
+              <div class="flex items-center justify-between gap-3 pb-3 border-b border-white/10">
+                <div>
+                  <div class="text-[11px] uppercase tracking-[0.22em] text-zinc-500">Conseil de guerre</div>
+                  <div class="text-white font-semibold text-base">Actions stratégiques</div>
+                </div>
+                <div class="hidden sm:block text-[11px] text-zinc-400">Les heures encodées n’alimentent que vos bonus d’exécution, pas la boucle centrale.</div>
+              </div>
+              <div class="mt-3 grid grid-cols-2 lg:grid-cols-3 gap-2.5">
+                <button type="button" data-empire-action="scout" class="empire-action group rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-3 text-left transition hover:bg-white/[0.08]">
+                  <div class="flex items-center gap-2 text-amber-300 text-sm font-semibold"><i data-lucide="compass" class="w-4 h-4"></i><span>Explorer</span></div>
+                  <div class="mt-1 text-[11px] text-zinc-400">Révéler une province et préparer l’expansion.</div>
+                  <div class="empire-action-meta mt-2 text-[11px] font-mono text-zinc-500">Coût</div>
+                </button>
+                <button type="button" data-empire-action="colony" class="empire-action group rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-3 text-left transition hover:bg-white/[0.08]">
+                  <div class="flex items-center gap-2 text-emerald-300 text-sm font-semibold"><i data-lucide="flag" class="w-4 h-4"></i><span>Fonder</span></div>
+                  <div class="mt-1 text-[11px] text-zinc-400">Créer une nouvelle province sur un territoire scouted.</div>
+                  <div class="empire-action-meta mt-2 text-[11px] font-mono text-zinc-500">Coût</div>
+                </button>
+                <button type="button" data-empire-action="harbor" class="empire-action group rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-3 text-left transition hover:bg-white/[0.08]">
+                  <div class="flex items-center gap-2 text-sky-300 text-sm font-semibold"><i data-lucide="anchor" class="w-4 h-4"></i><span>Port militaire</span></div>
+                  <div class="mt-1 text-[11px] text-zinc-400">Sécuriser vos routes maritimes et la flotte impériale.</div>
+                  <div class="empire-action-meta mt-2 text-[11px] font-mono text-zinc-500">Coût</div>
+                </button>
+                <button type="button" data-empire-action="legion" class="empire-action group rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-3 text-left transition hover:bg-white/[0.08]">
+                  <div class="flex items-center gap-2 text-red-300 text-sm font-semibold"><i data-lucide="shield" class="w-4 h-4"></i><span>Lever des légions</span></div>
+                  <div class="mt-1 text-[11px] text-zinc-400">Augmenter la puissance terrestre et la défense des provinces.</div>
+                  <div class="empire-action-meta mt-2 text-[11px] font-mono text-zinc-500">Coût</div>
+                </button>
+                <button type="button" data-empire-action="edict" class="empire-action group rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-3 text-left transition hover:bg-white/[0.08]">
+                  <div class="flex items-center gap-2 text-indigo-300 text-sm font-semibold"><i data-lucide="scroll-text" class="w-4 h-4"></i><span>Décret impérial</span></div>
+                  <div class="mt-1 text-[11px] text-zinc-400">Stabiliser l’empire, accélérer l’administration et les chaussées.</div>
+                  <div class="empire-action-meta mt-2 text-[11px] font-mono text-zinc-500">Coût</div>
+                </button>
+                <button type="button" data-empire-action="wonder" class="empire-action group rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-3 text-left transition hover:bg-white/[0.08]">
+                  <div class="flex items-center gap-2 text-fuchsia-300 text-sm font-semibold"><i data-lucide="landmark" class="w-4 h-4"></i><span>Merveille</span></div>
+                  <div class="mt-1 text-[11px] text-zinc-400">Élever un monument impérial et gagner du prestige durable.</div>
+                  <div class="empire-action-meta mt-2 text-[11px] font-mono text-zinc-500">Coût</div>
+                </button>
+              </div>
             </div>
-            <div id="hud-label" class="mt-1 text-[10px] text-zinc-400 font-mono">—</div>
+
+            <div class="pointer-events-auto rounded-3xl border border-white/10 bg-zinc-950/76 backdrop-blur-2xl shadow-2xl p-3 sm:p-4">
+              <div class="flex items-center justify-between gap-3 pb-3 border-b border-white/10">
+                <div>
+                  <div class="text-[11px] uppercase tracking-[0.22em] text-zinc-500">État de l’empire</div>
+                  <div class="text-white font-semibold text-base">Campagne & intégration métier</div>
+                </div>
+                <div id="empire-victory" class="hidden rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-[11px] text-emerald-200">Victoire impériale prête</div>
+              </div>
+
+              <div class="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                <div class="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2">
+                  <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Provinces</div>
+                  <div id="empire-provinces" class="mt-1 font-mono text-[14px] font-bold text-white">—</div>
+                </div>
+                <div class="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2">
+                  <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Carte révélée</div>
+                  <div id="empire-scouted" class="mt-1 font-mono text-[14px] font-bold text-white">—</div>
+                </div>
+                <div class="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2">
+                  <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Légions</div>
+                  <div id="empire-legions" class="mt-1 font-mono text-[14px] font-bold text-white">—</div>
+                </div>
+                <div class="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2">
+                  <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Flottes</div>
+                  <div id="empire-fleets" class="mt-1 font-mono text-[14px] font-bold text-white">—</div>
+                </div>
+                <div class="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2">
+                  <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Stabilité</div>
+                  <div id="empire-stability" class="mt-1 font-mono text-[14px] font-bold text-white">—</div>
+                </div>
+                <div class="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2">
+                  <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Merveilles</div>
+                  <div id="empire-wonders" class="mt-1 font-mono text-[14px] font-bold text-white">—</div>
+                </div>
+              </div>
+
+              <div class="mt-3 rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-3">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Avancée de campagne</div>
+                    <div id="empire-progress-label" class="mt-1 text-sm font-semibold text-white">—</div>
+                  </div>
+                  <div class="text-right">
+                    <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Acquis métier</div>
+                    <div id="empire-contract-acquis" class="mt-1 font-mono text-[13px] font-bold text-amber-300">—</div>
+                  </div>
+                </div>
+                <div class="mt-3 h-2 rounded-full bg-zinc-800 overflow-hidden">
+                  <div id="empire-progress-bar" class="h-full w-0 bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-amber-400 transition-all duration-500"></div>
+                </div>
+                <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                  <div id="empire-contract-hours" class="text-zinc-400 font-mono">—</div>
+                  <div id="empire-contract-bonus" class="text-emerald-300 font-mono">—</div>
+                </div>
+              </div>
+
+              <div class="mt-3 rounded-2xl border border-white/10 bg-zinc-900/70 px-3 py-3">
+                <div class="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Conseil impérial</div>
+                <div id="empire-advice" class="mt-1 text-sm text-zinc-200">—</div>
+              </div>
+
+              <div id="empire-inspector" class="mt-3 rounded-2xl border border-white/10 bg-black/25 px-3 py-3 hidden">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <div id="empire-inspector-clan" class="text-[10px] uppercase tracking-[0.18em] text-indigo-300">Province</div>
+                    <div id="empire-inspector-name" class="text-sm font-semibold text-white">—</div>
+                  </div>
+                  <button type="button" id="empire-inspector-close" class="h-8 w-8 rounded-xl border border-white/10 bg-white/5 text-zinc-300 hover:bg-white/10">✕</button>
+                </div>
+                <div class="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                  <div class="rounded-xl bg-white/[0.04] px-2.5 py-2">
+                    <div class="text-zinc-500 uppercase tracking-[0.15em] text-[9px]">Secteur</div>
+                    <div id="empire-inspector-district" class="mt-1 text-zinc-200">—</div>
+                  </div>
+                  <div class="rounded-xl bg-white/[0.04] px-2.5 py-2">
+                    <div class="text-zinc-500 uppercase tracking-[0.15em] text-[9px]">Statut</div>
+                    <div id="empire-inspector-status" class="mt-1 text-zinc-200">—</div>
+                  </div>
+                  <div class="col-span-2 rounded-xl bg-white/[0.04] px-2.5 py-2">
+                    <div class="text-zinc-500 uppercase tracking-[0.15em] text-[9px]">Lecture stratégique</div>
+                    <div id="empire-inspector-hours" class="mt-1 font-mono text-amber-300">—</div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -702,6 +850,6 @@
 <div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] px-4 py-2.5 bg-zinc-900/95 border border-zinc-700 text-sm rounded-xl shadow-2xl flex items-center gap-2 fade-in"></div>
 
 <script type="module" src="./firebase-config.js?v=2026-09-09-01"></script>
-<script type="module" src="./app.js?v=2026-09-09-01"></script>
+<script type="module" src="./app.js?v=2026-09-09-03"></script>
 </body>
 </html>

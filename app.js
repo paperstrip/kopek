@@ -15,7 +15,7 @@ import {
   setDoc,
   onSnapshot,
 } from './firebase-config.js?v=2026-09-09-01';
-import { initThreeGame, updateCity, triggerLogEffect } from './three-game.js';
+import { initThreeGame, updateCity, triggerLogEffect } from './three-game.js?v=2026-09-09-03';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -261,6 +261,7 @@ function initApp() {
     bindTopBar();
     bindHoursWizard();
     bindModals();
+    bindEmpireUi();
     if (!threeInitialized) {
       try {
         initThreeGame();
@@ -870,19 +871,33 @@ function renderNessyGauge(agg) {
 }
 
 // =================================================================
-// 🏙️  KOPEK · CITY BUILDER 3D · jeu Three.js SimCity
+// 🏛️ IMPERIUM KOPEK · CAMPAGNE 4X
 // -----------------------------------------------------------------
-// Le jeu LIT les heures encodées, il ne les écrit jamais.
-// Aucune action de jeu ne peut modifier une prestation, un projet
-// ou la facturation. Le sens unique est garanti ici, par convention.
+// Le jeu persiste en localStorage et vit comme une vraie campagne
+// indépendante. Les heures encodées n'en sont qu'un bonus tactique.
 // =================================================================
 let lastCityAgg = null;
+let empireStateCache = null;
+let empireBound = false;
+
 const CLAN_COLORS = [
   '#6366f1', '#8b5cf6', '#d946ef', '#ec4899',
   '#f43f5e', '#f97316', '#eab308', '#84cc16',
   '#22c55e', '#10b981', '#14b8a6', '#06b6d4',
   '#0ea5e9', '#3b82f6', '#a855f7', '#f59e0b',
 ];
+const EMPIRE_STORAGE_VERSION = 3;
+const EMPIRE_ACTIONS = {
+  scout: { icon: 'compass', label: 'Explorer', cost: { treasury: 20, influence: 12 } },
+  colony: { icon: 'flag', label: 'Fonder', cost: { treasury: 55, food: 42, stone: 36 } },
+  harbor: { icon: 'anchor', label: 'Port militaire', cost: { treasury: 48, stone: 32, iron: 16 } },
+  legion: { icon: 'shield', label: 'Lever des légions', cost: { treasury: 38, food: 24, iron: 22 } },
+  edict: { icon: 'scroll-text', label: 'Décret impérial', cost: { treasury: 24, influence: 16 } },
+  wonder: { icon: 'landmark', label: 'Merveille', cost: { treasury: 135, stone: 120, influence: 32 } },
+};
+
+function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
+
 function clanColor(id, idx = 0) {
   if (!id) return CLAN_COLORS[idx % CLAN_COLORS.length];
   let h = 0;
@@ -890,27 +905,386 @@ function clanColor(id, idx = 0) {
   return CLAN_COLORS[h % CLAN_COLORS.length];
 }
 
+function empireStorageKey() {
+  return `kopek_empire_v${EMPIRE_STORAGE_VERSION}_${STATE.user?.uid || 'anon'}`;
+}
+
+function defaultEmpireState() {
+  return {
+    version: EMPIRE_STORAGE_VERSION,
+    owner: STATE.user?.uid || 'anon',
+    turn: 1,
+    provinces: 1,
+    scouted: 2,
+    ports: 1,
+    roads: 1,
+    granaries: 1,
+    legions: 1,
+    fleets: 1,
+    wonders: 0,
+    decrees: 0,
+    treasury: 180,
+    food: 125,
+    stone: 90,
+    iron: 42,
+    influence: 18,
+    stability: 72,
+    prestige: 8,
+    rivalPressure: 2,
+    battleReadiness: 42,
+    lastAction: 'Le conseil impérial a consolidé la capitale et ouvert les premières routes maritimes.',
+  };
+}
+
+function normalizeEmpireState(raw = {}) {
+  const merged = { ...defaultEmpireState(), ...(raw || {}) };
+  merged.version = EMPIRE_STORAGE_VERSION;
+  merged.owner = STATE.user?.uid || merged.owner || 'anon';
+  merged.turn = Math.max(1, Number(merged.turn) || 1);
+  merged.provinces = clamp(Number(merged.provinces) || 1, 1, 9);
+  merged.scouted = clamp(Number(merged.scouted) || 2, merged.provinces, 9);
+  merged.ports = clamp(Number(merged.ports) || 0, 0, 9);
+  merged.roads = clamp(Number(merged.roads) || 0, 0, 12);
+  merged.granaries = clamp(Number(merged.granaries) || 0, 0, 12);
+  merged.legions = clamp(Number(merged.legions) || 1, 1, 12);
+  merged.fleets = clamp(Number(merged.fleets) || 0, 0, 10);
+  merged.wonders = clamp(Number(merged.wonders) || 0, 0, 4);
+  merged.decrees = clamp(Number(merged.decrees) || 0, 0, 12);
+  merged.treasury = Math.max(0, Math.round(Number(merged.treasury) || 0));
+  merged.food = Math.max(0, Math.round(Number(merged.food) || 0));
+  merged.stone = Math.max(0, Math.round(Number(merged.stone) || 0));
+  merged.iron = Math.max(0, Math.round(Number(merged.iron) || 0));
+  merged.influence = Math.max(0, Math.round(Number(merged.influence) || 0));
+  merged.stability = clamp(Math.round(Number(merged.stability) || 70), 25, 100);
+  merged.prestige = Math.max(0, Math.round(Number(merged.prestige) || 0));
+  merged.rivalPressure = clamp(Math.round(Number(merged.rivalPressure) || 0), 0, 10);
+  merged.battleReadiness = clamp(Math.round(Number(merged.battleReadiness) || 0), 0, 100);
+  merged.lastAction = String(merged.lastAction || defaultEmpireState().lastAction);
+  return merged;
+}
+
+function getEmpireState() {
+  const owner = STATE.user?.uid || 'anon';
+  if (empireStateCache && empireStateCache.owner === owner) return empireStateCache;
+  try {
+    const raw = localStorage.getItem(empireStorageKey());
+    empireStateCache = normalizeEmpireState(raw ? JSON.parse(raw) : {});
+  } catch {
+    empireStateCache = normalizeEmpireState({});
+  }
+  return empireStateCache;
+}
+
+function saveEmpireState(nextState) {
+  const normalized = normalizeEmpireState(nextState);
+  empireStateCache = normalized;
+  try {
+    localStorage.setItem(empireStorageKey(), JSON.stringify(normalized));
+  } catch { /* localStorage indisponible */ }
+  return normalized;
+}
+
+function getEmpireBonuses(agg) {
+  const billedH = (agg.mainBilledMinutes || 0) / 60;
+  const totalH = STATE.allLogs.reduce((a, l) => a + (l.billed_minutes || 0), 0) / 60;
+  const externalClients = STATE.clients.filter((c) => c.is_external).length;
+  return {
+    command: Math.max(0, Math.floor(billedH / 6) + Math.floor((agg.refundedH || 0) / 8)),
+    tribute: Math.max(0, Math.round((agg.mainFinalCA + agg.secondaryEur) / 1400) + externalClients),
+    logistics: Math.max(0, Math.floor(totalH / 10)),
+    morale: Math.max(0, Math.floor((agg.refundedH || 0) / 9)),
+    prestige: Math.max(0, Math.floor((agg.bonusEur || 0) / 300)),
+  };
+}
+
+function empireIncome(state, bonus) {
+  return {
+    treasury: 18 + state.provinces * 12 + state.ports * 9 + state.roads * 4 + bonus.tribute * 3,
+    food: 14 + state.provinces * 8 + state.granaries * 7 + bonus.logistics * 2,
+    stone: 7 + state.provinces * 4 + state.wonders * 3,
+    iron: 5 + state.provinces * 3 + state.ports * 2,
+    influence: 5 + state.wonders * 4 + state.decrees + bonus.command,
+  };
+}
+
+function getEmpireObjective(state) {
+  if (state.provinces < 3) {
+    return {
+      title: 'Stabiliser le coeur de l’archipel',
+      sub: 'Explorez davantage la carte puis fondez deux nouvelles provinces pour sortir de la phase de survie.',
+      advice: 'Priorité immédiate : exploration puis colonisation. Sans provinces supplémentaires, votre empire reste trop étroit.',
+      progress: Math.round((state.provinces / 3) * 100),
+      status: 'Expansion initiale',
+    };
+  }
+  if (state.ports < 2 || state.fleets < 2) {
+    return {
+      title: 'Sécuriser les routes maritimes impériales',
+      sub: 'Développez vos ports et votre flotte. Un empire insulaire sans mer maîtrisée finit étranglé.',
+      advice: 'Érigez au moins deux ports militaires pour transformer vos revenus en vraie puissance logistique.',
+      progress: Math.round((((state.ports + state.fleets) / 4)) * 100),
+      status: 'Maîtrise navale',
+    };
+  }
+  if (state.wonders < 2) {
+    return {
+      title: 'Élever les merveilles de l’empire',
+      sub: 'Vos rivaux vous craignent déjà. Il faut maintenant les écraser symboliquement par l’architecture et le prestige.',
+      advice: 'Accumulez pierre, trésor et influence. Les merveilles font basculer l’empire dans l’âge monumental.',
+      progress: Math.round((state.wonders / 2) * 100),
+      status: 'Âge monumental',
+    };
+  }
+  const prestigeTarget = 90;
+  const progress = Math.round(Math.min(1, state.prestige / prestigeTarget) * 100);
+  return {
+    title: 'Unifier définitivement l’archipel des couronnes',
+    sub: 'Atteignez 7 provinces, 2 merveilles et 90 de prestige pour imposer votre hégémonie impériale.',
+    advice: 'Vos prochains tours doivent convertir votre avantage économique en domination politique totale.',
+    progress,
+    status: state.prestige >= prestigeTarget && state.provinces >= 7 ? 'Victoire imminente' : 'Hégémonie',
+  };
+}
+
+function buildEmpireView(agg, clansData) {
+  const state = getEmpireState();
+  const bonus = getEmpireBonuses(agg);
+  const income = empireIncome(state, bonus);
+  const objective = getEmpireObjective(state);
+  const military = (state.legions * 18) + (state.fleets * 15) + Math.round(state.battleReadiness * 0.65) + (bonus.command * 5);
+  const frontier = Math.max(0, state.scouted - state.provinces);
+  const seasonNames = ['Aube civique', 'Campagne de printemps', 'Saison des moissons', 'Mer calme', 'Vent d’expansion', 'Hiver stratégique'];
+  const season = seasonNames[(state.turn - 1) % seasonNames.length];
+  const contractHours = agg.refundedH || 0;
+  const bonusHours = Math.max(0, contractHours - NESSY.minHoursEq);
+  const victoryReady = state.provinces >= 7 && state.wonders >= 2 && state.prestige >= 90 && state.stability >= 65;
+  return {
+    state,
+    bonus,
+    income,
+    objective,
+    military,
+    frontier,
+    season,
+    clansData,
+    victoryReady,
+    contractHours,
+    bonusHours,
+    contractAcquired: Math.max(0, (agg.mainFinalCA || 0) - (agg.bonusEur || 0)),
+  };
+}
+
+function hasEnoughResources(state, cost) {
+  return Object.entries(cost).every(([key, value]) => (state[key] || 0) >= value);
+}
+
+function costLabel(cost) {
+  const labels = {
+    treasury: 'or',
+    food: 'vivres',
+    stone: 'pierre',
+    iron: 'fer',
+    influence: 'influence',
+  };
+  return Object.entries(cost).map(([k, v]) => `${v} ${labels[k] || k}`).join(' · ');
+}
+
+function advanceEmpireTurn(state, bonus, narrative) {
+  const income = empireIncome(state, bonus);
+  state.turn += 1;
+  state.treasury += income.treasury;
+  state.food += income.food;
+  state.stone += income.stone;
+  state.iron += income.iron;
+  state.influence += income.influence;
+  state.prestige += Math.min(6, Math.floor(state.provinces / 2)) + state.wonders + bonus.prestige;
+  state.roads = clamp(state.roads + (state.decrees > 0 ? 1 : 0), 0, 12);
+  state.granaries = clamp(state.granaries + (state.provinces > 2 ? 1 : 0), 1, 12);
+  state.rivalPressure = clamp(
+    state.rivalPressure
+      + (state.provinces > state.legions + 1 ? 1 : 0)
+      + (state.ports === 0 ? 1 : 0)
+      - (state.decrees > 0 ? 1 : 0),
+    0,
+    10,
+  );
+  state.battleReadiness = clamp(
+    state.battleReadiness + (state.legions * 2) + bonus.morale - state.rivalPressure,
+    18,
+    100,
+  );
+  state.stability = clamp(
+    state.stability + state.granaries + Math.min(2, bonus.morale) - Math.max(1, Math.ceil(state.rivalPressure / 2)),
+    25,
+    100,
+  );
+  state.lastAction = narrative;
+  return state;
+}
+
+function bindEmpireUi() {
+  if (empireBound) return;
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-empire-action]');
+    if (btn) {
+      runEmpireAction(btn.getAttribute('data-empire-action'));
+      return;
+    }
+    if (e.target.closest('#empire-inspector-close')) {
+      $('#empire-inspector')?.classList.add('hidden');
+    }
+  });
+  empireBound = true;
+}
+
+function runEmpireAction(actionKey) {
+  if (!STATE.user || !lastCityAgg) return;
+  const action = EMPIRE_ACTIONS[actionKey];
+  if (!action) return;
+
+  const state = { ...getEmpireState() };
+  const bonus = getEmpireBonuses(lastCityAgg);
+
+  if (!hasEnoughResources(state, action.cost)) {
+    toast(`Ressources insuffisantes · ${costLabel(action.cost)}`, 'shield-alert', 'warn');
+    return;
+  }
+
+  if (actionKey === 'colony' && state.scouted <= state.provinces) {
+    toast('Explorez d’abord une province supplémentaire avant de fonder une colonie.', 'compass', 'warn');
+    return;
+  }
+  if (actionKey === 'wonder' && state.provinces < 3) {
+    toast('Il faut d’abord un empire stable de 3 provinces pour lancer une merveille.', 'landmark', 'warn');
+    return;
+  }
+
+  Object.entries(action.cost).forEach(([key, value]) => { state[key] -= value; });
+
+  let narrative = '';
+  switch (actionKey) {
+    case 'scout':
+      state.scouted = clamp(state.scouted + 1 + (bonus.command >= 3 ? 1 : 0), state.provinces, 9);
+      state.prestige += 2;
+      state.influence += bonus.command > 0 ? 1 : 0;
+      narrative = 'Vos éclaireurs ont révélé de nouvelles routes et repéré des rivages propices à la colonisation.';
+      break;
+    case 'colony':
+      state.provinces += 1;
+      state.ports += state.provinces % 2 === 0 ? 1 : 0;
+      state.stability -= 3;
+      state.prestige += 5;
+      narrative = 'Une nouvelle province a prêté serment. Les routes, les vivres et les garnisons doivent désormais suivre.';
+      break;
+    case 'harbor':
+      state.ports += 1;
+      state.fleets += 1;
+      state.prestige += 3;
+      narrative = 'Le littoral impérial s’est hérissé de quais, d’arsenaux et d’escadres. La mer devient votre autoroute.';
+      break;
+    case 'legion':
+      state.legions += 1;
+      state.battleReadiness = clamp(state.battleReadiness + 10, 0, 100);
+      state.rivalPressure = clamp(state.rivalPressure - 1, 0, 10);
+      narrative = 'De nouvelles légions ont prêté serment. L’empire impose désormais sa loi au lieu de la négocier.';
+      break;
+    case 'edict':
+      state.decrees += 1;
+      state.stability = clamp(state.stability + 8, 0, 100);
+      state.influence += 3;
+      narrative = 'Un décret impérial restructure les chaussées, les greniers et les flux administratifs de l’archipel.';
+      break;
+    case 'wonder':
+      state.wonders += 1;
+      state.prestige += 18;
+      state.stability = clamp(state.stability + 6, 0, 100);
+      narrative = 'Les maîtres d’œuvre dressent une merveille impériale. Désormais, le territoire parle de vous avant même de commercer avec vous.';
+      break;
+    default:
+      return;
+  }
+
+  saveEmpireState(advanceEmpireTurn(state, bonus, narrative));
+  toast(`${action.label} · ordre exécuté`, action.icon);
+  refreshPeriod();
+}
+
+function updateEmpireHud(view) {
+  const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+  const setHtml = (id, value) => { const el = document.getElementById(id); if (el) el.innerHTML = value; };
+  const state = view.state;
+  const objective = view.objective;
+
+  setText('empire-season', view.season);
+  setText('empire-goal', objective.title);
+  setText('empire-goal-sub', objective.sub);
+  setText('empire-turn', `Tour ${state.turn}`);
+  setText('empire-status', `${objective.status} · ${view.military} de puissance`);
+  setText('empire-threat', `Pression rivale ${state.rivalPressure}/10`);
+
+  setText('empire-treasury', `${state.treasury.toLocaleString('fr-BE')} or`);
+  setText('empire-food', `${state.food.toLocaleString('fr-BE')} vivres`);
+  setText('empire-stone', `${state.stone.toLocaleString('fr-BE')} pierre`);
+  setText('empire-iron', `${state.iron.toLocaleString('fr-BE')} fer`);
+  setText('empire-prestige', `${state.prestige.toLocaleString('fr-BE')} pts`);
+  setText('empire-command', `${state.influence} infl. · +${view.bonus.command} cmd`);
+
+  setText('empire-provinces', `${state.provinces} / 7`);
+  setText('empire-scouted', `${state.scouted} connues`);
+  setText('empire-legions', `${state.legions} cohortes`);
+  setText('empire-fleets', `${state.fleets} escadres`);
+  setText('empire-stability', `${state.stability}%`);
+  setText('empire-wonders', `${state.wonders} / 2`);
+
+  setText('empire-progress-label', `${objective.progress}% · ${objective.status}`);
+  const progressBar = document.getElementById('empire-progress-bar');
+  if (progressBar) progressBar.style.width = `${clamp(objective.progress, 0, 100)}%`;
+  setText('empire-contract-acquis', EUR(view.contractAcquired));
+  setText('empire-contract-hours', `${FR(view.contractHours)} h remboursées sur ${FR(NESSY.minHoursEq)} h`);
+  setText('empire-contract-bonus', `Bonus métier : +${EUR(lastCityAgg?.bonusEur || 0)} · surplus +${FR(view.bonusHours, 1)} h`);
+  setHtml('empire-advice', `${objective.advice}<div class="mt-2 text-[11px] text-zinc-400">${state.lastAction}</div>`);
+
+  const victory = document.getElementById('empire-victory');
+  if (victory) victory.classList.toggle('hidden', !view.victoryReady);
+
+  $$('[data-empire-action]').forEach((btn) => {
+    const action = EMPIRE_ACTIONS[btn.getAttribute('data-empire-action')];
+    if (!action) return;
+    const meta = btn.querySelector('.empire-action-meta');
+    const enabled = hasEnoughResources(state, action.cost)
+      && !(btn.dataset.empireAction === 'colony' && state.scouted <= state.provinces)
+      && !(btn.dataset.empireAction === 'wonder' && state.provinces < 3);
+    if (meta) meta.textContent = enabled ? costLabel(action.cost) : `Bloqué · ${costLabel(action.cost)}`;
+    btn.disabled = !enabled;
+    btn.className = `empire-action group rounded-2xl border px-3 py-3 text-left transition ${
+      enabled
+        ? 'border-white/10 bg-white/[0.04] hover:bg-white/[0.08]'
+        : 'border-white/5 bg-white/[0.02] opacity-50 cursor-not-allowed'
+    }`;
+  });
+}
+
 /** Appelé à chaque rendu du tableau de bord. */
 function renderCity(agg) {
   lastCityAgg = agg;
   if (!STATE.clients) return;
+
   const clientHours = new Map();
   const clientEur = new Map();
   for (const l of STATE.allLogs) {
     const cid = l.client_id;
     if (!cid) continue;
     const bm = l.billed_minutes || 0;
-    const eur = l.custom_price > 0
-      ? l.custom_price
-      : (bm / 60) * (l.rate_applied || 0);
+    const eur = l.custom_price > 0 ? l.custom_price : (bm / 60) * (l.rate_applied || 0);
     clientHours.set(cid, (clientHours.get(cid) || 0) + bm);
-    clientEur.set(cid,   (clientEur.get(cid)   || 0) + eur);
+    clientEur.set(cid, (clientEur.get(cid) || 0) + eur);
   }
+
   const clansData = STATE.clients
     .slice()
     .sort((a, b) => {
       if (!!a.is_external !== !!b.is_external) return a.is_external ? 1 : -1;
-      return (b.name || '').localeCompare(a.name || '');
+      return (clientEur.get(b.id) || 0) - (clientEur.get(a.id) || 0);
     })
     .map((c, i) => ({
       key: c.id,
@@ -920,37 +1294,14 @@ function renderCity(agg) {
       eur: clientEur.get(c.id) || 0,
       is_main: !c.is_external,
     }));
+
+  const view = buildEmpireView(agg, clansData);
+  updateEmpireHud(view);
+
   try {
-    updateCity(clansData, agg);
+    updateCity(clansData, agg, view);
   } catch (ex) {
     console.warn('[kopek] updateCity échoué', ex);
-  }
-  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  const socleH = NESSY.socleHours;
-  const garantieH = NESSY.minHoursEq;
-  const bonusH = Math.max(0, agg.refundedH - garantieH);
-  const mainClientCount = STATE.clients.filter((c) => !c.is_external).length;
-  const population = Math.round(
-    ((STATE.allLogs.reduce((a, l) => a + (l.billed_minutes || 0), 0) / 60) * 120)
-    + STATE.clients.length * 30
-    + mainClientCount * 180
-  );
-  const progress = agg ? Math.min(100, agg.gaugePct || 0) : 0;
-  const acquis = Math.max(0, (agg.mainFinalCA || 0) - (agg.bonusEur || 0));
-  setText('hud-socle',  `${FR(socleH)} h · ${EUR(NESSY.socleFlat)}`);
-  setText('hud-garanti', `${FR(garantieH)} h · ${EUR(NESSY.minGaranti)}`);
-  setText('hud-bonus',  `${FR(bonusH, 1)} h · ${EUR(agg.bonusEur || 0)}`);
-  setText('hud-pop',    population.toLocaleString('fr-BE'));
-  setText('hud-acquis', EUR(acquis));
-  setText('hud-ca-bonus', `+ ${EUR(agg.bonusEur || 0)}`);
-  const bar = document.getElementById('hud-bar');
-  if (bar) bar.style.width = `${progress}%`;
-  const label = document.getElementById('hud-label');
-  if (label) {
-    const refunded = agg.refundedH || 0;
-    if (refunded < 0.001) label.textContent = `0 / ${FR(garantieH)} h · contrat en attente`;
-    else if (refunded <= garantieH + 0.001) label.textContent = `${FR(refunded)} / ${FR(garantieH)} h · minimum garanti`;
-    else label.textContent = `${FR(refunded)} h · surplus +${FR(bonusH, 1)} h x ${NESSY.regieRate} €`;
   }
 }
 
