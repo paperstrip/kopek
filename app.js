@@ -15,7 +15,7 @@ import {
   setDoc,
   onSnapshot,
 } from './firebase-config.js?v=2026-09-09-01';
-import { initThreeGame, updateCity, triggerLogEffect } from './three-game.js?v=2026-09-09-06';
+import { initThreeGame, updateCity, triggerLogEffect } from './three-game.js?v=2026-09-09-07';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -1213,6 +1213,14 @@ function bindEmpireUi() {
       hide();
     });
   };
+
+  const hudWrap = document.getElementById('empire-hud-hidden');
+  const toggleHud = document.getElementById('empire-toggle-hud');
+  toggleHud?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!hudWrap) return;
+    hudWrap.classList.toggle('hidden');
+  });
 
   togglePanel('empire-advice-panel', 'empire-toggle-advice', 'empire-close-advice');
   togglePanel('empire-empire-panel', 'empire-toggle-empire', 'empire-close-empire');

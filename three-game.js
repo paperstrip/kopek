@@ -388,18 +388,48 @@ function setupLighting() {
 function buildHeightmap(size) {
   if (heightCache && heightCache.size === size) return heightCache.data;
   const data = [];
+  const peaks = [
+    { cx: 0.18, cy: 0.22, w: 0.09, h: 26 },
+    { cx: 0.82, cy: 0.18, w: 0.08, h: 22 },
+    { cx: 0.78, cy: 0.80, w: 0.09, h: 24 },
+    { cx: 0.22, cy: 0.75, w: 0.07, h: 18 },
+    { cx: 0.50, cy: 0.12, w: 0.06, h: 14 },
+    { cx: 0.14, cy: 0.48, w: 0.05, h: 11 },
+    { cx: 0.86, cy: 0.52, w: 0.05, h: 11 },
+  ];
+  const hills = [];
+  for (let i = 0; i < 22; i++) {
+    hills.push({
+      cx: 0.22 + Math.random() * 0.56,
+      cy: 0.22 + Math.random() * 0.56,
+      w: 0.025 + Math.random() * 0.05,
+      h: 3 + Math.random() * 8,
+    });
+  }
   for (let y = 0; y < size; y++) {
     const row = [];
     for (let x = 0; x < size; x++) {
       const nx = x / size;
       const ny = y / size;
       const d = Math.hypot(nx - 0.5, ny - 0.5);
-      const edge = Math.max(0, d - 0.34);
-      const base = -Math.sin(Math.min(1.0, edge * 5.4)) * 9;
-      const n1 = Math.sin(nx * 11.3) * Math.cos(ny * 12.1) * 0.8;
-      const n2 = Math.sin((nx + 0.31) * 6.4 + ny * 7.6) * 0.65;
-      const n3 = Math.cos((nx + 0.13) * 4.8) * Math.sin((ny + 0.05) * 3.9) * 0.45;
-      row.push(base + n1 + n2 + n3);
+      const edge = Math.max(0, d - 0.32);
+      const base = -Math.sin(Math.min(1.0, edge * 5.0)) * 12;
+      const n1 = Math.sin(nx * 14.2) * Math.cos(ny * 15.8) * 1.6;
+      const n2 = Math.sin((nx + 0.31) * 8.6 + ny * 10.2) * 1.3;
+      const n3 = Math.cos((nx + 0.13) * 6.2) * Math.sin((ny + 0.05) * 5.4) * 0.9;
+      let peakSum = 0;
+      for (let k = 0; k < peaks.length; k++) {
+        const p = peaks[k];
+        const pd = Math.hypot(nx - p.cx, ny - p.cy) / p.w;
+        if (pd < 1) peakSum += p.h * (1 - pd * pd);
+      }
+      let hillSum = 0;
+      for (let k = 0; k < hills.length; k++) {
+        const p = hills[k];
+        const pd = Math.hypot(nx - p.cx, ny - p.cy) / p.w;
+        if (pd < 1) hillSum += p.h * (1 - pd) * (1 - pd);
+      }
+      row.push(base + n1 + n2 + n3 + peakSum + hillSum);
     }
     data.push(row);
   }
@@ -459,18 +489,46 @@ function createMountainRing() {
 }
 
 function createOcean() {
-  const oceanGeo = new THREE.CircleGeometry(520, 96);
-  const oceanMat = waterMaterial();
+  const oceanGeo = new THREE.CircleGeometry(520, 128);
+  const oceanMat = new THREE.MeshPhysicalMaterial({
+    color: 0x0e2030,
+    metalness: 0.1,
+    roughness: 0.18,
+    transmission: 0.55,
+    thickness: 1.6,
+    ior: 1.42,
+    clearcoat: 0.85,
+    clearcoatRoughness: 0.12,
+    normalMap: waterNormalMap,
+    normalScale: new THREE.Vector2(0.85, 0.85),
+    transparent: true,
+    opacity: 0.94,
+    side: THREE.DoubleSide,
+  });
   const ocean = new THREE.Mesh(oceanGeo, oceanMat);
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.y = -3.2;
   ocean.receiveShadow = true;
   worldRoot.add(ocean);
 
+  const foamMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.06,
+  });
+  const foamGeo = new THREE.RingGeometry(300, 312, 128);
+  const foam = new THREE.Mesh(foamGeo, foamMat);
+  foam.rotation.x = -Math.PI / 2;
+  foam.position.y = -2.95;
+  worldRoot.add(foam);
+
   dynamicActors.push({
     update(time) {
-      oceanMat.normalMap.offset.x = (time * 0.012) % 1;
-      oceanMat.normalMap.offset.y = (time * 0.009) % 1;
+      if (oceanMat.normalMap) {
+        oceanMat.normalMap.offset.x = (time * 0.012) % 1;
+        oceanMat.normalMap.offset.y = (time * 0.009) % 1;
+      }
+      foam.position.y = -2.95 + Math.sin(time * 0.0035) * 0.25;
     },
   });
 }
@@ -638,6 +696,181 @@ function createPlaza(center, size, landAltitude) {
   return mesh;
 }
 
+function createPalais(mainSize = 1) {
+  const group = new THREE.Group();
+  const s = mainSize;
+  const baseStone = stoneMaterial(0x9a8e7c);
+  const wallStone = stoneMaterial(0xa49886);
+  const accentStone = stoneMaterial(0x8a7e6e);
+  const roof = roofMaterial(0x4a2618);
+  const roofAccent = roofMaterial(0x6b3a2a);
+  const windowGlow = new THREE.MeshStandardMaterial({
+    color: 0x2d2218,
+    emissive: 0xff9a3a,
+    emissiveIntensity: 0.52,
+    roughness: 0.3,
+    metalness: 0.08,
+  });
+
+  const socle1 = new THREE.Mesh(new THREE.BoxGeometry(34 * s, 1.8, 30 * s), accentStone);
+  socle1.position.y = 0.9;
+  socle1.castShadow = true;
+  socle1.receiveShadow = true;
+  group.add(socle1);
+
+  const socle2 = new THREE.Mesh(new THREE.BoxGeometry(30 * s, 1.2, 26 * s), baseStone);
+  socle2.position.y = 1.8 + 0.6;
+  socle2.castShadow = true;
+  socle2.receiveShadow = true;
+  group.add(socle2);
+
+  const stairs = new THREE.Mesh(
+    new THREE.BoxGeometry(12 * s, 0.4, 10 * s),
+    accentStone,
+  );
+  stairs.position.set(0, 1.8 + 0.2, 18 * s);
+  stairs.castShadow = true;
+  group.add(stairs);
+  for (let i = 1; i < 5; i++) {
+    const step = new THREE.Mesh(
+      new THREE.BoxGeometry((12 - i * 1.5) * s, 0.4, 2.2 * s),
+      baseStone,
+    );
+    step.position.set(0, 1.8 + 0.2 + i * 0.4, 18 * s - (i + 0.5) * 2.2 * s * 0.7);
+    step.castShadow = true;
+    group.add(step);
+  }
+
+  const wingL = new THREE.Mesh(new THREE.BoxGeometry(10 * s, 14 * s, 22 * s), wallStone);
+  wingL.position.set(-12 * s, 3.0 + (14 * s) / 2, 0);
+  wingL.castShadow = true;
+  wingL.receiveShadow = true;
+  group.add(wingL);
+  const wingR = wingL.clone();
+  wingR.position.x = 12 * s;
+  group.add(wingR);
+
+  const wingRoofL = new THREE.Mesh(new THREE.BoxGeometry(10.8 * s, 2.4 * s, 22.8 * s), roof);
+  wingRoofL.position.set(-12 * s, 3.0 + 14 * s + 1.2 * s, 0);
+  wingRoofL.castShadow = true;
+  group.add(wingRoofL);
+  const wingRoofR = wingRoofL.clone();
+  wingRoofR.position.x = 12 * s;
+  group.add(wingRoofR);
+
+  const corps = new THREE.Mesh(new THREE.BoxGeometry(16 * s, 20 * s, 22 * s), wallStone);
+  corps.position.set(0, 3.0 + (20 * s) / 2, -1 * s);
+  corps.castShadow = true;
+  corps.receiveShadow = true;
+  group.add(corps);
+
+  const pediment = new THREE.Mesh(new THREE.ConeGeometry(18 * s, 6 * s, 4), roofAccent);
+  pediment.rotation.y = Math.PI / 4;
+  pediment.position.set(0, 3.0 + 20 * s + 3 * s, -1 * s);
+  pediment.castShadow = true;
+  group.add(pediment);
+
+  const colonnadeCount = 5;
+  for (let i = 0; i < colonnadeCount; i++) {
+    const cx = -8 * s + (16 * s) * (i / (colonnadeCount - 1));
+    const col = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.45 * s, 0.55 * s, 9 * s, 14),
+      baseStone,
+    );
+    col.position.set(cx, 3.0 + 4.5 * s, 11 * s);
+    col.castShadow = true;
+    group.add(col);
+  }
+  const porchRoof = new THREE.Mesh(new THREE.BoxGeometry(17 * s, 0.9 * s, 4 * s), roof);
+  porchRoof.position.set(0, 3.0 + 9.45 * s, 11 * s);
+  porchRoof.castShadow = true;
+  group.add(porchRoof);
+
+  const domeBase = new THREE.Mesh(
+    new THREE.CylinderGeometry(5.5 * s, 6 * s, 3 * s, 20),
+    accentStone,
+  );
+  domeBase.position.set(0, 3.0 + 20 * s + 6 * s + 1.5 * s, -1 * s);
+  domeBase.castShadow = true;
+  group.add(domeBase);
+
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(5.5 * s, 32, 20, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshStandardMaterial({
+      color: 0x7a2e20,
+      metalness: 0.25,
+      roughness: 0.4,
+    }),
+  );
+  dome.position.set(0, 3.0 + 20 * s + 6 * s + 3 * s, -1 * s);
+  dome.castShadow = true;
+  group.add(dome);
+
+  const lantern = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.1 * s, 1.4 * s, 3 * s, 10),
+    baseStone,
+  );
+  lantern.position.set(0, 3.0 + 20 * s + 6 * s + 3 * s + 5.5 * s + 1.5 * s, -1 * s);
+  lantern.castShadow = true;
+  group.add(lantern);
+
+  const finial = new THREE.Mesh(
+    new THREE.SphereGeometry(0.6 * s, 14, 10),
+    new THREE.MeshStandardMaterial({ color: 0xffd66b, metalness: 0.9, roughness: 0.2 }),
+  );
+  finial.position.set(0, 3.0 + 20 * s + 6 * s + 3 * s + 5.5 * s + 3 * s + 0.6 * s, -1 * s);
+  group.add(finial);
+
+  for (let side = -1; side <= 1; side += 2) {
+    const towerBase = new THREE.Mesh(
+      new THREE.BoxGeometry(6 * s, 26 * s, 6 * s),
+      accentStone,
+    );
+    towerBase.position.set(side * 17 * s, 3.0 + 13 * s, -10 * s);
+    towerBase.castShadow = true;
+    towerBase.receiveShadow = true;
+    group.add(towerBase);
+    const belfry = new THREE.Mesh(
+      new THREE.BoxGeometry(5.2 * s, 4 * s, 5.2 * s),
+      baseStone,
+    );
+    belfry.position.set(side * 17 * s, 3.0 + 26 * s + 2 * s, -10 * s);
+    belfry.castShadow = true;
+    group.add(belfry);
+    const spire = new THREE.Mesh(
+      new THREE.ConeGeometry(3.8 * s, 8 * s, 4),
+      roof,
+    );
+    spire.rotation.y = Math.PI / 4;
+    spire.position.set(side * 17 * s, 3.0 + 26 * s + 4 * s + 4 * s, -10 * s);
+    spire.castShadow = true;
+    group.add(spire);
+  }
+
+  for (let face = 0; face < 4; face++) {
+    const faces = [
+      { dir: 'z+', cx: 0, cz: 11, nx: 0, nz: 1 },
+      { dir: 'z-', cx: 0, cz: -12, nx: 0, nz: -1 },
+      { dir: 'x-', cx: -12, cz: 0, nx: -1, nz: 0 },
+      { dir: 'x+', cx: 12, cz: 0, nx: 1, nz: 0 },
+    ];
+    const f = faces[face];
+    const levels = 5;
+    for (let lvl = 0; lvl < levels; lvl++) {
+      for (let i = -2; i <= 2; i++) {
+        const wx = (f.dir === 'z+' || f.dir === 'z-') ? i * 3.6 * s : f.cx * s;
+        const wz = (f.dir === 'z+' || f.dir === 'z-') ? f.cz * s + f.nz * 1.1 : i * 3.6 * s;
+        const wy = 5.0 + lvl * 3.2 * s;
+        const win = new THREE.Mesh(new THREE.BoxGeometry(1.3 * s, 1.7 * s, 0.2), windowGlow);
+        win.position.set(wx, wy, wz);
+        group.add(win);
+      }
+    }
+  }
+
+  return group;
+}
+
 function createColumnBuilding(width, depth, height, tint = 0x9e9282, roofTint = 0x5a2f24) {
   const group = new THREE.Group();
   const stone = stoneMaterial(tint);
@@ -690,66 +923,179 @@ function createColumnBuilding(width, depth, height, tint = 0x9e9282, roofTint = 
 
 function createTenement(w = 6, d = 7, h = 10) {
   const group = new THREE.Group();
-  const stone = stoneMaterial(0x968a7a);
-  const roof = roofMaterial(0x5a2f24);
+  const wallTints = [0x968a7a, 0x8e8272, 0xa49886, 0x8a7e6e, 0x9a8e7c, 0x9e9282];
+  const roofTints = [0x5a2f24, 0x4a2618, 0x6b3a2a, 0x552a20];
+  const wallTint = wallTints[Math.floor(Math.random() * wallTints.length)];
+  const roofTint = roofTints[Math.floor(Math.random() * roofTints.length)];
+  const stone = stoneMaterial(wallTint);
+  const roof = roofMaterial(roofTint);
+  const windowGlow = new THREE.MeshStandardMaterial({
+    color: 0x2d2218,
+    emissive: 0xffa64d,
+    emissiveIntensity: 0.42,
+    roughness: 0.3,
+    metalness: 0.05,
+  });
   const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), stone);
   body.position.y = h / 2;
   body.castShadow = true;
   body.receiveShadow = true;
   group.add(body);
 
+  if (h > 14 && Math.random() < 0.55) {
+    const topFloor = new THREE.Mesh(
+      new THREE.BoxGeometry(w * 0.86, 2.6, d * 0.86),
+      stoneMaterial(0x8e8272),
+    );
+    topFloor.position.y = h + 1.3;
+    topFloor.castShadow = true;
+    group.add(topFloor);
+  }
+
+  const stepX = Math.max(1.4, w / 4.6);
+  const cols = Math.max(2, Math.floor(w / stepX));
+  const rows = Math.max(3, Math.floor(h / 2.4));
   for (let z = -1; z <= 1; z += 2) {
-    for (let i = 0; i < Math.floor(h / 2.2); i++) {
-      const y = 1 + i * 2.2;
-      for (let x = -1; x <= 1; x++) {
-        const wx = x * (w / 3.2);
+    for (let r = 0; r < rows; r++) {
+      const y = 1.3 + r * (h - 1.3) / rows;
+      for (let c = 0; c < cols; c++) {
+        const wx = -w / 2 + stepX / 2 + c * stepX;
         const win = new THREE.Mesh(
-          new THREE.BoxGeometry(0.6, 0.8, 0.1),
-          new THREE.MeshStandardMaterial({ color: 0x3a2e1d, emissive: 0xffa64d, emissiveIntensity: 0.38, roughness: 0.25, metalness: 0.05 }),
+          new THREE.BoxGeometry(0.68, 0.92, 0.12),
+          windowGlow,
         );
         win.position.set(wx, y, (z * d) / 2 + (z * 0.06));
         group.add(win);
       }
     }
   }
+  for (let x = -1; x <= 1; x += 2) {
+    const rowsSide = Math.max(2, Math.floor(h / 2.8));
+    const stepZ = Math.max(1.4, d / 4.6);
+    const colsSide = Math.max(2, Math.floor(d / stepZ));
+    for (let r = 0; r < rowsSide; r++) {
+      const y = 1.5 + r * (h - 1.5) / rowsSide;
+      for (let c = 0; c < colsSide; c++) {
+        const wz = -d / 2 + stepZ / 2 + c * stepZ;
+        const win = new THREE.Mesh(
+          new THREE.BoxGeometry(0.12, 0.85, 0.68),
+          windowGlow,
+        );
+        win.position.set((x * w) / 2 + (x * 0.06), y, wz);
+        group.add(win);
+      }
+    }
+  }
 
-  const roofMesh = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.84, 2.6, 4), roof);
-  roofMesh.rotation.y = Math.PI / 4;
-  roofMesh.position.y = h + 1.3;
-  roofMesh.castShadow = true;
-  group.add(roofMesh);
+  const roofType = Math.random();
+  if (roofType < 0.55) {
+    const roofH = 1.8 + Math.random() * 1.4;
+    const roofMesh = new THREE.Mesh(
+      new THREE.ConeGeometry(Math.max(w, d) * 0.82, roofH, 4),
+      roof,
+    );
+    roofMesh.rotation.y = Math.PI / 4;
+    roofMesh.position.y = h + roofH / 2 + 0.6;
+    roofMesh.castShadow = true;
+    group.add(roofMesh);
+  } else if (roofType < 0.82) {
+    const terrace = new THREE.Mesh(
+      new THREE.BoxGeometry(w * 0.96, 0.4, d * 0.96),
+      roofMaterial(0x7e7366),
+    );
+    terrace.position.y = h + 0.2;
+    terrace.castShadow = true;
+    group.add(terrace);
+    const rail = new THREE.Mesh(
+      new THREE.BoxGeometry(w + 0.2, 0.7, 0.18),
+      stoneMaterial(0x6e6356),
+    );
+    rail.position.set(0, h + 0.75, d / 2 + 0.05);
+    group.add(rail);
+    const rail2 = rail.clone();
+    rail2.position.z = -d / 2 - 0.05;
+    group.add(rail2);
+  } else {
+    const mansard = new THREE.Mesh(
+      new THREE.BoxGeometry(w * 0.92, 2.2, d * 0.92),
+      roof,
+    );
+    mansard.position.y = h + 1.1;
+    mansard.castShadow = true;
+    group.add(mansard);
+  }
 
-  const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.8, 0.6), stoneMaterial(0x7e7366));
-  chimney.position.set(w / 4, h + 2, -d / 4);
-  chimney.castShadow = true;
-  group.add(chimney);
+  if (Math.random() < 0.72) {
+    const chimney = new THREE.Mesh(
+      new THREE.BoxGeometry(0.55, 1.6 + Math.random() * 1.2, 0.55),
+      stoneMaterial(0x7e7366),
+    );
+    chimney.position.set((Math.random() - 0.5) * w * 0.5, h + 1.8, (Math.random() - 0.5) * d * 0.5);
+    chimney.castShadow = true;
+    group.add(chimney);
+  }
+  if (Math.random() < 0.4) {
+    const balcony = new THREE.Mesh(
+      new THREE.BoxGeometry(w * 0.48, 0.12, 0.9),
+      stoneMaterial(0x8e8272),
+    );
+    const floor = Math.floor(Math.random() * Math.max(1, rows - 1));
+    balcony.position.set(0, 1.3 + (floor + 0.8) * (h - 1.3) / rows, d / 2 + 0.5);
+    balcony.castShadow = true;
+    group.add(balcony);
+  }
   return group;
 }
 
 function createWarehouse(w = 11, d = 8, h = 6) {
   const group = new THREE.Group();
-  const walls = stoneMaterial(0x8a7e6e);
-  const roof = roofMaterial(0x5a2f24);
+  const wallTints = [0x8a7e6e, 0x8e8272, 0x827664];
+  const roofTints = [0x4a3626, 0x5a2f24, 0x3e2a1c];
+  const walls = stoneMaterial(wallTints[Math.floor(Math.random() * wallTints.length)]);
+  const roof = roofMaterial(roofTints[Math.floor(Math.random() * roofTints.length)]);
   const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), walls);
   body.position.y = h / 2;
   body.castShadow = true;
   body.receiveShadow = true;
   group.add(body);
 
-  const arches = Math.max(3, Math.round(w / 2.6));
+  const arches = Math.max(2, Math.round(w / 3.6));
   for (let i = 0; i < arches; i++) {
     const x = -w / 2 + (w / (arches - 1)) * i;
     const door = new THREE.Mesh(
-      new THREE.BoxGeometry(1.2, 2.4, 0.22),
-      new THREE.MeshStandardMaterial({ color: 0x4a3626, roughness: 0.95 }),
+      new THREE.BoxGeometry(1.3, 2.8, 0.22),
+      new THREE.MeshStandardMaterial({ color: 0x3d2c1e, roughness: 0.96 }),
     );
-    door.position.set(x, 1.2, d / 2 + 0.12);
+    door.position.set(x, 1.4, d / 2 + 0.12);
     group.add(door);
   }
-  const roofMesh = new THREE.Mesh(new THREE.BoxGeometry(w + 0.5, 1.1, d + 0.5), roof);
-  roofMesh.position.y = h + 0.55;
-  roofMesh.castShadow = true;
-  group.add(roofMesh);
+
+  const roofKind = Math.random();
+  if (roofKind < 0.5) {
+    const roofMesh = new THREE.Mesh(new THREE.BoxGeometry(w + 0.5, 1.3, d + 0.5), roof);
+    roofMesh.position.y = h + 0.65;
+    roofMesh.castShadow = true;
+    group.add(roofMesh);
+  } else {
+    const ridge = new THREE.Mesh(
+      new THREE.BoxGeometry(w + 0.4, 0.5, 0.5),
+      roof,
+    );
+    ridge.position.set(0, h + 2.1, 0);
+    group.add(ridge);
+    const slopeA = new THREE.Mesh(
+      new THREE.BoxGeometry(w + 0.4, 0.3, d * 0.56),
+      roof,
+    );
+    slopeA.rotation.x = 0.62;
+    slopeA.position.set(0, h + 1.15, d * 0.22);
+    slopeA.castShadow = true;
+    group.add(slopeA);
+    const slopeB = slopeA.clone();
+    slopeB.rotation.x = -0.62;
+    slopeB.position.z = -d * 0.22;
+    group.add(slopeB);
+  }
   return group;
 }
 
@@ -955,32 +1301,33 @@ function createProvince(slot, data, landAltitude) {
   createPlaza(plaza, 18, landAltitude);
 
   if (slot.isMain) {
-    const capitol = createColumnBuilding(18, 24, 18, 0xf2e7cd, 0x9a573a);
+    const capitol = createPalais(1.0);
     capitol.position.set(center.x, alt(center.x, center.z) + 0.2, center.z);
     capitol.castShadow = true;
     province.add(capitol);
 
-    const forum = createColumnBuilding(12, 10, 9, 0xece0c8, 0x8e5835);
-    forum.position.set(center.x - 14, alt(center.x - 14, center.z + 10) + 0.15, center.z + 10);
-    forum.rotation.y = 0.8;
+    const forum = createPalais(0.55);
+    forum.position.set(center.x - 18, alt(center.x - 18, center.z + 12) + 0.15, center.z + 12);
+    forum.rotation.y = 0.6;
     forum.castShadow = true;
     province.add(forum);
 
-    const towerA = createColumnBuilding(6, 6, 26, 0xefdfc0, 0x7b482d);
-    towerA.scale.setScalar(0.85);
-    towerA.position.set(center.x + 13, alt(center.x + 13, center.z - 10) + 0.2, center.z - 10);
-    towerA.castShadow = true;
-    province.add(towerA);
+    const belfry = createPalais(0.42);
+    belfry.scale.set(0.9, 1.15, 0.9);
+    belfry.position.set(center.x + 17, alt(center.x + 17, center.z - 12) + 0.2, center.z - 12);
+    belfry.rotation.y = -0.5;
+    belfry.castShadow = true;
+    province.add(belfry);
 
-    const wonderHall = createColumnBuilding(16, 20, 22, 0xf4e8d2, 0x8c5336);
-    wonderHall.position.set(center.x - 8, alt(center.x - 8, center.z - 16) + 0.1, center.z - 16);
-    wonderHall.rotation.y = -0.4;
+    const wonderHall = createPalais(0.7);
+    wonderHall.position.set(center.x - 10, alt(center.x - 10, center.z - 18) + 0.1, center.z - 18);
+    wonderHall.rotation.y = -0.3;
     wonderHall.castShadow = true;
     wonderHall.visible = data.empireView.state.wonders > 0;
     province.add(wonderHall);
   } else {
     const districtCenter = new THREE.Vector3(center.x, 0, center.z);
-    const mainTemple = createColumnBuilding(9, 12, 12, 0xe9dcc2, 0x8a5536);
+    const mainTemple = createPalais(0.5);
     mainTemple.position.set(districtCenter.x, alt(districtCenter.x, districtCenter.z) + 0.15, districtCenter.z);
     mainTemple.castShadow = true;
     province.add(mainTemple);
@@ -994,8 +1341,8 @@ function createProvince(slot, data, landAltitude) {
     const bx = center.x + Math.cos(a) * r;
     const bz = center.z + Math.sin(a) * r;
     const build = slot.isMain || i % 3 === 0
-      ? createTenement(5.2 + Math.random() * 2.2, 5.2 + Math.random() * 2.2, 8 + Math.random() * 9)
-      : createWarehouse(9 + Math.random() * 3, 6 + Math.random() * 2, 5 + Math.random() * 2.5);
+      ? createTenement(4.5 + Math.random() * 3, 4.5 + Math.random() * 3, 10 + Math.random() * 16)
+      : createWarehouse(8 + Math.random() * 4, 5.5 + Math.random() * 3, 5 + Math.random() * 4);
     build.position.set(bx, alt(bx, bz), bz);
     build.rotation.y = a + Math.random() * 0.6;
     build.castShadow = true;
@@ -1379,8 +1726,8 @@ export function initThreeGame() {
   containerElement = canvasElement.parentElement;
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0e1629);
-  scene.fog = new THREE.FogExp2(0x1f2947, 0.0022);
+  scene.background = new THREE.Color(0x0a1020);
+  scene.fog = new THREE.FogExp2(0x101828, 0.003);
 
   camera = new THREE.PerspectiveCamera(38, 1, 0.1, 2000);
   camera.position.set(130, 96, 150);
