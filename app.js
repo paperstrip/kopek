@@ -14,8 +14,8 @@ import {
   serverTimestamp,
   setDoc,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-08-01';
-import * as GAMEJS from './game.js?v=2026-09-08-01';
+} from './firebase-config.js?v=2026-09-09-01';
+import * as GAMEJS from './game.js?v=2026-09-09-01';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -954,7 +954,7 @@ async function ensureGameLoaded() {
   if (gameStatus !== 'idle') return;
   gameStatus = 'loading';
   try {
-    gameMod = await import('./world3d.js?v=2026-09-08-01');
+    gameMod = await import('./world3d.js?v=2026-09-09-01');
     const canvas = document.getElementById('game-canvas');
     if (!canvas) throw new Error('canvas #game-canvas introuvable');
     gameMod.initWorld(canvas, { onSelect: onTileSelected });
@@ -1144,7 +1144,14 @@ function renderTilePanel() {
   const troops = t.owner ? (t.garrison || 0) : (t.neutralGarrison || 0);
   const bName = GAMEJS.BUILDINGS[t.building]?.label;
 
-  $('#g-tile-title').textContent = `${ter.label} · ${ownerLabel}`;
+  // Une pastille à la couleur du camp, la même que la bordure sur la carte :
+  // le panneau et la carte doivent dire la même chose de la même façon.
+  const couleur = t.owner === 'joueur' ? '#f2c14e'
+    : t.owner ? (GAMEJS.CLANS.find((c) => c.key === t.owner)?.color || '#9aa7b0')
+    : '#9aa7b0';
+  $('#g-tile-title').innerHTML =
+    `<span class="inline-block w-2.5 h-2.5 rounded-full align-middle mr-1.5" style="background:${couleur}"></span>`
+    + escapeHtml(`${ter.label} · ${ownerLabel}`);
   const armeeIci = GAMEJS.armyAt(GAME.state, t.q, t.r);
   // « Armée de 3 » sans dire à qui elle est, sur une case ennemie, se lit comme
   // une bonne nouvelle. C'est exactement le contraire.
@@ -1181,7 +1188,9 @@ function renderTilePanel() {
       <span class="block">${escapeHtml(a.label)}</span>
       <span class="block text-[9px] ${a.enabled ? 'font-mono opacity-70' : 'text-amber-400/70'} mt-0.5 leading-tight">${escapeHtml(bas)}</span>
     </button>`;
-  }).join('') || '<div class="col-span-2 text-[11px] text-zinc-500">Aucune action possible ici.</div>';
+  }).join('') || `<div class="col-span-2 text-[11px] text-zinc-400 leading-snug">${
+    escapeHtml(GAMEJS.situation(GAME.state, GAME.tiles, t))
+  } <span class="text-zinc-500">Approchez une armée pour pouvoir l’attaquer.</span></div>`;
 
   wrap.querySelectorAll('button[data-act]').forEach((b) => {
     b.addEventListener('click', () => runGameAction(actions[Number(b.getAttribute('data-act'))], t));

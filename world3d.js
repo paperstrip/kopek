@@ -16,11 +16,11 @@
 // Ce module ne connaît PAS les règles du jeu : on lui passe une carte de tuiles,
 // il la dessine et signale la tuile touchée. Toute la logique vit dans game.js.
 // =============================================================================
-import * as THREE from './vendor/three/three.module.js?v=2026-09-08-01';
-import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-08-01';
-import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-08-01';
-import { GLTFLoader } from './vendor/three/GLTFLoader.js?v=2026-09-08-01';
-import { axialToWorld, TERRAINS, CLANS, neighbors, tileKey } from './game.js?v=2026-09-08-01';
+import * as THREE from './vendor/three/three.module.js?v=2026-09-09-01';
+import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-09-01';
+import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-09-01';
+import { GLTFLoader } from './vendor/three/GLTFLoader.js?v=2026-09-09-01';
+import { axialToWorld, TERRAINS, CLANS, neighbors, tileKey } from './game.js?v=2026-09-09-01';
 
 const HEX = 1.0;                 // rayon d'un hexagone
 const GAP = 0.13;                // interstice : c'est lui qui fait « îles séparées »
@@ -39,7 +39,7 @@ const PALETTE = {
 };
 
 let renderer, scene, camera, controls, clock, raf = null;
-let canvasEl, worldGroup, decorGroup, markerGroup, armyGroup, reachGroup, marqueGroup, seaMesh;
+let canvasEl, worldGroup, decorGroup, markerGroup, armyGroup, reachGroup, marqueGroup, bordGroup, seaMesh;
 let seaWaves = null;
 let envReady = false;
 let sun, hemi;
@@ -324,6 +324,14 @@ function buildSharedGeometries() {
   // Deux lames croisées : le signe universel « ici on s'est battu ». Une simple
   // pastille de couleur se confondait avec les cases à portée.
   GEO.lame = new THREE.BoxGeometry(0.075, 0.075, 0.62);
+  // Bordure de territoire : un anneau hexagonal aligné sur la tuile. C'est la
+  // réponse à « comment je différencie un territoire à moi d'un ennemi ? » —
+  // rien d'autre sur la carte ne disait à qui appartenait une case sans
+  // bâtiment. Les tuiles sont en pointe vers le haut, d'où la rotation d'un
+  // sixième de tour : sans elle l'anneau est de travers d'un cran.
+  GEO.frontiere = new THREE.RingGeometry((HEX - GAP) * 0.80, (HEX - GAP) * 0.97, 6);
+  GEO.frontiere.rotateX(-Math.PI / 2);
+  GEO.frontiere.rotateY(Math.PI / 6);
 
   // Cible de sélection : un hexagone plat, invisible, posé sur la tuile.
   GEO.pick = new THREE.CircleGeometry(HEX * 0.92, 6);
@@ -628,6 +636,13 @@ function buildSharedMaterials() {
   // ce qui va se passer avant qu'on touche.
   MAT.reachMove = new THREE.MeshBasicMaterial({ color: '#5eb0ff', transparent: true, opacity: 0.35, depthWrite: false });
   MAT.reachAttack = new THREE.MeshBasicMaterial({ color: '#ff5a5a', transparent: true, opacity: 0.4, depthWrite: false });
+  // Les bordures ne doivent pas être éteintes par l'ombre : elles servent à
+  // lire la carte, pas à l'éclairer. D'où un matériau non affecté par la lumière.
+  MAT.frontiere = { joueur: new THREE.MeshBasicMaterial({ color: PALETTE.joueur, transparent: true, opacity: 0.92, depthWrite: false }) };
+  CLANS.forEach((c) => {
+    MAT.frontiere[c.key] = new THREE.MeshBasicMaterial({ color: c.color, transparent: true, opacity: 0.92, depthWrite: false });
+  });
+  MAT.frontiereBrume = new THREE.MeshBasicMaterial({ color: '#c9d6e0', transparent: true, opacity: 0.35, depthWrite: false });
   MAT.marque = {
     victoire: new THREE.MeshBasicMaterial({ color: '#6ee7a8', transparent: true, opacity: 0.95 }),
     defense:  new THREE.MeshBasicMaterial({ color: '#6ee7a8', transparent: true, opacity: 0.95 }),
@@ -708,6 +723,7 @@ export function initWorld(canvas, { onSelect } = {}) {
   decorGroup = new THREE.Group(); scene.add(decorGroup);
   markerGroup = new THREE.Group(); scene.add(markerGroup);
   marqueGroup = new THREE.Group(); scene.add(marqueGroup);
+  bordGroup = new THREE.Group(); scene.add(bordGroup);
   armyGroup = new THREE.Group(); scene.add(armyGroup);
   reachGroup = new THREE.Group(); scene.add(reachGroup);
 
@@ -866,6 +882,7 @@ export function renderWorld(p, { force = false } = {}) {
   drawTilesInstanced(socles);
 
   placeSelection(p.selected, tiles);
+  drawFrontieres(p);
   drawArmies(p);
   drawMarques(p);
   drawReach(p);
@@ -916,6 +933,37 @@ function drawArmies(p) {
       pion.castShadow = true;
       armyGroup.add(pion);
     }
+  });
+}
+
+/**
+ * Les frontières. Une case sans bâtiment n'avait aucune couleur de camp : on ne
+ * pouvait pas dire, en regardant la carte, ce qui était à soi et ce qui était à
+ * l'adversaire. Un anneau à la couleur du propriétaire sur chaque case possédée
+ * répond à la question d'un coup d'œil, y compris dans la brume — en sourdine,
+ * puisqu'on sait qu'un camp tient la case sans savoir lequel.
+ */
+function drawFrontieres(p) {
+  clearGroup(bordGroup);
+  const parMat = new Map();
+  Object.values(p.tiles || {}).forEach((t) => {
+    if (!t.owner) return;
+    const brume = !t.revealed;
+    const mat = brume ? MAT.frontiereBrume : (MAT.frontiere[t.owner] || MAT.frontiere.joueur);
+    if (!parMat.has(mat)) parMat.set(mat, []);
+    parMat.get(mat).push(t);
+  });
+  parMat.forEach((liste, mat) => {
+    const lot = new THREE.InstancedMesh(GEO.frontiere, mat, liste.length);
+    const m4 = new THREE.Matrix4();
+    liste.forEach((t, i) => {
+      const { x, z } = axialToWorld(t.q, t.r, HEX);
+      m4.makeTranslation(x, t.revealed ? 0.135 : 0.085, z);
+      lot.setMatrixAt(i, m4);
+    });
+    lot.instanceMatrix.needsUpdate = true;
+    lot.renderOrder = 2;
+    bordGroup.add(lot);
   });
 }
 
@@ -1278,6 +1326,17 @@ export function focusTile(q, r, distance = 5.5) {
  */
 /** Combien de maillages d'armée sont posés autour d'un point. Sert au test qui
  *  vérifie qu'une colonne ennemie est bien dessinée, brume ou pas. */
+/** Les bordures posées : combien, de quelle couleur, sur quelles cases. Sert au
+ *  test qui vérifie qu'on distingue ses territoires de ceux des clans. */
+export function debugFrontieres() {
+  const out = [];
+  bordGroup.children.forEach((lot) => {
+    const c = lot.material.color;
+    out.push({ couleur: '#' + c.getHexString(), cases: lot.count, opacite: lot.material.opacity });
+  });
+  return out;
+}
+
 export function debugArmyMeshesAt(x = 0, z = 0, radius = 1) {
   return armyGroup.children.filter((m) => Math.hypot(m.position.x - x, m.position.z - z) <= radius).length;
 }

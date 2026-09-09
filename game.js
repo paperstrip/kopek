@@ -490,6 +490,8 @@ export const RULES = [
     texte: 'Étendre votre domaine et prendre le château d’un clan adverse. Votre rang monte avec le nombre de territoires ET les heures que vous encodez.' },
   { titre: 'Deux ressources',
     texte: 'L’or et les vivres tombent tout seuls, toutes les 3 minutes, même application fermée. Chaque territoire produit ; les bâtiments produisent plus.' },
+  { titre: 'Lire la carte',
+    texte: 'Chaque territoire possédé porte un anneau à la couleur de son camp : doré, c’est à vous. Rose, orange, bleu et vert sont les quatre clans. Sans anneau, la case n’appartient à personne. Ce qui est en sourdine n’a pas encore été exploré.' },
   { titre: 'S’étendre',
     texte: 'Touchez un territoire libre voisin du vôtre, puis « Coloniser ». Un territoire gardé ne se colonise pas : il se prend par les armes.' },
   { titre: 'Faire la guerre',
@@ -888,6 +890,24 @@ export function attack(state, tiles, fromQ, fromR, toQ, toR, hoursMonth, rng = M
   return { ok: true, win: false, result: res, bonus };
 }
 
+/**
+ * Ce que la case est, dit en une phrase, du point de vue du joueur. Un panneau
+ * qui annonce « aucune action possible ici » sans dire pourquoi laisse croire
+ * que le jeu est cassé ; c'est le sentiment que le joueur a décrit.
+ */
+export function situation(state, tiles, t) {
+  if (!t) return '';
+  if (t.owner === 'joueur') return t.capital ? 'Votre capitale.' : 'Territoire à vous.';
+  const nom = t.owner ? (CLANS.find((c) => c.key === t.owner)?.label || t.owner) : null;
+  const dist = Math.min(...ownedTiles(tiles).map((m) => hexDistance(m.q, m.r, t.q, t.r)), Infinity);
+  const loin = Number.isFinite(dist) && dist > 1 ? ` À ${dist} cases de vos terres.` : '';
+  // Sans article : « du Marche de Givre » est faux, et les quatre clans n'ont
+  // pas le même genre. Le tiret évite d'avoir à le savoir.
+  if (nom) return `Territoire — ${nom}.${loin}`;
+  if (t.neutralGarrison) return `Repaire hostile, sans maître.${loin}`;
+  return `Territoire libre.${loin}`;
+}
+
 /** Les actions possibles sur une tuile, prêtes à être affichées telles quelles. */
 export function actionsFor(state, tiles, t, hoursTotal) {
   if (!t) return [];
@@ -931,16 +951,22 @@ export function actionsFor(state, tiles, t, hoursTotal) {
     // On n'attaque plus depuis un panneau : on amène une armée sur la case.
     // Deux systèmes d'attaque concurrents rendaient le jeu illisible.
     const proches = armiesOf(state).filter((a) => reachable(state, tiles, a).has(tileKey(t.q, t.r)));
-    out.push({
-      kind: 'assault', label: 'Attaquer avec une armée',
-      enabled: proches.length > 0,
-      why: proches.length ? null
-        : (armiesOf(state).length ? 'Aucune de vos armées n’est à portée'
-                                  : 'Vous n’avez pas d’armée — levez-en une sur un de vos territoires'),
-      armyId: proches[0] ? proches[0].id : null,
-      attackers: proches[0] ? proches[0].str : 0,
-      defenders: t.owner ? (t.garrison || 0) : (t.neutralGarrison || 0),
-    });
+    // Le bouton n'apparaît que là où l'assaut est réellement sur la table :
+    // une armée à portée, ou une case qui touche vos terres. Le proposer sur
+    // les 200 cases de la carte n'offrait pas un choix, seulement du bruit.
+    const frontiere = isAdjacentToPlayer(tiles, t);
+    if (proches.length || frontiere) {
+      out.push({
+        kind: 'assault', label: 'Attaquer avec une armée',
+        enabled: proches.length > 0,
+        why: proches.length ? null
+          : (armiesOf(state).length ? 'Aucune de vos armées n’est à portée'
+                                    : 'Vous n’avez pas d’armée — levez-en une sur un de vos territoires'),
+        armyId: proches[0] ? proches[0].id : null,
+        attackers: proches[0] ? proches[0].str : 0,
+        defenders: t.owner ? (t.garrison || 0) : (t.neutralGarrison || 0),
+      });
+    }
   }
   return out;
 }

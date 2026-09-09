@@ -261,10 +261,37 @@ rien des performances sur un vrai GPU.
 
 ### Le banc d'essai se régénère
 
-`_app_test.js` et `_index_test.html` sont **produits** à partir de `app.js` et
-`index.html` par `gen.mjs` (dans le dossier de travail, hors dépôt), qui y greffe
-la doublure Firebase et quelques sondes. Les recopier à la main revient tôt ou
-tard à tester une version périmée de l'application.
+`_app_test.js`, `_index_test.html` et `_mock-firebase-config.js` sont
+**produits** par `gen.mjs` (dans le dossier de travail, hors dépôt) à partir de
+`app.js`, `index.html` et d'une doublure Firebase qui vit elle aussi hors dépôt.
+Les recopier à la main revient tôt ou tard à tester une version périmée de
+l'application — et supprimer la doublure avant un commit, sans copie ailleurs,
+revient à la perdre. C'est arrivé une fois ; le générateur est la réponse.
+
+⚠️ Un test qui fait `import('./world3d.js?v=autre-chose')` obtient une **seconde
+instance** du module, avec ses groupes vides : il mesurerait une scène qui
+n'existe pas. Les suites passent par `window.__world`, l'instance réellement
+utilisée par l'application.
+
+### Lire la carte · à qui est ce territoire
+
+Une case sans bâtiment n'avait aucune couleur de camp : rien, en regardant la
+carte, ne disait ce qui était à soi et ce qui était à l'adversaire.
+`drawFrontieres()` pose sur chaque case possédée un anneau hexagonal à la
+couleur du camp — doré pour le joueur, la couleur du clan sinon, en sourdine
+dans la brume. Les anneaux partent en `InstancedMesh` par couleur, et
+`debugFrontieres()` permet de les vérifier depuis un test.
+
+Le bouton « Attaquer » n'apparaît plus que là où l'assaut est réellement sur la
+table : une armée à portée, ou une case qui touche vos terres. Le proposer,
+grisé, sur les deux cents cases de la carte n'offrait pas un choix, seulement du
+bruit. Ailleurs, `situation()` dit en une phrase ce qu'est la case et à quelle
+distance elle se trouve — un panneau qui annonce « aucune action possible ici »
+sans dire pourquoi laisse croire que le jeu est cassé.
+
+⚠️ Conséquence voulue : sur une carte neuve, **aucun** repaire ne touche la
+capitale (ils commencent à deux cases), donc aucun bouton d'attaque tant qu'on
+n'a pas colonisé. C'est l'ordre que les objectifs demandent déjà.
 
 ## Écritures optimistes · pourquoi le mock de test est asynchrone
 
