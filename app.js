@@ -5,63 +5,48 @@ import {
   signOut,
   onAuthStateChanged,
   collection,
-  addDoc,
-  getDocs,
-  getDoc,
   doc,
   updateDoc,
   deleteDoc,
   query,
   where,
-  orderBy,
   Timestamp,
   serverTimestamp,
   setDoc,
-} from './firebase-config.js';
-import { initThreeGame, updateCity, triggerLogEffect } from './three-game.js';
+  onSnapshot,
+} from './firebase-config.js?v=2026-09-09-01';
+import * as GAMEJS from './game.js?v=2026-09-09-01';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
 // =============================================================
+// L'app ne fait plus que deux choses : compter les heures et dire ce qu'il y a
+// à facturer. Plus de TVA, d'INASTI, d'IPP, de charges fixes ni d'avance de
+// démarrage : ces provisions estimaient des montants qu'on ne peut de toute
+// façon pas calculer correctement sans les frais professionnels réels.
 const NESSY = {
   socleFlat: 2000,
   socleHours: 25,
   regieRate: 80,
   minGaranti: 3500,
   minHoursEq: 43.75,
-  phase2Min: 3000,
-  phase2HoursEq: 37.5,
-  phase2StartMonth: 12, // Mois 13 (index 12)
-  avanceFrom: 3,        // Mois 4 (index 3)
-  avanceTo: 10,         // Mois 11 (index 10)
-  avanceDeduct: 625,
 };
-
-const TRESORERIE = {
-  tva: 0.21,
-  creditTVA: 56.40,   // € HT crédit leasing 650€ TTC
-  inasti: 0.18,
-  ipp: 0.25,
-  charges: {
-    leasing: 650,
-    logement: 625,
-    outils: 125,
-    comptable: 125,
-  },
-};
-const TOTAL_CHARGES = Object.values(TRESORERIE.charges).reduce((a, b) => a + b, 0);
 
 // =============================================================
 // 🗓️ ÉTAT GLOBAL
 // =============================================================
 const STATE = {
   user: null,
-  clients: [],          // {id, name, default_rate, is_main_contract}
-  logs: [],             // time_logs du mois courant
+  clients: [],           // Projets · {id, name, default_rate, is_external}
+  allLogs: [],           // TOUS les time_logs du user (cache local, sync temps réel)
+  logs: [],              // time_logs filtrés sur le mois affiché (dérivé de allLogs)
   selectedMonth: new Date().getMonth(),
   selectedYear: new Date().getFullYear(),
   contractStart: firstDayOfMonth(new Date().getFullYear(), 0), // À override : ex. new Date('2025-01-01')
   editingClientId: null,
+  clientsLoaded: false,   // les projets ont-ils été reçus au moins une fois ?
+  dataTimeout: false,     // Firestore n'a jamais répondu · on débloque quand même l'interface
+  lastPopulatedClientId: null,
 };
 
 // =============================================================
@@ -83,18 +68,41 @@ function HH(totalMinutes, showMinSuffix = true) {
   const out = `${h}h${String(m).padStart(2, '0')}`;
   return showMinSuffix ? out : out;
 }
+/** Nombre au format belge/français : virgule décimale. */
+function FR(n, digits = 2) {
+  return Number(n).toLocaleString('fr-BE', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
 function HHdecimal(totalMinutes) {
-  return (totalMinutes / 60).toFixed(2);
+  return FR(totalMinutes / 60);
 }
 function firstDayOfMonth(y, m) { return new Date(y, m, 1, 0, 0, 0, 0); }
 function lastDayOfMonth(y, m)  { return new Date(y, m + 1, 0, 23, 59, 59, 999); }
+/**
+ * Convertit en Date tout ce que Firestore peut renvoyer.
+ * On NE teste PAS `instanceof Timestamp` : selon la façon dont le SDK est chargé,
+ * l'objet renvoyé peut ne pas être une instance de NOTRE classe importée, et le
+ * test échouait silencieusement — la date devenait invalide et l'encodage
+ * disparaissait de tous les mois, donnant l'impression d'avoir perdu les données.
+ * On accepte donc aussi la forme `{seconds, nanoseconds}` et les chaînes ISO.
+ */
+function toDateSafe(v) {
+  if (!v) return null;
+  if (v instanceof Date) return v;
+  if (typeof v.toDate === 'function') return v.toDate();
+  if (typeof v.seconds === 'number') return new Date(v.seconds * 1000);
+  if (typeof v._seconds === 'number') return new Date(v._seconds * 1000);
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
 function fmtDateBE(tsOrDate) {
-  const d = tsOrDate instanceof Timestamp ? tsOrDate.toDate() : new Date(tsOrDate);
-  return d.toLocaleDateString('fr-BE', { day: '2-digit', month: 'short', year: 'numeric' });
+  const d = toDateSafe(tsOrDate);
+  return d ? d.toLocaleDateString('fr-BE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 }
 function fmtDateInput(tsOrDate) {
-  const d = tsOrDate instanceof Timestamp ? tsOrDate.toDate() : new Date(tsOrDate);
-  return d.toISOString().slice(0, 10);
+  const d = toDateSafe(tsOrDate) || new Date();
+  // getFullYear/Month/Date (heure locale) : toISOString décale d'un jour selon le fuseau.
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 // ★ Règle d'arrondi · 15 min SUPÉRIEURES
 function billedMinutes(realMin) {
@@ -105,10 +113,101 @@ function toast(msg, icon = 'check-circle', variant = 'success') {
   const t = $('#toast');
   const iconCls = variant === 'danger' ? 'text-red-400' : variant === 'warn' ? 'text-amber-400' : 'text-emerald-400';
   t.innerHTML = `<i data-lucide="${icon}" class="w-4 h-4 ${iconCls}"></i><span>${msg}</span>`;
-  lucide.createIcons();
+  if (window.lucide) lucide.createIcons();
   t.classList.remove('hidden');
   clearTimeout(t._t);
   t._t = setTimeout(() => t.classList.add('hidden'), 2800);
+}
+
+// =============================================================
+// 🚨 DIAGNOSTIC · erreurs Firestore visibles à l'écran
+// Un toast de 3 secondes ne suffit pas quand rien ne s'enregistre : on affiche
+// un bandeau persistant avec le code d'erreur exact et la marche à suivre.
+// =============================================================
+// Vérifié le 03/09/2026 par un appel direct à l'API Firestore REST sur le projet
+// kopek-4ffe6 : « The database (default) does not exist for project kopek-4ffe6 ».
+// Le projet Firebase existe et l'authentification fonctionne, mais aucune base
+// Firestore n'y est provisionnée : toute lecture et toute écriture échouent.
+// Règles minimales : chacun ne lit et n'écrit que ses propres documents.
+const RULES_TEXT = `rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{col}/{doc} {
+      allow read, delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+      allow create, update: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+    }
+  }
+}`;
+
+const RULES_MSG =
+  'Les règles de sécurité de Firestore refusent la lecture et l\'écriture — c\'est le '
+  + 'réglage par défaut d\'une base créée en mode production. Console Firebase → '
+  + 'Firestore Database → onglet Règles : remplacez tout par les règles ci-dessous, '
+  + 'cliquez sur Publier, puis rechargez cette page.';
+
+// Le chien de garde ne sait PAS pourquoi rien n'arrive : il ne doit donc rien
+// affirmer. Une cause inventée (« la base n'existe pas » alors qu'elle existe)
+// envoie chercher au mauvais endroit — c'est pire que pas de message du tout.
+const NO_DATA_MSG =
+  'Firestore n\'a renvoyé aucune donnée. Deux causes possibles, à vérifier dans '
+  + 'la console Firebase du projet kopek-4ffe6 : les règles de sécurité (onglet '
+  + 'Règles) refusent la lecture, ou aucune base Firestore n\'a encore été créée '
+  + '(Firestore Database → Créer une base de données, région europe-west).';
+
+const FIRESTORE_MISSING_MSG =
+  "Aucune base Firestore n'existe dans le projet kopek-4ffe6. Ouvrez la console "
+  + 'Firebase → Firestore Database → « Créer une base de données » (région europe-west, '
+  + 'mode production), puis rechargez cette page. Tant que la base est absente, aucune '
+  + "donnée ne peut être lue ni enregistrée.";
+
+function explainFirebaseError(err) {
+  const code = (err && err.code) || '';
+  const map = {
+    'permission-denied': RULES_MSG,
+    'unauthenticated': 'Session expirée · reconnectez-vous.',
+    'unavailable': 'Firestore est injoignable (réseau ou hors ligne).',
+    'failed-precondition': "Firestore réclame un index. Normalement l'app n'en a plus besoin — signalez ce message.",
+    'invalid-argument': 'Donnée refusée par Firestore (champ inattendu ou format invalide).',
+    'resource-exhausted': 'Quota Firestore dépassé pour ce projet.',
+    'not-found': FIRESTORE_MISSING_MSG,
+  };
+  const msg = (err && err.message) || String(err);
+  if (/database .* does not exist|NOT_FOUND/i.test(msg)) return FIRESTORE_MISSING_MSG;
+  return map[code] || msg;
+}
+
+function showErrorBanner(action, err) {
+  const el = document.getElementById('error-banner');
+  const code = (err && err.code) ? err.code : 'inconnu';
+  console.error(`[kopek] ${action}`, err);
+  if (!el) { toast(`${action} · ${code}`, 'alert-circle', 'danger'); return; }
+  const detail = document.getElementById('error-banner-text');
+  const codeEl = document.getElementById('error-banner-code');
+  if (detail) detail.textContent = `${action} — ${explainFirebaseError(err)}`;
+  if (codeEl) codeEl.textContent = `code : ${code}`;
+  // Recopier des règles Firestore à la main depuis un téléphone est intenable :
+  // on les met dans le presse-papier en un geste.
+  const copyBtn = document.getElementById('error-banner-copy');
+  if (copyBtn) copyBtn.classList.toggle('hidden', code !== 'permission-denied');
+  el.classList.remove('hidden');
+}
+
+document.getElementById('error-banner-copy')?.addEventListener('click', async (e) => {
+  try {
+    await navigator.clipboard.writeText(RULES_TEXT);
+    e.currentTarget.textContent = 'Règles copiées ✓';
+  } catch {
+    // Presse-papier refusé (contexte non sécurisé) : on affiche les règles en clair.
+    const detail = document.getElementById('error-banner-text');
+    if (detail) detail.textContent = RULES_TEXT;
+  }
+});
+
+function hideErrorBanner() {
+  const el = document.getElementById('error-banner');
+  if (el) el.classList.add('hidden');
 }
 
 // =============================================================
@@ -136,18 +235,21 @@ $('#btn-logout').addEventListener('click', async () => {
   try { await signOut(auth); toast('Déconnecté', 'log-out', 'warn'); } catch { /* ignore */ }
 });
 
+let appBound = false;
 onAuthStateChanged(auth, (user) => {
   STATE.user = user;
   if (user) {
     $('#login-screen').classList.add('hidden');
     $('#dashboard-screen').classList.remove('hidden');
-    $('#auth-status').classList.remove('hidden');
-    $('#auth-status').classList.add('flex');
+    // NB : la visibilité de #auth-status est gérée par ses classes responsive
+    // (masqué sous sm) — on ne force plus `flex` ici, sinon la barre du haut
+    // déborde sur trois lignes au téléphone.
     $('#auth-email').textContent = user.email || '';
     initApp();
   } else {
     $('#dashboard-screen').classList.add('hidden');
     $('#login-screen').classList.remove('hidden');
+    teardownData();
   }
   if (window.lucide) lucide.createIcons();
 });
@@ -156,12 +258,15 @@ onAuthStateChanged(auth, (user) => {
 // 🚀 INIT APP (après auth)
 // =============================================================
 function initApp() {
-  buildPeriodSelectors();
-  bindTopBar();
-  bindQuickForm();
-  bindModals();
-  initThreeGame();
-  refreshPeriod();
+  if (!appBound) {
+    buildPeriodSelectors();
+    bindTopBar();
+    bindHoursWizard();
+    bindModals();
+    bindGameUi();
+    appBound = true;
+  }
+  subscribeData();
   lucide.createIcons();
 }
 
@@ -203,124 +308,209 @@ function navigateMonth(delta) {
 // =============================================================
 // 🗃️ FIRESTORE CRUD
 // =============================================================
+// Le jeu vit dans son propre document, séparé des prestations. Une partie
+// perdue ou corrompue ne peut donc rien casser côté facturation.
+const GAME = { state: null, tiles: null, selected: null, army: null, loaded: false, dirty: false };
+const gameDocRef = () => doc(db, 'game_state', STATE.user.uid);
+
 const colClients   = () => collection(db, 'clients');
 const colTimeLogs  = () => collection(db, 'time_logs');
 
-async function ensureDefaultClient() {
-  // Charge les clients du user
-  const q = query(colClients(), where('userId', '==', STATE.user.uid), orderBy('name', 'asc'));
-  const snap = await getDocs(q);
-  const list = [];
-  snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-  STATE.clients = list;
-  if (list.length === 0) {
-    const nessy = await addDoc(colClients(), {
-      userId: STATE.user.uid,
-      name: 'NESSY · Contrat Principal',
-      default_rate: NESSY.regieRate,
-      is_main_contract: true,
-      createdAt: serverTimestamp(),
-    });
-    STATE.clients.push({
-      id: nessy.id,
-      userId: STATE.user.uid,
-      name: 'NESSY · Contrat Principal',
-      default_rate: NESSY.regieRate,
-      is_main_contract: true,
-    });
-  }
+// -------------------------------------------------------------------------
+// ⚠️ Toutes les requêtes ci-dessous n'utilisent QU'UN SEUL filtre d'égalité
+// (userId ==) et AUCUN orderBy Firestore. C'est volontaire : dès qu'on
+// combine une égalité avec un orderBy sur un autre champ (ou un 2e where),
+// Firestore exige un index composite créé manuellement dans la console.
+// Sans cet index, la requête échoue silencieusement (catch avalé) et rien
+// ne s'affiche. On trie/filtre donc côté JS, ce qui ne nécessite AUCUN
+// index et fonctionne immédiatement sur un projet Firebase tout neuf.
+// -------------------------------------------------------------------------
+
+let unsubClients = null;
+let unsubLogs = null;
+let seedingDefaultProject = false;
+let unsubGame = null;
+
+function toMillisSafe(tsOrDate) {
+  const d = toDateSafe(tsOrDate);
+  return d ? d.getTime() : 0;
 }
-async function loadClients() {
-  const q = query(colClients(), where('userId', '==', STATE.user.uid), orderBy('name', 'asc'));
-  const snap = await getDocs(q);
-  const list = [];
-  snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-  STATE.clients = list;
-  if (list.length === 0) await ensureDefaultClient();
+
+function teardownData() {
+  if (unsubClients) { unsubClients(); unsubClients = null; }
+  if (unsubLogs) { unsubLogs(); unsubLogs = null; }
+  if (unsubGame) { unsubGame(); unsubGame = null; }
+  clearTimeout(gameTickTimer); clearTimeout(gameSaveTimer);
+  GAME.state = null; GAME.tiles = null; GAME.selected = null; GAME.loaded = false;
+  STATE.clients = []; STATE.allLogs = []; STATE.logs = [];
+  STATE.clientsLoaded = false;
+  STATE.dataTimeout = false;
+  if (readWatchdog) { clearTimeout(readWatchdog); readWatchdog = null; }
 }
-async function loadLogsForMonth() {
-  if (!STATE.user) return [];
-  const start = firstDayOfMonth(STATE.selectedYear, STATE.selectedMonth);
-  const end   = lastDayOfMonth(STATE.selectedYear, STATE.selectedMonth);
-  const q = query(
-    colTimeLogs(),
-    where('userId', '==', STATE.user.uid),
-    where('date', '>=', Timestamp.fromDate(start)),
-    where('date', '<=', Timestamp.fromDate(end)),
-    orderBy('date', 'asc')
-  );
-  try {
-    const snap = await getDocs(q);
-    const arr = [];
-    snap.forEach((d) => arr.push({ id: d.id, ...d.data() }));
-    STATE.logs = arr;
-    return arr;
-  } catch (ex) {
-    console.warn('loadLogsForMonth', ex);
-    STATE.logs = [];
-    return [];
-  }
+
+// Firestore ne signale pas toujours une lecture impossible par le callback
+// d'erreur : quand la base n'existe pas, le flux temps réel est relancé
+// indéfiniment et l'interface resterait bloquée sur « chargement » sans le
+// moindre message. On borne donc l'attente.
+const READ_TIMEOUT_MS = 8000;
+let readWatchdog = null;
+let readReported = false;   // un écouteur a-t-il déjà remonté une vraie erreur ?
+
+// Une lecture refusée est définitive : inutile de faire patienter 8 secondes de
+// plus derrière un bouton inerte. On affiche la vraie cause et on rend la main.
+function onReadError(action, err) {
+  readReported = true;
+  STATE.dataTimeout = true;
+  if (readWatchdog) { clearTimeout(readWatchdog); readWatchdog = null; }
+  showErrorBanner(action, err);
+  renderAll();
 }
-async function createLog(payload) {
+
+function subscribeData() {
+  teardownData();
+  const uid = STATE.user.uid;
+
+  readReported = false;
+  readWatchdog = setTimeout(() => {
+    if (STATE.clientsLoaded) return;
+    STATE.dataTimeout = true;
+    // Si un écouteur a déjà remonté son vrai code d'erreur, on le laisse en
+    // place : on se contente de débloquer l'interface.
+    if (!readReported) showErrorBanner('Aucune donnée reçue', { code: 'timeout', message: NO_DATA_MSG });
+    renderAll();   // on débloque l'interface plutôt que de laisser un bouton mort
+  }, READ_TIMEOUT_MS);
+
+  const qClients = query(colClients(), where('userId', '==', uid));
+  unsubClients = onSnapshot(qClients, (snap) => {
+    const list = [];
+    snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+    list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    STATE.clients = list;
+    STATE.clientsLoaded = true;
+    STATE.dataTimeout = false;
+    if (readWatchdog) { clearTimeout(readWatchdog); readWatchdog = null; }
+    hideErrorBanner();
+    if (list.length === 0 && !seedingDefaultProject) {
+      seedingDefaultProject = true;
+      ensureDefaultProject()
+        .catch((ex) => showErrorBanner('Création du projet par défaut impossible', ex))
+        .finally(() => { seedingDefaultProject = false; });
+    }
+    renderAll();
+  }, (err) => onReadError('Lecture des projets impossible', err));
+
+  unsubGame = onSnapshot(gameDocRef(), (snap) => {
+    const remote = snap.exists() ? snap.data() : null;
+    adoptGameState(remote);
+  }, (err) => {
+    // Une partie illisible ne doit jamais empêcher d'encoder : on démarre une
+    // partie locale et on signale, sans bloquer le reste de l'application.
+    console.warn('[kopek] partie illisible', err);
+    adoptGameState(null);
+  });
+
+  const qLogs = query(colTimeLogs(), where('userId', '==', uid));
+  unsubLogs = onSnapshot(qLogs, (snap) => {
+    const list = [];
+    snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+    list.sort((a, b) => toMillisSafe(a.date) - toMillisSafe(b.date));
+    STATE.allLogs = list;
+    renderAll();
+  }, (err) => onReadError('Lecture des encodages impossible', err));
+}
+
+function ensureDefaultProject() {
+  const ref = doc(colClients());
+  return setDoc(ref, {
+    userId: STATE.user.uid,
+    name: 'Nessy · Général',
+    default_rate: NESSY.regieRate,
+    is_external: false,
+    createdAt: serverTimestamp(),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// ⚠️ AUCUNE de ces fonctions n'attend l'accusé de réception du serveur.
+// La promesse renvoyée par addDoc/setDoc ne se résout QUE lorsque Firestore a
+// confirmé côté serveur : sur une connexion instable elle reste en attente
+// indéfiniment — sans jamais échouer. Un `await` dessus fige donc l'interface
+// (bouton désactivé, rien ne se passe, aucune erreur), ce qui est exactement le
+// symptôme observé. Firestore écrit dans son cache local immédiatement et
+// synchronise ensuite ; les écouteurs temps réel affichent la donnée aussitôt.
+// On génère donc l'identifiant côté client et on surveille l'échec en arrière-plan.
+// ---------------------------------------------------------------------------
+function writeInBackground(promise, label) {
+  promise.catch((ex) => showErrorBanner(label, ex));
+}
+
+// Les écouteurs temps réel ne rappellent qu'au tour de boucle suivant. Le code
+// qui suit immédiatement une création — remplir une liste déroulante, y
+// sélectionner le nouvel élément — travaillerait donc sur un état périmé : la
+// sélection retombait dans le vide et le projet fraîchement créé n'apparaissait
+// qu'après avoir refermé la fenêtre. On l'insère donc localement tout de suite ;
+// l'instantané qui arrive ensuite porte le même identifiant et le remplace.
+function upsertLocal(list, item) {
+  const i = list.findIndex((x) => x.id === item.id);
+  if (i >= 0) list[i] = { ...list[i], ...item };
+  else list.push(item);
+  return item;
+}
+
+function createLog(payload) {
   if (!STATE.user) return null;
-  const d = {
+  const ref = doc(colTimeLogs());          // identifiant généré localement
+  writeInBackground(setDoc(ref, {
     userId: STATE.user.uid,
     custom_price: null,
     project_name: '',
     createdAt: serverTimestamp(),
     ...payload,
-    date: payload.date instanceof Timestamp ? payload.date : Timestamp.fromDate(payload.date),
-  };
-  const ref = await addDoc(colTimeLogs(), d);
+    date: Timestamp.fromDate(toDateSafe(payload.date) || new Date()),
+  }), "Enregistrement de l'encodage impossible");
+  upsertLocal(STATE.allLogs, {
+    id: ref.id, userId: STATE.user.uid, custom_price: null, ...payload,
+    date: toDateSafe(payload.date) || new Date(),
+  });
+  STATE.allLogs.sort((a, b) => toMillisSafe(a.date) - toMillisSafe(b.date));
+  renderAll();
   return ref.id;
 }
-async function updateLog(id, patch) {
+function updateLog(id, patch) {
   if (!STATE.user) return;
   const norm = { ...patch };
-  if (norm.date && !(norm.date instanceof Timestamp)) norm.date = Timestamp.fromDate(norm.date);
-  await updateDoc(doc(db, 'time_logs', id), norm);
+  if (norm.date) norm.date = Timestamp.fromDate(toDateSafe(norm.date) || new Date());
+  writeInBackground(updateDoc(doc(db, 'time_logs', id), norm), 'Mise à jour impossible');
 }
-async function deleteLog(id) {
+function deleteLog(id) {
   if (!STATE.user) return;
-  await deleteDoc(doc(db, 'time_logs', id));
+  writeInBackground(deleteDoc(doc(db, 'time_logs', id)), 'Suppression impossible');
 }
-async function createClient(data) {
+function createClient(data) {
   if (!STATE.user) return null;
-  const payload = {
+  const ref = doc(colClients());
+  writeInBackground(setDoc(ref, {
     userId: STATE.user.uid,
     createdAt: serverTimestamp(),
     ...data,
-  };
-  // Si is_main_contract, reset les autres
-  if (payload.is_main_contract) {
-    for (const c of STATE.clients) {
-      if (c.is_main_contract) await updateDoc(doc(db, 'clients', c.id), { is_main_contract: false });
-    }
-  }
-  const ref = await addDoc(colClients(), payload);
+  }), 'Enregistrement du projet impossible');
+  upsertLocal(STATE.clients, { id: ref.id, userId: STATE.user.uid, ...data });
+  STATE.clients.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  renderAll();
   return ref.id;
 }
-async function updateClient(id, patch) {
+function updateClient(id, patch) {
   if (!STATE.user) return;
-  if (patch.is_main_contract) {
-    for (const c of STATE.clients) {
-      if (c.is_main_contract && c.id !== id)
-        await updateDoc(doc(db, 'clients', c.id), { is_main_contract: false });
-    }
-  }
-  await updateDoc(doc(db, 'clients', id), patch);
+  writeInBackground(updateDoc(doc(db, 'clients', id), patch), 'Mise à jour du projet impossible');
 }
-async function deleteClient(id) {
+function deleteClient(id) {
   if (!STATE.user) return;
-  // Vérifie qu'il ne reste pas que ce client
+  // Vérifie qu'il ne reste pas que ce projet
   if (STATE.clients.length <= 1) {
-    toast('Impossible de supprimer le dernier client', 'alert-circle', 'danger');
+    toast('Impossible de supprimer le dernier projet', 'alert-circle', 'danger');
     throw new Error('last_client');
   }
-  await deleteDoc(doc(db, 'clients', id));
-}
-function getMainClient() {
-  return STATE.clients.find((c) => c.is_main_contract) || STATE.clients[0];
+  writeInBackground(deleteDoc(doc(db, 'clients', id)), 'Suppression du projet impossible');
 }
 function getClient(id) {
   return STATE.clients.find((c) => c.id === id);
@@ -329,82 +519,58 @@ function getClient(id) {
 // =============================================================
 // 🧮 MOTEUR CALCUL · FACTURATION NESSY + MULTI-CLIENTS
 // =============================================================
-function computeContractMonthIdx() {
-  const s = STATE.contractStart;
-  return (STATE.selectedYear - s.getFullYear()) * 12 + (STATE.selectedMonth - s.getMonth());
-}
-function getMinGaranti(monthIdx) { return monthIdx >= NESSY.phase2StartMonth ? NESSY.phase2Min : NESSY.minGaranti; }
-function getMinHoursEq(monthIdx) { return monthIdx >= NESSY.phase2StartMonth ? NESSY.phase2HoursEq : NESSY.minHoursEq; }
-function isAvanceMonth(monthIdx)   { return monthIdx >= NESSY.avanceFrom && monthIdx <= NESSY.avanceTo; }
 
-/**
- * Décompose les heures NESSY en 3 paliers et le CA associé
- * @returns {{tier1:{h:number,eur:number}, tier2:{h:number,eur:number}, tier3:{h:number,eur:number}, rawEur:number, minApplied:boolean, finalCA:number, mainClient:object, mainTotalHours:number}}
+/** Calcule tout le mois · objet agrégat
+ * =========================================================================
+ * 🔑 MODÈLE MÉTIER :
+ *   Les "clients" créés dans l'app sont en réalité des PROJETS internes à
+ *   Nessy (étiquettes pour savoir pour qui/quoi on a bossé). Quel que soit
+ *   le projet sélectionné, les heures alimentent LA MÊME jauge Nessy
+ *   (Socle → Régie Garantie → Bonus), car c'est Nessy qui facture au bout
+ *   du compte. Un projet peut être marqué `is_external: true` pour un
+ *   vrai client indépendant hors-Nessy : son CA s'ajoute au total mais ne
+ *   touche pas la jauge/les paliers.
+ *
+ *   SOCLE 2 000 € (25 h) + MIN GARANTI 3 500 € (43,75 h) = ACQUIS PROMIS
+ *   sur contrat, DÈS LE PREMIER JOUR DU MOIS, SANS ENCODAGE.
+ *   Les heures encodées servent à REMBOURSER cet acquis (0 → 43,75 h),
+ *   puis au-delà génèrent du SURPLUS BONUS facturé en plus du Min Garanti.
+ * =========================================================================
  */
-function nessyTierBreakdown(mainBilledMinutes, extraMainHourlyEur, flatEntriesFromMain) {
-  // Heures facturées totales du client principal (forfaits exclus du décompte paliers → ils s'ajoutent au brut)
-  const minutesHourly = mainBilledMinutes; // ne contient déjà que les logs hourly, pas flat
-  const hoursHourly = minutesHourly / 60;
-  // flat → on ajoute leur € au revenu brut, ils ne participent pas aux paliers
-  const flatEur = flatEntriesFromMain.reduce((a, l) => a + (l.custom_price || 0), 0);
-
-  // Palier 1 : Socle 25h · forfait 2000 €
-  const t1h = Math.min(hoursHourly, NESSY.socleHours);
-  // Palier 2 : Régie Garantie 25h → 43,75h · 80 €/h
-  const t2h = Math.min(Math.max(hoursHourly - NESSY.socleHours, 0), getMinHoursEq(0) - NESSY.socleHours);
-  // Palier 3 : Surplus · 80 €/h (ou taux custom s'il est précisé)
-  const t3h = Math.max(hoursHourly - getMinHoursEq(0), 0);
-
-  const t1eur = hoursHourly > 0 ? NESSY.socleFlat : 0;
-  const t2eur = t2h * NESSY.regieRate;
-  // T3 utilise le rate moyen (80 €/h en général, mais si certains logs NESSY ont un taux custom on utilise leur € réel)
-  const t3eur = extraMainHourlyEur; // taux horaire réel * heures t3 précalculés
-  // Note: précision — pour la simplicité, on calcule via le revenu réel ci-dessous :
-  // rawHourlyEur depuis les logs hourly :
-  return {
-    t1: { h: t1h, eur: t1eur },
-    t2: { h: t2h, eur: t2eur },
-    t3: { h: t3h, eur: t3eur },
-    flatEur,
-    hours: hoursHourly,
-  };
-}
-
-/** Calcule tout le mois · objet agrégat */
 function aggregateMonth() {
-  const monthIdx = computeContractMonthIdx();
-  const mainClient = getMainClient();
-  const mainClientId = mainClient ? mainClient.id : null;
 
-  // Regroupements par client
+  // Regroupements par projet
   const byClient = new Map(); // id -> { client, realMin, billedMin, eur, count }
 
-  let mainRealMin = 0, mainBilledMin = 0;     // hourly NESSY uniquement
-  let mainHourlyLogs = [];                    // logs hourly du client principal
-  let mainFlatLogs = [];                      // logs flat du client principal
-  let mainHourlyRealEur = 0;                  // (minutes facturées/60) × rate appliqué pour les logs hourly NESSY
+  let nessyRealMin = 0, nessyBilledMin = 0;   // hourly, projets Nessy (non externes)
+  let nessyHourlyEur = 0;                     // (minutes facturées/60) × rate appliqué, projets Nessy hourly
+  let nessyFlatEur = 0;                       // somme des forfaits sur projets Nessy
+  let nessyLogCount = 0;                      // nb d'encodages sur projets Nessy (active le contrat du mois)
+
+  let externalEur = 0;                        // CA des vrais clients externes (hors jauge)
 
   let globalRealMin = 0;
   let globalBilledMin = 0;
-  let globalRawEur = 0; // somme brute tous clients (avant application min garanti NESSY)
+  let globalRawEur = 0; // somme brute tous projets (avant application min garanti NESSY)
 
   for (const l of STATE.logs) {
     const realMin = l.real_minutes || 0;
     const billedMin = l.billed_minutes || 0;
     const rate = l.rate_applied || 0;
     const isFlat = l.custom_price != null && l.custom_price > 0;
-    let eur = 0;
-    if (isFlat) eur = l.custom_price;
-    else eur = (billedMin / 60) * rate;
+    const eur = isFlat ? l.custom_price : (billedMin / 60) * rate;
 
     globalRealMin += realMin;
     globalBilledMin += billedMin;
     globalRawEur += eur;
 
-    // bucket client
+    const client = getClient(l.client_id);
+    const isExternal = !!client?.is_external;
+
+    // bucket projet
     if (!byClient.has(l.client_id)) {
       byClient.set(l.client_id, {
-        client: getClient(l.client_id) || { name: 'Client supprimé', id: l.client_id },
+        client: client || { name: 'Projet supprimé', id: l.client_id },
         realMin: 0, billedMin: 0, eur: 0, count: 0, flat: 0, hourly: 0,
       });
     }
@@ -412,83 +578,51 @@ function aggregateMonth() {
     b.realMin += realMin; b.billedMin += billedMin; b.eur += eur; b.count++;
     if (isFlat) b.flat += eur; else b.hourly += eur;
 
-    // NESSY
-    if (l.client_id === mainClientId) {
+    if (isExternal) {
+      externalEur += eur;
+    } else {
+      nessyLogCount++;
       if (isFlat) {
-        mainFlatLogs.push(l);
+        nessyFlatEur += eur;
       } else {
-        mainRealMin += realMin;
-        mainBilledMin += billedMin;
-        mainHourlyLogs.push(l);
-        mainHourlyRealEur += eur;
+        nessyRealMin += realMin;
+        nessyBilledMin += billedMin;
+        nessyHourlyEur += eur;
       }
     }
   }
 
-  // ---- DÉCOMPOSITION PALIERS NESSY ----
-  // =========================================================================
-  // 🔑 RÈGLE MÉTIER (nouvelle logique utilisateur) :
-  //   SOCLE 2 000 € (25 h) + MIN GARANTI 3 500 € (43,75 h) = ACQUIS PROMIS
-  //   sur contrat, DÈS LE PREMIER JOUR DU MOIS, SANS ENCODAGE.
-  //
-  //   Les heures encodées servent DEUX CHOSES :
-  //   1. REMBOURSER l'heure acquise (crédit d'heures dûes au client Nessy)
-  //      → de 0 h → 43,75 h : comble la dette horaire contractuelle
-  //   2. AU-DELÀ : générer du SURPLUS BONUS (facturé en plus du Min Garanti)
-  //      → > 43,75 h = @ Taux horaire Nessy → ajouté DESSUS du Min Garanti
-  //
-  //   mainFinalCA = Max(Min Garanti, revenu réel) PAR CONSTRUCTION :
-  //   → on prend donc Le Min Garanti si pas assez travaillé (top-up acquis)
-  //   → on prend le réel si on dépasse le Min Garanti grâce au surplus.
-  // =========================================================================
-  const hoursHourlyNessy = mainBilledMin / 60;
-  // ---- Heures remboursement (dette 0 → 43,75 h) ----
+  // ---- DÉCOMPOSITION PALIERS NESSY (tous projets non-externes confondus) ----
+  const hoursHourlyNessy = nessyBilledMin / 60;
   const heuresDette = NESSY.minHoursEq;
   const refundedH = Math.min(hoursHourlyNessy, heuresDette);            // 0 → 43,75
-  const debtRemainH = Math.max(0, heuresDette - hoursHourlyNessy);     // ce qu'il reste à faire pour le client
+  const debtRemainH = Math.max(0, heuresDette - hoursHourlyNessy);     // ce qu'il reste à faire
   const t3h = Math.max(hoursHourlyNessy - heuresDette, 0);             // SURPLUS BONUS au-dessus du Min Garanti
 
-  // Pour les cartes paliers 1/2/3 : on affiche le % D'ACQUITTEMENT DE LA DETTE
-  // (pas le % d'acquisition car l'argent est déjà acquis)
   const socleHours = NESSY.socleHours;
   const t1h = Math.min(refundedH, socleHours);                                         // Remboursement Socle
   const t2h = Math.min(Math.max(refundedH - socleHours, 0), heuresDette - socleHours); // Remboursement Régie Garantie
 
   // CA NESSY = MIN GARANTI (acquis) + SURPLUS RÉEL HORAIRE + FORFAITS
-  const minG = getMinGaranti(monthIdx);
-  // Revenu hourly réel NESSY pour heures > minHoursEq (surplus) + forfaits
-  const hourlySurplusEur = Math.max(0, mainHourlyRealEur - (heuresDette * NESSY.regieRate));
-  const mainFlatEur = mainFlatLogs.reduce((a, l) => a + (l.custom_price || 0), 0);
+  const minG = NESSY.minGaranti;
+  const hourlySurplusEur = Math.max(0, nessyHourlyEur - (heuresDette * NESSY.regieRate));
+  const mainFlatEur = nessyFlatEur;
   const bonusEur = hourlySurplusEur + mainFlatEur;
 
-  // t1eur/t2eur = Ce qui a été "comptabilisé" comme Heures REMBOURSÉES (pas euros facturés — c'est déjà dans MinG)
   const t1eur = t1h * NESSY.regieRate;              // 0 → 2000
   const t2eur = t2h * NESSY.regieRate;              // 0 → 1500
   const t3eur = hourlySurplusEur;
 
   const mainRevenusAvantMin = (refundedH * NESSY.regieRate) + bonusEur;
   // Si on a ne serait-ce qu'1 log Nessy → on active le contrat pour le mois → Min Garanti
-  const hasAnyNessy = (mainHourlyLogs.length + mainFlatLogs.length) > 0;
+  const hasAnyNessy = nessyLogCount > 0;
   const mainFinalCA = hasAnyNessy
     ? Math.max(minG, mainRevenusAvantMin)
     : 0;
   const minApplied = hasAnyNessy && mainRevenusAvantMin < minG;
 
-  // Revenus clients secondaires (brut, sans min garanti)
-  let secondaryEur = 0;
-  for (const [cid, v] of byClient) {
-    if (cid !== mainClientId) secondaryEur += v.eur;
-  }
+  const secondaryEur = externalEur;
   const globalCA = mainFinalCA + secondaryEur;
-
-  // ---- CASCADE TRÉSORERIE ----
-  const tvaCollectee = globalCA * TRESORERIE.tva;
-  const tvaNette = Math.max(0, tvaCollectee - TRESORERIE.creditTVA);
-  const inasti = globalCA * TRESORERIE.inasti;
-  const caApresInasti = globalCA - inasti;
-  const ipp = caApresInasti * TRESORERIE.ipp;
-  const avance = isAvanceMonth(monthIdx) ? NESSY.avanceDeduct : 0;
-  const netPocket = globalCA + TRESORERIE.creditTVA - TOTAL_CHARGES - inasti - ipp - avance;
 
   // Pour jauge · base = heures DETTE (43,75 h). On clamp 0→120%
   //   0%   = 0h encodées (dette ENTIÈRE)
@@ -498,25 +632,19 @@ function aggregateMonth() {
   const gaugePct = Math.min(120, (hoursHourlyNessy / gaugeBaseHours) * 100);
 
   return {
-    monthIdx, minG, minApplied,
-    mainClient,
+    minG, minApplied,
     tiers: { t1: { h: t1h, eur: t1eur }, t2: { h: t2h, eur: t2eur }, t3: { h: t3h, eur: t3eur } },
     mainFlatEur,
     mainRevenusAvantMin,
     mainFinalCA,
     mainHoursHourly: hoursHourlyNessy,
-    mainRealMinutes: mainRealMin,
-    mainBilledMinutes: mainBilledMin,
+    mainRealMinutes: nessyRealMin,
+    mainBilledMinutes: nessyBilledMin,
     secondaryEur,
     globalCA,
     globalRealMin,
     globalBilledMin,
     globalRawEur,
-    tvaCollectee, tvaNette,
-    inasti, ipp,
-    provisions: inasti + ipp,
-    avance,
-    netPocket,
     byClient,
     gaugePct,
     gaugeBaseHours,
@@ -530,43 +658,58 @@ function aggregateMonth() {
 // =============================================================
 // 🎨 RENDU PRINCIPAL
 // =============================================================
-async function refreshPeriod() {
-  await loadClients();
-  await loadLogsForMonth();
+function recomputeMonthLogs() {
+  const start = firstDayOfMonth(STATE.selectedYear, STATE.selectedMonth).getTime();
+  const end = lastDayOfMonth(STATE.selectedYear, STATE.selectedMonth).getTime();
+  STATE.logs = STATE.allLogs.filter((l) => {
+    const t = toMillisSafe(l.date);
+    return t >= start && t <= end;
+  });
+}
+
+// Chaque bloc est rendu isolément : une erreur dans une section (un id absent du
+// HTML, par ex.) ne doit plus faire tomber tout le tableau de bord comme avant.
+function section(name, fn, agg) {
+  try { fn(agg); } catch (ex) { console.error(`[kopek] rendu "${name}" en échec`, ex); }
+}
+
+/** Rendu complet du tableau de bord à partir de STATE (alimenté en temps réel par les listeners Firestore). */
+function renderAll() {
+  if (!STATE.user) return;
+  recomputeMonthLogs();
   const agg = aggregateMonth();
-  populateClientSelects();
-  renderHeader(agg);
-  renderNessyGauge(agg);
-  renderCity(agg);
-  renderPocket(agg);
-  renderMetrics(agg);
-  renderWaterfall(agg);
-  renderClientsList(agg);
-  renderLogs(agg);
+  // Le bouton n'est inactif que pendant les toutes premières secondes, le temps
+  // que la liste des projets arrive. Passé le délai de garde il redevient
+  // cliquable même si Firestore n'a pas répondu : un bouton définitivement mort
+  // est le pire des symptômes, il ne laisse aucune prise à l'utilisateur.
+  const addBtn = document.getElementById('btn-add-hours');
+  if (addBtn) addBtn.disabled = !(STATE.clientsLoaded || STATE.dataTimeout);
+  section('projets', populateClientSelects, agg);
+  section('entête', renderHeader, agg);
+  section('jauge', renderNessyGauge, agg);
+  section('ville', renderCity, agg);
+  section('métriques', renderMetrics, agg);
+  section('encodages', renderLogs, agg);
   if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
 }
+// Alias conservé pour tous les points d'appel existants (CRUD → re-rendu immédiat,
+// même si le listener temps réel confirmera l'état juste après).
+const refreshPeriod = renderAll;
 
 function renderHeader(agg) {
   const months = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   $('#period-title').textContent = `${months[STATE.selectedMonth]} ${STATE.selectedYear}`;
-  const idx = agg.monthIdx;
-  let phaseTxt = '', phaseBadge = '';
-  if (idx < 0) { phaseTxt = `Pré-démarrage (M${idx})`; phaseBadge = 'Pré-démarrage'; }
-  else if (idx < NESSY.phase2StartMonth) {
-    phaseTxt = `Mois ${idx + 1} / 24 · Phase 1 · Min garanti ${EUR(NESSY.minGaranti)}`;
-    phaseBadge = `Phase 1 · Mois ${idx + 1}/24`;
-  } else if (idx < 24) {
-    phaseTxt = `Mois ${idx + 1} / 24 · Phase 2 · Min garanti ${EUR(NESSY.phase2Min)}`;
-    phaseBadge = `Phase 2 · Mois ${idx + 1}/24`;
-  } else { phaseTxt = `Post-contrat (M${idx + 1})`; phaseBadge = 'Post-contrat'; }
-  if (agg.avance > 0) phaseTxt += ` · Remboursement avance −${EUR(NESSY.avanceDeduct)}`;
-  $('#period-sub').textContent = phaseTxt;
+  $('#period-sub').textContent = agg.hasAnyNessy
+    ? `Minimum garanti ${EUR(NESSY.minGaranti)} · ${FR(NESSY.minHoursEq)} h à prester`
+    : `Aucune heure encodée ce mois · minimum garanti ${EUR(NESSY.minGaranti)}`;
   const pb = $('#phase-badge');
-  pb.textContent = phaseBadge;
-  if (idx < 0) pb.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-zinc-800/80 text-zinc-400 text-[10px] font-semibold tracking-wider uppercase border border-zinc-700/70';
-  else if (idx < NESSY.phase2StartMonth) pb.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-fuchsia-500/10 text-fuchsia-300 text-[10px] font-semibold tracking-wider uppercase border border-fuchsia-500/30';
-  else if (idx < 24) pb.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 text-[10px] font-semibold tracking-wider uppercase border border-cyan-500/30';
-  else pb.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-300 text-[10px] font-semibold tracking-wider uppercase border border-amber-500/30';
+  if (pb) {
+    const surplus = agg.tiers.t3.h > 0.001;
+    pb.textContent = surplus ? 'Surplus facturable' : (agg.hasAnyNessy ? 'En cours' : 'À démarrer');
+    pb.className = surplus
+      ? 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 text-[10px] font-semibold tracking-wider uppercase border border-emerald-500/30'
+      : 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-zinc-800/80 text-zinc-400 text-[10px] font-semibold tracking-wider uppercase border border-zinc-700/70';
+  }
   $('#nessy-ca').textContent = EUR(agg.mainFinalCA);
 }
 
@@ -576,13 +719,25 @@ function renderNessyGauge(agg) {
   const garantieH = NESSY.minHoursEq;              // 43,75 h
 
   // ============================================================
-  // ⚠️ POSITIONS DES ZONES SOCLE / GARANTIE / SURPLUS SONT FIXES EN DUR DANS LE HTML
-  //    (fond coloré en filigrane + séparateurs verticaux épais)
-  //    Ici on ne fait que positionner le FILL et le CURSEUR sur cette grille fixe.
+  // La piste HTML fait 100 % = 43,75 h (min garanti). On borne donc le
+  // remplissage à 100 % : tout ce qui dépasse est raconté par le bandeau
+  // surplus ci-dessous, plus jamais par un débordement de la piste.
   // ============================================================
-  const pct = agg.gaugePct; // 0..120
+  const pct = Math.min(100, agg.gaugePct);
   $('#gauge-fill').style.width   = `${pct}%`;
-  $('#gauge-cursor').style.left  = `${pct}%`;
+  $('#gauge-cursor').style.left  = `calc(${pct}% - 1.5px)`;
+
+  // Bandeau surplus
+  const surplusBox = $('#gauge-surplus');
+  const surplusH = agg.tiers.t3.h;
+  if (surplusH > 0.001) {
+    surplusBox.classList.remove('hidden');
+    $('#gauge-surplus-text').innerHTML =
+      `Minimum garanti atteint · <b class="font-mono">+${FR(surplusH)} h</b> de surplus ` +
+      `facturable en plus, soit <b class="font-mono text-emerald-300">+${EUR(agg.tiers.t3.eur)}</b>.`;
+  } else {
+    surplusBox.classList.add('hidden');
+  }
 
   // ------------------------------------------------------------------
   // HEADER NESSY (à gauche du Hero)
@@ -595,17 +750,17 @@ function renderNessyGauge(agg) {
   const hh = HHdecimal(hoursNessy * 60);           // heures decimal pour affichage
   $('#nessy-sub').innerHTML = (agg.hasAnyNessy)
     ? `<b>Acquis <span class="chip text-amber-300 font-bold">${acquisShow}</span> garanti</b> · ` +
-      `Réalisé <span class="chip text-white font-bold">${hh} h / ${garantieH.toFixed(2)} h</span> · ` +
+      `Réalisé <span class="chip text-white font-bold">${hh} h / ${FR(garantieH)} h</span> · ` +
       `<span class="text-emerald-300 font-bold">+ ${bonusShow} bonus</span>`
     : `Aucun encodage Nessy ce mois · Acquis contractuel non activé — Encode tes premières heures pour activer <b class="text-amber-300">${EUR(agg.minG)}</b> de Min Garanti.`;
 
   // Cards tiers (3 sous-cartes sous la jauge)
   // Puisque l'argent est acquis : montrer REMBOURSEMENT (pas € gagnés)
-  $('#tier1-h').textContent   = `${agg.tiers.t1.h.toFixed(2)} h / ${socleH.toFixed(2)} h`;
+  $('#tier1-h').textContent   = `${FR(agg.tiers.t1.h)} h`;
   $('#tier1-eur').textContent = `~ ${EUR(agg.tiers.t1.eur)} remboursés`;
-  $('#tier2-h').textContent   = `${agg.tiers.t2.h.toFixed(2)} h / ${(garantieH - socleH).toFixed(2)} h`;
+  $('#tier2-h').textContent   = `${FR(agg.tiers.t2.h)} h`;
   $('#tier2-eur').textContent = `~ ${EUR(agg.tiers.t2.eur)} remboursés @ ${NESSY.regieRate} €/h`;
-  $('#tier3-h').textContent   = `+ ${agg.tiers.t3.h.toFixed(2)} h`;
+  $('#tier3-h').textContent   = `+ ${FR(agg.tiers.t3.h)} h`;
   $('#tier3-eur').textContent = `+ ${EUR(agg.tiers.t3.eur + agg.mainFlatEur)} bonus`;
 
   // ---- STATUS BAND : remplacements ACQUIS vs RÉALISÉ vs BONUS ----
@@ -623,25 +778,25 @@ function renderNessyGauge(agg) {
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-zinc-800/80 border border-zinc-700 text-zinc-300 text-[11px] font-mono">💶 Min Garanti · ${EUR(agg.minG)}</span>
         </div>
         <strong class="text-zinc-100 block">0 h encodées Nessy · L'acquis <b class="text-amber-300">${EUR(agg.minG)}</b> est PROMIS par contrat, mais <b>pas encore activé</b> sur le mois.</strong>
-        <div class="mt-3 grid grid-cols-3 gap-3 text-xs font-mono">
+        <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 text-xs font-mono">
           <div class="rounded-lg p-2 bg-zinc-900/70 border border-zinc-800 text-indigo-300/90">
             <div class="text-[9px] uppercase tracking-wider text-zinc-500 font-sans">Socle 2 000 €</div>
             <b class="block mt-1 text-zinc-100">—</b>
-            <div class="text-[10px] text-zinc-500 mt-0.5">0 / ${socleH.toFixed(2)} h · dette</div>
+            <div class="text-[10px] text-zinc-500 mt-0.5">0 / ${FR(socleH)} h · dette</div>
           </div>
           <div class="rounded-lg p-2 bg-zinc-900/70 border border-zinc-800 text-fuchsia-300/90">
             <div class="text-[9px] uppercase tracking-wider text-zinc-500 font-sans">Régie Garantie</div>
             <b class="block mt-1 text-zinc-100">—</b>
-            <div class="text-[10px] text-zinc-500 mt-0.5">0 / ${(garantieH - socleH).toFixed(2)} h · dette</div>
+            <div class="text-[10px] text-zinc-500 mt-0.5">0 / ${FR(garantieH - socleH)} h · dette</div>
           </div>
           <div class="rounded-lg p-2 bg-zinc-900/70 border border-zinc-800 text-emerald-300/90">
             <div class="text-[9px] uppercase tracking-wider text-zinc-500 font-sans">Bonus Surplus</div>
             <b class="block mt-1 text-zinc-100">0,00 €</b>
-            <div class="text-[10px] text-zinc-500 mt-0.5">seulement après ${garantieH.toFixed(2)} h</div>
+            <div class="text-[10px] text-zinc-500 mt-0.5">seulement après ${FR(garantieH)} h</div>
           </div>
         </div>
         <div class="mt-3 text-[12px] text-zinc-400">
-          Sélectionnez <b>${agg.mainClient?.name || 'NESSY'}</b> dans la saisie rapide ci-dessus, puis encodez vos heures · Le top-up Min Garanti s'appliquera en fin de mois si nécessaire.
+          Sélectionnez un <b>projet Nessy</b> dans la saisie rapide ci-dessus, puis encodez vos heures · Le top-up Min Garanti s'appliquera en fin de mois si nécessaire.
         </div>
       </div>`;
   }
@@ -657,14 +812,14 @@ function renderNessyGauge(agg) {
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-400/50 text-indigo-200 text-[11px] font-semibold tracking-wider uppercase">🧱 SOCLE EN COURS</span>
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-400/40 text-emerald-200 text-[11px] font-mono">✨ BONUS <b class="ml-1">${EUR(agg.bonusEur || 0)}</b></span>
         </div>
-        <strong class="text-indigo-100">Heures de dette · <span class="chip">${refunded.toFixed(2)} h / ${socleH.toFixed(2)} h</span> sur le Socle (25 h)</strong>
+        <strong class="text-indigo-100">Heures de dette · <span class="chip">${FR(refunded)} h / ${FR(socleH)} h</span> sur le Socle (25 h)</strong>
         <div class="mt-2 h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-indigo-500 to-indigo-300 rounded-full" style="width:${pctSocle}%"></div></div>
-        <div class="flex justify-between text-[11px] font-mono mt-1.5 text-indigo-300/80">
+        <div class="flex justify-between flex-wrap gap-x-3 gap-y-1 text-[10px] sm:text-[11px] font-mono mt-1.5 text-indigo-300/80">
           <span>Remboursement Socle · ${pctSocle.toFixed(0)}%</span>
-          <span>Il manque <b>${debt.toFixed(2)} h</b> avant déclenchement du surplus</span>
+          <span>Il manque <b>${FR(debt)} h</b> avant déclenchement du surplus</span>
         </div>
         <div class="text-zinc-400 text-[12px] mt-2">
-          Le contrat Nessy est activé · Tu gagnes <b class="text-amber-300">déjà ${EUR(agg.minG)}</b> d'office. Encode encore <b class="text-indigo-300">${(socleH - refunded).toFixed(2)} h</b> pour solder le socle.
+          Le contrat Nessy est activé · Tu gagnes <b class="text-amber-300">déjà ${EUR(agg.minG)}</b> d'office. Encode encore <b class="text-indigo-300">${FR(socleH - refunded)} h</b> pour solder le socle.
         </div>
       </div>`;
   }
@@ -683,25 +838,24 @@ function renderNessyGauge(agg) {
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-fuchsia-500/20 border border-fuchsia-400/50 text-fuchsia-200 text-[11px] font-semibold tracking-wider uppercase">🛡️ RÉGIE ${pctRegie.toFixed(0)}%</span>
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-400/40 text-emerald-200 text-[11px] font-mono">✨ BONUS <b class="ml-1">${EUR(agg.bonusEur || 0)}</b></span>
         </div>
-        <strong class="text-fuchsia-100">Dette Régie Garantie · <span class="chip">${regieH.toFixed(2)} h / ${regieMax.toFixed(2)} h</span> · il reste <b>${debt.toFixed(2)} h</b></strong>
+        <strong class="text-fuchsia-100">Dette Régie Garantie · <span class="chip">${FR(regieH)} h / ${FR(regieMax)} h</span> · il reste <b>${FR(debt)} h</b></strong>
         <div class="mt-2 grid grid-cols-2 gap-3">
           <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-indigo-500 to-indigo-300 rounded-full" style="width:100%"></div></div>
           <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-fuchsia-500 to-fuchsia-300 rounded-full" style="width:${pctRegie}%"></div></div>
         </div>
-        <div class="flex justify-between text-[11px] font-mono mt-1.5 text-zinc-400">
+        <div class="flex justify-between flex-wrap gap-x-3 gap-y-1 text-[10px] sm:text-[11px] font-mono mt-1.5 text-zinc-400">
           <span class="text-indigo-300/80">Socle 100% · 25 h · dette remboursée</span>
-          <span class="text-fuchsia-300/80">Régie Garantie · manque <b>${(garantieH - refunded).toFixed(2)} h</b></span>
+          <span class="text-fuchsia-300/80">Régie Garantie · manque <b>${FR(garantieH - refunded)} h</b></span>
         </div>
         <div class="text-zinc-400 text-[12px] mt-2">
-          <b class="text-amber-300">${EUR(agg.minG)}</b> d'office · Dès que tu atteindras <b class="text-fuchsia-300">${garantieH.toFixed(2)} h</b>, tu passeras en <b class="text-emerald-300">Surplus Bonus</b>.
+          <b class="text-amber-300">${EUR(agg.minG)}</b> d'office · Dès que tu atteindras <b class="text-fuchsia-300">${FR(garantieH)} h</b>, tu passeras en <b class="text-emerald-300">Surplus Bonus</b>.
         </div>
       </div>`;
   }
 
   // Cas 3 · SURPLUS (≥ 43,75h)  — 🏆 ENGAGEMENT VALIDÉ
   else {
-    const surplusH = agg.tiers.t3.h;
-    st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-emerald-500/50 bg-emerald-500/[0.08] shadow-[0_30px_80px_-40px_rgba(16,185,129,0.55)]';
+      st.className = 'mt-6 rounded-xl p-4 flex items-start gap-3.5 border border-emerald-500/50 bg-emerald-500/[0.08] shadow-[0_30px_80px_-40px_rgba(16,185,129,0.55)]';
     st.innerHTML = `<i data-lucide="trophy" class="w-5 h-5 text-amber-300 flex-none mt-0.5"></i>
       <div class="flex-1">
         <div class="flex flex-wrap items-center gap-2 mb-2">
@@ -710,16 +864,16 @@ function renderNessyGauge(agg) {
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-fuchsia-500/20 border border-fuchsia-400/50 text-fuchsia-200 text-[11px] font-semibold tracking-wider uppercase">🛡️ GARANTIE ✓</span>
           <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 text-[11px] font-mono">✨ BONUS +<b class="ml-1">${EUR(agg.bonusEur || 0)}</b></span>
         </div>
-        <strong class="text-emerald-100">Tu as remboursé toutes tes heures · <span class="chip">+${surplusH.toFixed(2)} h</span> en bonus facturable en <b class="text-amber-300">plus de ${EUR(agg.minG)}</b></strong>
+        <strong class="text-emerald-100">Tu as remboursé toutes tes heures · <span class="chip">+${FR(surplusH)} h</span> en bonus facturable en <b class="text-amber-300">plus de ${EUR(agg.minG)}</b></strong>
         <div class="mt-2 grid grid-cols-3 gap-3">
           <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-indigo-500 to-indigo-300 rounded-full" style="width:100%"></div></div>
           <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-fuchsia-500 to-fuchsia-300 rounded-full" style="width:100%"></div></div>
           <div class="h-2 rounded-full bg-zinc-900/60 overflow-hidden"><div class="h-full bg-gradient-to-r from-emerald-400 via-lime-400 to-amber-300 rounded-full" style="width:${Math.min(100,(surplusH/8.75)*100)}%"></div></div>
         </div>
-        <div class="flex justify-between text-[11px] font-mono mt-1.5 text-zinc-400">
+        <div class="flex justify-between flex-wrap gap-x-3 gap-y-1 text-[10px] sm:text-[11px] font-mono mt-1.5 text-zinc-400">
           <span class="text-indigo-300/80">Socle 25 h · ${EUR(NESSY.socleFlat)}</span>
           <span class="text-fuchsia-300/80">Régie 18,75 h · ${EUR(1500)}</span>
-          <span class="text-emerald-300/80">Surplus · +${surplusH.toFixed(2)} h × ${NESSY.regieRate} €</span>
+          <span class="text-emerald-300/80">Surplus · +${FR(surplusH)} h × ${NESSY.regieRate} €</span>
         </div>
         <div class="text-zinc-400 text-[12px] mt-2">
           CA principal · <b class="text-white">${EUR(agg.mainFinalCA)}</b> dont acquis <b class="text-amber-300">${EUR(agg.minG)}</b> + bonus <b class="text-emerald-300">${EUR(agg.bonusEur || 0)}</b> · Chaque heure en plus = c'est <b class="text-emerald-300">directement dans la poche</b>.
@@ -730,213 +884,501 @@ function renderNessyGauge(agg) {
 }
 
 // =================================================================
-// 🎮 GAMIFIED · MINE KOPEK 3D + SCOREBOARD
+// ⚔️  LES MARCHES DE NESSY · le jeu
+// -----------------------------------------------------------------
+// Règle intangible : le jeu LIT les heures encodées, il ne les écrit jamais.
+// Aucune action de jeu ne peut modifier une prestation, un projet ou la
+// facturation. Le sens unique est garanti ici, pas par convention.
 // =================================================================
-function renderCity(agg) {
-  // Collecter tous les clans (le clan principal + les autres clients)
-  const mainClient = agg.mainClient || (STATE.clients && STATE.clients.find(c => c.is_main_contract)) || { id: 'main', name: 'Nessy' };
-  
-  const clansData = [];
-  
-  // 1. Clan Principal (Votre Cité)
-  clansData.push({
-    id: mainClient.id,
-    name: mainClient.name || 'Métropole Principale',
-    isMain: true,
-    hours: agg.mainHoursHourly || 0,
-    refundedH: agg.refundedH || 0,
-    debtRemainH: agg.debtRemainH || 0,
-    minG: agg.minG || 0,
-    bonusEur: agg.bonusEur || 0,
-    ca: agg.mainFinalCA || 0,
-    rate: mainClient.default_rate || 80,
-    socleH: NESSY.socleHours,
-    garantiH: NESSY.minHoursEq,
-    tiers: agg.tiers,
-    count: (agg.byClient && agg.byClient.get(mainClient.id)?.count) || 0,
-  });
+let gameMod = null;
+let gameStatus = 'idle';      // idle | loading | ready | failed
+let gameSaveTimer = null;
+let gameTickTimer = null;
+let lastAggForGame = null;
 
-  // 2. Autres Clans (Autres Clients)
-  const processedIds = new Set([mainClient.id]);
-  
-  // Clients existants dans STATE.clients
-  (STATE.clients || []).forEach(c => {
-    if (processedIds.has(c.id)) return;
-    processedIds.add(c.id);
-    const clientAgg = (agg.byClient && agg.byClient.get(c.id)) || { realMin: 0, billedMin: 0, eur: 0, count: 0 };
-    clansData.push({
-      id: c.id,
-      name: c.name || `Client ${c.id.substring(0, 4)}`,
-      isMain: false,
-      hours: (clientAgg.billedMin || 0) / 60,
-      ca: clientAgg.eur || 0,
-      rate: c.default_rate || 80,
-      count: clientAgg.count || 0,
-    });
-  });
+function showGameFallback(msg) {
+  const el = document.getElementById('game-fallback');
+  if (!el) return;
+  el.classList.remove('hidden');
+  const detail = document.getElementById('game-fallback-detail');
+  if (detail && msg) detail.textContent = msg;
+}
 
-  // Clients trouvés dans byClient mais pas dans STATE.clients
-  if (agg.byClient) {
-    for (const [cid, b] of agg.byClient.entries()) {
-      if (processedIds.has(cid)) continue;
-      processedIds.add(cid);
-      clansData.push({
-        id: cid,
-        name: b.client?.name || 'Client',
-        isMain: false,
-        hours: (b.billedMin || 0) / 60,
-        ca: b.eur || 0,
-        rate: b.client?.default_rate || 80,
-        count: b.count || 0,
-      });
-    }
+function gameToast(msg, ok = true) {
+  const el = document.getElementById('g-toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `absolute left-1/2 -translate-x-1/2 top-24 sm:top-28 z-20 rounded-xl px-3.5 py-2 text-[12px] font-semibold backdrop-blur-xl border shadow-lg ${
+    ok ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-100'
+       : 'bg-red-500/20 border-red-400/40 text-red-100'}`;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.add('hidden'), 2600);
+}
+
+/**
+ * Adopte l'état venu de Firestore. Nos propres écritures nous reviennent par le
+ * même écouteur : sans garde, l'écho écraserait les coups joués entre-temps.
+ * On ne prend le distant que s'il est réellement plus récent que ce qu'on tient.
+ */
+function adoptGameState(remote) {
+  const valid = remote && typeof remote.seed === 'string' && remote.version === 1;
+  if (!valid) {
+    if (GAME.state) return;              // partie déjà en cours localement
+    GAME.state = GAMEJS.newGameState(STATE.user.uid, Date.now());
+    GAME.tiles = GAMEJS.hydrate(GAME.state);
+    GAME.loaded = true;
+    saveGameNow();                        // on grave la première partie tout de suite
+  } else {
+    const mine = GAME.state;
+    if (mine && (remote.savedAt || 0) <= (mine.savedAt || 0)) return;
+    const { userId, ...clean } = remote;
+    GAME.state = clean;
+    GAME.tiles = GAMEJS.hydrate(GAME.state);
+    GAME.loaded = true;
   }
+  GAME.selected = null;
+  GAME.army = null;
+  GAMEJS.checkObjectives(GAME.state, GAME.tiles);
+  // Première visite : on montre les règles. Un jeu qu'on doit deviner n'est
+  // pas un jeu, et c'est exactement le reproche qui revenait.
+  try {
+    if (!localStorage.getItem(RULES_SEEN_KEY)) ouvrirRegles();
+  } catch { /* navigation privée : tant pis, pas d'ouverture automatique */ }
+  runCatchUp();
+  ensureGameLoaded();
+  drawGame();
+  renderGameHud();
+}
 
-  // Mettre à jour le moteur 3D Three.js
-  updateCity(clansData, agg);
+async function ensureGameLoaded() {
+  if (gameStatus !== 'idle') return;
+  gameStatus = 'loading';
+  try {
+    gameMod = await import('./world3d.js?v=2026-09-09-01');
+    const canvas = document.getElementById('game-canvas');
+    if (!canvas) throw new Error('canvas #game-canvas introuvable');
+    gameMod.initWorld(canvas, { onSelect: onTileSelected });
+    gameStatus = 'ready';
+    drawGame();
+  } catch (ex) {
+    gameStatus = 'failed';
+    console.error('[kopek] archipel 3D indisponible', ex);
+    showGameFallback(ex && ex.message ? ex.message : String(ex));
+  }
+}
 
-  // Mettre à jour l'affichage du HUD 2D
-  const socleH = NESSY.socleHours;
-  const fullH = NESSY.minHoursEq;
-  const refunded = agg.refundedH || 0;
-  const bonusH = agg.tiers?.t3?.h || 0;
-  const soclePct = Math.min(100, (refunded / socleH) * 100);
-  const garantiPct = refunded >= socleH ? Math.min(100, ((refunded - socleH) / (fullH - socleH)) * 100) : 0;
-  const pctForBar = Math.min(120, (refunded / fullH) * 100 + Math.min(30, (bonusH / 24) * 30));
+/** Total d'heures facturées, toutes périodes confondues — la source des Sceaux. */
+function totalBilledHours() {
+  return STATE.allLogs.reduce((a, l) => a + (l.billed_minutes || 0), 0) / 60;
+}
 
+/** Heures du mois affiché — la source du bonus d'assaut. */
+function monthBilledHours(agg) {
+  return agg ? (agg.mainBilledMinutes || 0) / 60 : 0;
+}
+
+function drawGame() {
+  if (gameStatus !== 'ready' || !gameMod || !GAME.state || !GAME.tiles) return;
+  const agg = lastAggForGame;
+  // La capitale grandit exactement comme la ville d'avant : à la progression du
+  // mois vers la garantie. Le jeu ne change rien à ce calcul.
+  const progress = agg ? Math.min(1.6, (agg.refundedH || 0) / NESSY.minHoursEq) : 0;
+  const army = GAME.army ? GAMEJS.armyById(GAME.state, GAME.army) : null;
+  gameMod.renderWorld({
+    tiles: GAME.tiles,
+    capitalProgress: progress,
+    selected: GAME.selected,
+    armies: GAME.state.armies || [],
+    // La portée n'est calculée que pour l'armée sélectionnée : c'est elle qui
+    // dit au joueur ce qu'il peut faire, et rien d'autre ne doit s'allumer.
+    reach: army ? GAMEJS.reachable(GAME.state, GAME.tiles, army) : null,
+    // Les faits de guerre récents : c'est ce qui donne à la carte l'air d'un
+    // monde où il se passe quelque chose plutôt que d'un décor figé.
+    marques: GAMEJS.recentMarks(GAME.state, Date.now()),
+  });
+}
+
+function renderGameHud() {
   const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  setText('hud-socle', `${soclePct.toFixed(0)} %`);
-  setText('hud-garanti', `${garantiPct.toFixed(0)} %`);
-  setText('hud-bonus', `+${bonusH.toFixed(1).replace('.', ',')} h`);
+  if (!GAME.state || !GAME.tiles) return;
+  const hoursTotal = totalBilledHours();
+  const rank = GAMEJS.rankOf(GAME.tiles, hoursTotal);
+  setText('g-rank', rank.label);
+  const owned = GAMEJS.ownedTiles(GAME.tiles).length;
+  setText('g-rank-next', rank.next
+    ? `${owned} territoire${owned > 1 ? 's' : ''} · ${rank.next.label} à ${rank.next.tiles} territoires et ${FR(rank.next.hours, 0)} h`
+    : `${owned} territoires · rang maximal`);
+  setText('g-or', Math.floor(GAME.state.or));
+  setText('g-vivres', Math.floor(GAME.state.vivres));
+  setText('g-sceaux', GAMEJS.sceauxAvailable(GAME.state, hoursTotal));
 
-  const population = Math.round(150 + refunded * 28 + bonusH * 60 + (agg.secondaryEur || 0) / 8);
-  setText('hud-pop', population.toLocaleString('fr-BE') + ' hab.');
-  setText('hud-acquis', EUR(agg.hasAnyNessy ? agg.minG : 0));
-  setText('hud-ca-bonus', EUR(agg.bonusEur || 0));
+  const bonus = GAMEJS.warBonus(monthBilledHours(lastAggForGame), NESSY.socleHours, NESSY.minHoursEq);
+  const el = document.getElementById('g-bonus');
+  if (el) {
+    el.textContent = bonus.pct > 0 ? `Assaut +${bonus.pct} % · ${bonus.label}` : 'Aucun bonus · sous le socle';
+    el.className = `rounded-xl px-2.5 py-1 backdrop-blur-xl bg-zinc-950/70 border text-[10px] font-semibold ${
+      bonus.tier === 2 ? 'border-fuchsia-400/40 text-fuchsia-300'
+      : bonus.tier === 1 ? 'border-indigo-400/40 text-indigo-300'
+      : 'border-white/10 text-zinc-400'}`;
+  }
 
-  const bar = document.getElementById('hud-bar');
-  if (bar) bar.style.width = `${pctForBar}%`;
+  // L'objectif est la première chose à lire : sans lui, l'écran n'est qu'une
+  // carte d'hexagones sans enjeu.
+  const { objective, index, total } = GAMEJS.currentObjective(GAME.state, GAME.tiles);
+  const goalLabel = document.getElementById('g-goal-label');
+  const goalHint = document.getElementById('g-goal-hint');
+  const goalCount = document.getElementById('g-goal-count');
+  if (goalLabel) {
+    goalLabel.textContent = objective ? objective.label : 'Tous les objectifs sont accomplis';
+    goalCount.textContent = `${index}/${total}`;
+    goalHint.textContent = GAMEJS.nextStepHint(GAME.state, GAME.tiles);
+  }
 
-  const label = document.getElementById('hud-label');
-  if (label) {
-    if (!agg.hasAnyNessy) {
-      label.textContent = 'Contrat principal en attente d’encodage';
-    } else if (refunded < fullH) {
-      label.textContent = `Engagement : ${refunded.toFixed(2).replace('.', ',')} / ${fullH.toFixed(2).replace('.', ',')} h · reste ${agg.debtRemainH.toFixed(2).replace('.', ',')} h`;
+  // La menace : la seule information qui doit interrompre ce que le joueur est
+  // en train de faire. Sans elle, on perd un territoire sans avoir rien vu.
+  const menaces = GAMEJS.menaces(GAME.state, GAME.tiles);
+  const mBox = document.getElementById('g-menace');
+  const mTxt = document.getElementById('g-menace-text');
+  if (mBox && mTxt) {
+    const m = menaces[0];
+    if (!m) {
+      mBox.classList.add('hidden');
     } else {
-      label.textContent = `Engagement validé ! Bonus ${EUR(agg.bonusEur || 0)} · Surplus +${bonusH.toFixed(1).replace('.', ',')} h`;
+      const clan = GAMEJS.CLANS.find((c) => c.key === m.clan)?.label || m.clan;
+      const ou = m.distance === 0 ? 'sur vos terres'
+        : m.distance === 1 ? 'au contact de vos terres'
+        : `à ${m.distance} cases de vos terres`;
+      mTxt.textContent = `${clan} · colonne de ${m.str} ${ou}`
+        + (menaces.length > 1 ? ` · ${menaces.length} colonnes en marche` : '');
+      mBox.classList.remove('hidden');
+      mBox._cible = { q: m.q, r: m.r };
     }
   }
 
-  if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
+  const body = document.getElementById('g-log-body');
+  if (body) {
+    const entries = GAME.state.log || [];
+    body.innerHTML = entries.length
+      ? entries.slice(0, 20).map((e) => `<div class="text-[10px] leading-snug ${
+          e.kind === 'bad' ? 'text-red-300' : e.kind === 'good' ? 'text-emerald-300' : 'text-zinc-400'
+        }">${escapeHtml(e.text)}</div>`).join('')
+      : '<div class="text-[10px] text-zinc-500">Rien à raconter pour l\'instant.</div>';
+  }
 }
 
-function maybePuffSmoke(shouldRun) {
-  if (!shouldRun) return;
-  const smoke = document.getElementById('k-smoke');
-  if (!smoke) return;
-  if (puffCooldown > 0) return;
-  smoke.style.animation = 'none';
-  // reflow
-  void smoke.offsetWidth;
-  smoke.style.animation = `puf ${(2.6 + Math.random() * 0.8).toFixed(2)}s ease-out forwards`;
-  puffCooldown = 1;
-  setTimeout(() => { puffCooldown = 0; }, 2400);
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function renderPocket(agg) {
-  $('#pocket-amount').textContent = EUR(agg.netPocket);
-  const charges = TOTAL_CHARGES + agg.inasti + agg.ipp + agg.avance;
-  $('#pocket-ca').textContent = EUR(agg.globalCA);
-  $('#pocket-charges').textContent = `−${EUR(charges)}`;
-  const lines = [
-    `<div>TVA collectée +${EUR(agg.tvaCollectee, 2)} · Crédit leasing ${EUR(TRESORERIE.creditTVA, 2)}</div>`,
-    `<div>INASTI ${EUR(agg.inasti)} · IPP ${EUR(agg.ipp)}${agg.avance ? ` · Avance −${EUR(agg.avance)}` : ''}</div>`,
-    `<div>Charges fixes ${EUR(TOTAL_CHARGES)} (Voiture 650 · Logement 625 · Outils 125 · Compta 125)</div>`,
-  ];
-  $('#pocket-detail').innerHTML = lines.join('');
+function onTileSelected(sel) {
+  if (!GAME.state) return;
+  const key = GAMEJS.tileKey(sel.q, sel.r);
+
+  // Une armée est sélectionnée : le toucher suivant est un ordre de marche.
+  // C'est la boucle entière du jeu — sélectionner, voir la portée, ordonner.
+  if (GAME.army) {
+    const army = GAMEJS.armyById(GAME.state, GAME.army);
+    if (army && (army.q !== sel.q || army.r !== sel.r)) {
+      const portee = GAMEJS.reachable(GAME.state, GAME.tiles, army);
+      if (portee.has(key)) { orderMove(army, sel); return; }
+    }
+    if (army && army.q === sel.q && army.r === sel.r) { deselectArmy(); return; }
+  }
+
+  const surPlace = GAMEJS.armyAt(GAME.state, sel.q, sel.r);
+  GAME.army = surPlace && surPlace.owner === 'joueur' ? surPlace.id : null;
+  GAME.selected = sel;
+  if (gameMod && gameStatus === 'ready') gameMod.setSelected(sel);
+  drawGame();
+  renderTilePanel();
+}
+
+function deselectArmy() {
+  GAME.army = null;
+  drawGame();
+  renderTilePanel();
+}
+
+/** Exécute l'ordre et raconte ce qui s'est passé. */
+function orderMove(army, sel) {
+  const res = GAMEJS.moveArmy(GAME.state, GAME.tiles, army.id,
+    sel.q, sel.r, monthBilledHours(lastAggForGame));
+  if (!res.ok) { gameToast(res.error, false); return; }
+  if (res.attacked) {
+    const bonus = res.bonus.pct ? ` · bonus heures +${res.bonus.pct} %` : '';
+    gameToast(res.win
+      ? `${res.defenders} défenseurs balayés${bonus} · territoire pris, ${res.attackers} survivants`
+      : `Assaut brisé sur ${res.defenders} défenseurs${bonus} · armée perdue`, res.win);
+    if (!res.win) GAME.army = null;
+  } else {
+    GAME.selected = { q: sel.q, r: sel.r };
+    if (gameMod && gameStatus === 'ready') gameMod.setSelected(GAME.selected);
+    if (army.mp <= 0) gameToast('Armée à bout de souffle · elle repart au prochain tour', true);
+  }
+  afterGameChange();
+}
+
+function renderTilePanel() {
+  const panel = document.getElementById('g-tile-panel');
+  if (!panel || !GAME.tiles) return;
+  const sel = GAME.selected;
+  const t = sel ? GAME.tiles[GAMEJS.tileKey(sel.q, sel.r)] : null;
+  // Sur téléphone, l'objectif et le panneau du territoire se disputent l'écran
+  // et il ne reste plus de carte entre les deux. Ils s'excluent : l'objectif
+  // guide quand rien n'est sélectionné, le panneau prend le relais ensuite.
+  const goal = document.getElementById('g-goal');
+  if (!t) {
+    panel.classList.add('hidden');
+    if (goal) goal.classList.remove('max-sm:hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+  if (goal) goal.classList.add('max-sm:hidden');
+
+  const ter = GAMEJS.TERRAINS[t.terrain];
+  const ownerLabel = t.capital ? 'Votre capitale'
+    : t.owner === 'joueur' ? 'À vous'
+    : t.owner ? (GAMEJS.CLANS.find((c) => c.key === t.owner)?.label || t.owner)
+    : t.neutralGarrison ? 'Repaire hostile'
+    : 'Territoire libre';
+  const troops = t.owner ? (t.garrison || 0) : (t.neutralGarrison || 0);
+  const bName = GAMEJS.BUILDINGS[t.building]?.label;
+
+  // Une pastille à la couleur du camp, la même que la bordure sur la carte :
+  // le panneau et la carte doivent dire la même chose de la même façon.
+  const couleur = t.owner === 'joueur' ? '#f2c14e'
+    : t.owner ? (GAMEJS.CLANS.find((c) => c.key === t.owner)?.color || '#9aa7b0')
+    : '#9aa7b0';
+  $('#g-tile-title').innerHTML =
+    `<span class="inline-block w-2.5 h-2.5 rounded-full align-middle mr-1.5" style="background:${couleur}"></span>`
+    + escapeHtml(`${ter.label} · ${ownerLabel}`);
+  const armeeIci = GAMEJS.armyAt(GAME.state, t.q, t.r);
+  // « Armée de 3 » sans dire à qui elle est, sur une case ennemie, se lit comme
+  // une bonne nouvelle. C'est exactement le contraire.
+  const armeeTxt = !armeeIci ? null
+    : armeeIci.owner === 'joueur'
+      ? `Votre armée de ${armeeIci.str} · ${armeeIci.mp} déplacement${armeeIci.mp > 1 ? 's' : ''}`
+      : `⚔ Colonne ${GAMEJS.CLANS.find((c) => c.key === armeeIci.owner)?.label || armeeIci.owner} de ${armeeIci.str}`;
+  $('#g-tile-sub').textContent = [
+    armeeTxt,
+    `Défense +${GAMEJS.tileDefense(t)} %`,
+    troops ? `${troops} troupe${troops > 1 ? 's' : ''}` : null,
+    bName || null,
+  ].filter(Boolean).join(' · ');
+
+  const hoursTotal = totalBilledHours();
+  const bonusAssaut = GAMEJS.warBonus(monthBilledHours(lastAggForGame), NESSY.socleHours, NESSY.minHoursEq);
+  const actions = GAMEJS.actionsFor(GAME.state, GAME.tiles, t, hoursTotal);
+  const wrap = $('#g-tile-actions');
+  wrap.innerHTML = actions.map((a, i) => {
+    const cost = a.sceaux ? `${a.sceaux} sceaux`
+      : a.troupes ? `${a.troupes} troupes de la garnison`
+      : a.cost ? [a.cost.or ? `${a.cost.or} or` : null, a.cost.vivres ? `${a.cost.vivres} vivres` : null].filter(Boolean).join(' · ')
+      : a.defenders != null
+        ? `${a.attackers || 0} contre ${a.defenders} · terrain +${GAMEJS.tileDefense(t)} %`
+          + (bonusAssaut.pct ? ` · vos heures +${bonusAssaut.pct} %` : '')
+        : '';
+    // Un bouton grisé sans explication, c'est ce qui donne le sentiment de ne
+    // rien pouvoir faire. On affiche la raison à la place du coût.
+    const bas = a.enabled ? cost : (a.why || cost);
+    return `<button type="button" data-act="${i}" ${a.enabled ? '' : 'disabled'} title="${escapeHtml(a.why || '')}"
+      class="rounded-xl px-2.5 py-2 text-left border transition text-[11px] font-semibold
+             ${a.enabled ? 'bg-white/5 border-white/15 text-zinc-100 hover:bg-white/10 active:scale-[0.98]'
+                         : 'bg-white/[0.02] border-white/10 text-zinc-500 cursor-not-allowed'}">
+      <span class="block">${escapeHtml(a.label)}</span>
+      <span class="block text-[9px] ${a.enabled ? 'font-mono opacity-70' : 'text-amber-400/70'} mt-0.5 leading-tight">${escapeHtml(bas)}</span>
+    </button>`;
+  }).join('') || `<div class="col-span-2 text-[11px] text-zinc-400 leading-snug">${
+    escapeHtml(GAMEJS.situation(GAME.state, GAME.tiles, t))
+  } <span class="text-zinc-500">Approchez une armée pour pouvoir l’attaquer.</span></div>`;
+
+  wrap.querySelectorAll('button[data-act]').forEach((b) => {
+    b.addEventListener('click', () => runGameAction(actions[Number(b.getAttribute('data-act'))], t));
+  });
+}
+
+function runGameAction(a, t) {
+  if (!a || !GAME.state) return;
+  const hoursTotal = totalBilledHours();
+  let res;
+  if (a.kind === 'build') res = GAMEJS.build(GAME.state, GAME.tiles, t.q, t.r, a.key);
+  else if (a.kind === 'recruit') res = GAMEJS.recruit(GAME.state, GAME.tiles, t.q, t.r, 1);
+  else if (a.kind === 'elite') res = GAMEJS.recruitElite(GAME.state, GAME.tiles, t.q, t.r, hoursTotal);
+  else if (a.kind === 'colonise') res = GAMEJS.colonise(GAME.state, GAME.tiles, t.q, t.r);
+  else if (a.kind === 'raise') {
+    res = GAMEJS.raiseArmy(GAME.state, GAME.tiles, t.q, t.r, a.troupes);
+    if (res.ok) {
+      // On sélectionne l'armée aussitôt : sinon le joueur ne fait pas le lien
+      // entre le bouton qu'il vient d'appuyer et le pion qui apparaît.
+      const nouvelle = GAMEJS.armyAt(GAME.state, t.q, t.r);
+      if (nouvelle) GAME.army = nouvelle.id;
+      gameToast('Armée levée · touchez une case bleue pour la déplacer', true);
+    }
+  }
+  else if (a.kind === 'assault') {
+    if (!a.armyId) { gameToast('Aucune armée à portée. Levez-en une et approchez-la.', false); return; }
+    const army = GAMEJS.armyById(GAME.state, a.armyId);
+    GAME.army = a.armyId;
+    orderMove(army, { q: t.q, r: t.r });
+    return;
+  }
+  else if (a.kind === 'attack') {
+    if (!a.from) { gameToast('Aucune troupe voisine pour lancer l\'assaut.', false); return; }
+    const troops = Math.max(0, (GAME.tiles[GAMEJS.tileKey(a.from.q, a.from.r)]?.garrison || 0) - 1);
+    const defenders = a.defenders;
+    res = GAMEJS.attack(GAME.state, GAME.tiles, a.from.q, a.from.r, t.q, t.r, monthBilledHours(lastAggForGame));
+    if (res.ok) {
+      // « Assaut repoussé » sans chiffres ne dit pas au joueur ce qu'il a raté.
+      // On expose le rapport de force qui a décidé du sort du combat.
+      const bonus = res.bonus.pct ? ` · bonus heures +${res.bonus.pct} %` : '';
+      const survivants = res.win
+        ? `${res.result.attackerLeft} survivant${res.result.attackerLeft > 1 ? 's' : ''}`
+        : `il leur reste ${res.result.defenderLeft}`;
+      gameToast(`${troops} contre ${defenders}${bonus} → ${res.win ? 'victoire' : 'échec'}, ${survivants}`, res.win);
+    }
+  }
+  if (!res) return;
+  if (!res.ok) { gameToast(res.error, false); return; }
+  if (a.kind !== 'attack') gameToast(`${a.label} · fait`, true);
+  afterGameChange();
+}
+
+/** Un seul point de sortie après toute modification : redessiner puis sauver. */
+function afterGameChange() {
+  const fresh = GAMEJS.checkObjectives(GAME.state, GAME.tiles);
+  drawGame();
+  renderGameHud();
+  renderTilePanel();
+  scheduleGameSave();
+  // Un objectif franchi doit s'annoncer : c'est la seule récompense visible
+  // du jeu, et elle arrive souvent au milieu d'une autre action.
+  if (fresh.length) {
+    gameToast(`Objectif accompli · ${fresh[fresh.length - 1].label}`, true);
+  }
+}
+
+// Les actions s'enchaînent vite (construire, recruter, attaquer) : on regroupe
+// les écritures plutôt que d'en envoyer une par clic. Le délai reste court —
+// à 900 ms, fermer l'onglet juste après un coup pouvait le perdre.
+const SAVE_DEBOUNCE_MS = 350;
+
+function scheduleGameSave() {
+  clearTimeout(gameSaveTimer);
+  gameSaveTimer = setTimeout(() => { gameSaveTimer = null; saveGameNow(); }, SAVE_DEBOUNCE_MS);
+}
+
+/** Écrit sans attendre le délai. Appelé quand la page peut disparaître. */
+function flushGameSave() {
+  if (!gameSaveTimer) return;
+  clearTimeout(gameSaveTimer);
+  gameSaveTimer = null;
+  saveGameNow();
+}
+
+// Sur téléphone, quitter l'application ne déclenche pas toujours « unload » :
+// c'est « pagehide » et le passage en arrière-plan qui font foi.
+window.addEventListener('pagehide', flushGameSave);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushGameSave();
+});
+
+function saveGameNow() {
+  if (!STATE.user || !GAME.state) return;
+  // On horodate AVANT d'écrire et on garde la même valeur en local : l'écho de
+  // notre propre écriture est ainsi reconnu comme « pas plus récent » et ignoré.
+  GAME.state.savedAt = Date.now();
+  writeInBackground(
+    setDoc(gameDocRef(), { userId: STATE.user.uid, ...GAME.state }),
+    'Sauvegarde de la partie impossible',
+  );
+}
+
+/** Rattrape la production hors ligne, puis programme le prochain tour. */
+function runCatchUp() {
+  if (!GAME.state || !GAME.tiles) return;
+  const avant = GAMEJS.menaces(GAME.state, GAME.tiles).length;
+  const sum = GAMEJS.catchUp(GAME.state, GAME.tiles, Date.now());
+  if (sum.ticks > 0) {
+    afterGameChange();
+    const apres = GAMEJS.menaces(GAME.state, GAME.tiles);
+    const proche = apres[0];
+    if (sum.attacks.some((a) => a.lost)) gameToast('Un territoire est tombé pendant votre absence.', false);
+    else if (sum.attacks.length) gameToast('Une incursion a été repoussée sur vos terres.', true);
+    // Pendant une partie ouverte, annoncer « +3 or » toutes les trois minutes
+    // n'apprend rien ; ce qui compte, c'est la colonne qui approche.
+    else if (proche && (proche.distance <= 2 || apres.length > avant)) {
+      gameToast(proche.distance <= 1
+        ? `Colonne du clan ${proche.clan} au contact de vos terres !`
+        : `Colonne du clan ${proche.clan} à ${proche.distance} cases de vos terres.`, false);
+    } else if (sum.ticks >= 2 && sum.or > 0) gameToast(`+${sum.or} or récoltés en votre absence`, true);
+  }
+  clearTimeout(gameTickTimer);
+  const msLeft = GAMEJS.TICK_MS - ((Date.now() - GAME.state.lastTick) % GAMEJS.TICK_MS);
+  gameTickTimer = setTimeout(runCatchUp, Math.max(5000, msLeft));
+}
+
+const RULES_SEEN_KEY = 'kopek_regles_vues';
+
+function ouvrirRegles() {
+  const panneau = document.getElementById('g-rules');
+  const corps = document.getElementById('g-rules-body');
+  if (!panneau || !corps) return;
+  corps.innerHTML = GAMEJS.RULES.map((r) => `
+    <div class="rounded-xl p-3 bg-white/[0.04] border border-white/10">
+      <div class="text-[13px] font-bold text-indigo-300">${escapeHtml(r.titre)}</div>
+      <div class="text-[12px] text-zinc-300 leading-relaxed mt-1">${escapeHtml(r.texte)}</div>
+    </div>`).join('');
+  panneau.classList.remove('hidden');
+  if (window.lucide) lucide.createIcons();
+}
+
+function fermerRegles() {
+  document.getElementById('g-rules')?.classList.add('hidden');
+  try { localStorage.setItem(RULES_SEEN_KEY, '1'); } catch { /* navigation privée */ }
+}
+
+function bindGameUi() {
+  $('#g-help')?.addEventListener('click', ouvrirRegles);
+  $('#g-rules-close')?.addEventListener('click', fermerRegles);
+  $('#g-rules-ok')?.addEventListener('click', fermerRegles);
+  $('#g-tile-close')?.addEventListener('click', () => {
+    GAME.selected = null;
+    if (gameMod && gameStatus === 'ready') gameMod.setSelected(null);
+    document.getElementById('g-tile-panel')?.classList.add('hidden');
+  });
+  $('#g-menace-go')?.addEventListener('click', () => {
+    const cible = document.getElementById('g-menace')?._cible;
+    if (!cible) return;
+    onTileSelected(cible);
+    document.getElementById('game-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  $('#g-log-toggle')?.addEventListener('click', () => {
+    document.getElementById('g-log-body')?.classList.toggle('hidden');
+  });
+}
+
+/** Appelé à chaque rendu du tableau de bord. */
+function renderCity(agg) {
+  lastAggForGame = agg;
+  ensureGameLoaded();
+  if (GAME.state) { drawGame(); renderGameHud(); }
 }
 
 function renderMetrics(agg) {
+  const restH = Math.max(0, agg.debtRemainH);
+
   $('#m-ca').textContent = EUR(agg.globalCA);
-  $('#m-ca-detail').textContent = `Principal ${EUR(agg.mainFinalCA)} · Autres ${EUR(agg.secondaryEur)}`;
-  $('#m-tva').textContent = EUR(agg.tvaNette, 2);
-  $('#m-tva-detail').textContent = `Collectée ${EUR(agg.tvaCollectee, 2)} · Crédit −${EUR(TRESORERIE.creditTVA, 2)}`;
-  $('#m-impots').textContent = EUR(agg.provisions);
-  $('#m-impots-detail').textContent = `INASTI ${EUR(agg.inasti)} · IPP ${EUR(agg.ipp)}`;
-  $('#m-hours').textContent = `${HH(agg.globalBilledMin)}`;
-  $('#m-hours-detail').textContent = `Réel ${HH(agg.globalRealMin)} · Facturé ${HHdecimal(agg.globalBilledMin)} h`;
-}
+  $('#m-ca-detail').textContent = agg.secondaryEur > 0
+    ? `Nessy ${EUR(agg.mainFinalCA)} · Externes ${EUR(agg.secondaryEur)}`
+    : `Minimum garanti ${EUR(agg.minG)}`;
 
-function renderWaterfall(agg) {
-  const rows = [
-    { label: 'CA HTVA Cumulé (Tous clients)', val: agg.globalCA, type: 'in', icon: 'banknote', sub: `Principal ${EUR(agg.mainFinalCA)} · Autres ${EUR(agg.secondaryEur)}` },
-    { label: `TVA Collectée (${Math.round(TRESORERIE.tva * 100)}%)`, val: agg.tvaCollectee, type: 'neutral', icon: 'percent', sub: `Encaissée du client · 21% sur le CA` },
-    { label: `TVA Nette à reverser (${EUR(TRESORERIE.creditTVA, 2)} de crédit leasing déduit)`, val: -agg.tvaNette, type: 'out', icon: 'arrow-down-right' },
-    { label: `Provision INASTI · ${Math.round(TRESORERIE.inasti * 100)}% CA HTVA`, val: -agg.inasti, type: 'out', icon: 'building-2' },
-    { label: `Provision IPP · ${Math.round(TRESORERIE.ipp * 100)}% (CA − INASTI)`, val: -agg.ipp, type: 'out', icon: 'landmark' },
-    { label: `Charges Fixes · Structure + Perso (4 postes)`, val: -TOTAL_CHARGES, type: 'out', icon: 'layers', sub: `Leasing 650 · Logement 625 · Outils 125 · Comptable 125` },
-  ];
-  if (agg.avance > 0) rows.push({ label: `Remboursement Avance Démarrage (Mois ${NESSY.avanceFrom + 1}→${NESSY.avanceTo + 1})`, val: -agg.avance, type: 'out', icon: 'piggy-bank' });
-  rows.push({ label: 'RESTE NET DANS LA POCHE', val: agg.netPocket, type: 'net', icon: 'wallet' });
+  $('#m-hours').textContent = `${FR(agg.mainBilledMinutes / 60)} h`;
+  $('#m-hours-detail').textContent = `sur ${FR(NESSY.minHoursEq)} h · ${HH(agg.mainRealMinutes)} réellement prestées`;
 
-  const html = rows.map((r) => {
-    const sign = r.val >= 0 ? '' : '−';
-    const abs = Math.abs(r.val);
-    const cls = {
-      in:  { row: 'bg-indigo-500/5 border border-indigo-500/20', val: 'text-white', icon: 'text-indigo-300 bg-indigo-500/15 border border-indigo-500/30' },
-      neutral: { row: 'bg-zinc-900/50 border border-zinc-800', val: 'text-amber-300', icon: 'text-amber-300 bg-amber-500/15 border border-amber-500/30' },
-      out: { row: 'bg-rose-500/5 border border-rose-500/20', val: 'text-rose-300', icon: 'text-rose-300 bg-rose-500/15 border border-rose-500/30' },
-      net: { row: 'bg-emerald-500/10 border border-emerald-500/30', val: 'glow-gradient-text font-bold', icon: 'text-emerald-300 bg-emerald-500/20 border border-emerald-500/40 shadow-pocket' },
-    }[r.type];
-    const isNet = r.type === 'net';
-    return `<div class="rounded-lg px-3 py-2.5 ${cls.row} flex items-center gap-3 ${isNet ? 'mt-2' : ''}">
-      <div class="w-8 h-8 flex-none rounded-lg flex items-center justify-center ${cls.icon}"><i data-lucide="${r.icon}" class="w-4 h-4"></i></div>
-      <div class="flex-1 min-w-0">
-        <div class="text-sm ${isNet ? 'font-semibold text-emerald-100' : ''}">${r.label}</div>
-        ${r.sub ? `<div class="text-[11px] text-zinc-500 mt-0.5">${r.sub}</div>` : ''}
-      </div>
-      <div class="font-mono font-semibold chip ${cls.val} ${isNet ? 'text-xl' : ''}">${sign}${EUR(abs)}</div>
-    </div>`;
-  }).join('');
-  $('#waterfall').innerHTML = html;
-}
-
-function renderClientsList(agg) {
-  const mainId = agg.mainClient?.id;
-  const entries = Array.from(agg.byClient.entries());
-  if (entries.length === 0) {
-    $('#clients-list').innerHTML = `<div class="text-xs text-zinc-500 p-4 border border-dashed border-zinc-800 rounded-xl text-center">Aucun encodage ce mois-ci.<br>Créez un client via le bouton <b>"+ Nouveau Client"</b>.</div>`;
-    return;
-  }
-  entries.sort((a, b) => b[1].eur - a[1].eur);
-  const totalEur = entries.reduce((s, [, v]) => s + v.eur, 0) || 1;
-  const html = entries.map(([cid, v]) => {
-    const isMain = cid === mainId;
-    const pct = Math.max(6, (v.eur / totalEur) * 100);
-    const grad = isMain
-      ? 'from-indigo-500/80 via-fuchsia-500/70 to-emerald-400/70'
-      : 'from-zinc-500/60 via-zinc-400/60 to-zinc-300/50';
-    return `<div class="rounded-xl p-3 border border-zinc-800 bg-zinc-900/30 hover:bg-zinc-900/60 transition">
-      <div class="flex items-start justify-between gap-3 mb-2">
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2 mb-0.5">
-            <div class="font-semibold text-sm truncate">${v.client?.name || 'N/A'}</div>
-            ${isMain ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase bg-gradient-to-r from-indigo-500/20 to-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-500/30"><i data-lucide="crown" class="w-2.5 h-2.5"></i> Principal</span>` : ''}
-          </div>
-          <div class="text-[11px] text-zinc-500">${v.count} entrée${v.count > 1 ? 's' : ''} · ${HH(v.realMin)} réel · ${HHdecimal(v.billedMin)} h facturé</div>
-        </div>
-        <div class="text-right flex-none">
-          <div class="font-mono font-bold chip">${EUR(v.eur)}</div>
-          ${v.flat > 0 ? `<div class="text-[10px] text-amber-300/80 font-mono mt-0.5">incl. forfait ${EUR(v.flat)}</div>` : ''}
-        </div>
-      </div>
-      <div class="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-        <div class="h-full bg-gradient-to-r ${grad}" style="width:${pct}%;"></div>
-      </div>
-    </div>`;
-  }).join('');
-  $('#clients-list').innerHTML = html;
+  $('#m-reste').textContent = restH > 0 ? `${FR(restH)} h` : 'Atteint';
+  $('#m-reste-detail').textContent = restH > 0
+    ? `avant d'atteindre ${EUR(agg.minG)}`
+    : `minimum garanti couvert`;
 }
 
 // =============================================================
@@ -957,9 +1399,9 @@ function renderLogs(agg) {
     realMin += rm;
     const isFlat = l.custom_price != null && l.custom_price > 0;
     let eur = isFlat ? l.custom_price : (bm / 60) * (l.rate_applied || 0);
-    const isMain = l.client_id === agg.mainClient?.id;
-    if (isMain) { mainBilled += bm; mainEur += eur; } else otherEur += eur;
     const client = getClient(l.client_id);
+    const isMain = !client?.is_external;
+    if (isMain) { mainBilled += bm; mainEur += eur; } else otherEur += eur;
     const diff = bm - rm;
     const roundedPct = diff > 0;
     const badge = roundedPct
@@ -970,7 +1412,7 @@ function renderLogs(agg) {
       <td class="px-4 sm:px-5 py-3 min-w-[160px]">
         <div class="flex items-center gap-2">
           <div class="w-1 h-1.5 rounded-full ${isMain ? 'bg-fuchsia-400' : 'bg-zinc-600'}"></div>
-          <span class="text-sm truncate ${isMain ? 'text-zinc-100 font-medium' : 'text-zinc-300'}">${client?.name || 'Client supprimé'}</span>
+          <span class="text-sm truncate ${isMain ? 'text-zinc-100 font-medium' : 'text-zinc-300'}">${client?.name || 'Projet supprimé'}</span>
         </div>
       </td>
       <td class="px-4 sm:px-5 py-3 min-w-[220px] text-sm text-zinc-200"><span class="truncate inline-block max-w-full">${l.description || ''}</span></td>
@@ -987,8 +1429,11 @@ function renderLogs(agg) {
           : `<span class="font-mono chip">${EUR(l.rate_applied || 0)}<span class="text-zinc-500 text-xs">/h</span></span>`}
       </td>
       <td class="px-4 sm:px-5 py-3 text-right hidden sm:table-cell whitespace-nowrap font-mono chip font-semibold">${EUR(eur)}</td>
-      <td class="px-4 sm:px-5 py-3 text-right w-16">
+      <td class="px-4 sm:px-5 py-3 text-right w-24">
         <div class="flex items-center justify-end gap-1 opacity-50 group-hover:opacity-100 transition">
+          <button data-dup class="p-1.5 hover:bg-emerald-500/20 text-emerald-300 rounded" title="Dupliquer (répéter cette tâche)">
+            <i data-lucide="copy-plus" class="w-4 h-4"></i>
+          </button>
           <button data-edit class="p-1.5 hover:bg-indigo-500/20 text-indigo-300 rounded" title="Modifier">
             <i data-lucide="edit-3" class="w-4 h-4"></i>
           </button>
@@ -1003,8 +1448,8 @@ function renderLogs(agg) {
   tfoot.innerHTML = `<tr>
     <td class="px-4 sm:px-5 py-3" colspan="3">
       <div class="flex items-center gap-2 flex-wrap">
-        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold"><i data-lucide="crown" class="w-3 h-3"></i> Principal · ${HHdecimal(mainBilled)} h · ${EUR(mainEur)}</span>
-        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800/80 text-zinc-300 border border-zinc-700 text-[11px] font-semibold">Autres clients · ${EUR(otherEur)}</span>
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold"><i data-lucide="crown" class="w-3 h-3"></i> Nessy · ${HHdecimal(mainBilled)} h · ${EUR(mainEur)}</span>
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800/80 text-zinc-300 border border-zinc-700 text-[11px] font-semibold">Clients externes · ${EUR(otherEur)}</span>
       </div>
     </td>
     <td class="px-4 sm:px-5 py-3 text-right whitespace-nowrap">
@@ -1026,132 +1471,284 @@ function renderLogs(agg) {
     tr.querySelector('[data-del]').addEventListener('click', async () => {
       if (!confirm('Supprimer cet encodage ?')) return;
       try {
-        await deleteLog(id);
+        deleteLog(id);
         toast('Encodage supprimé', 'trash-2', 'warn');
         refreshPeriod();
-      } catch { toast('Erreur suppression', 'alert-circle', 'danger'); }
+      } catch (ex) { showErrorBanner('Suppression impossible', ex); }
     });
     tr.querySelector('[data-edit]').addEventListener('click', () => openEditLog(log));
+    tr.querySelector('[data-dup]').addEventListener('click', () => duplicateLogIntoQuickForm(log));
   });
 }
 
 // =============================================================
-// ⚡ SAISIE RAPIDE
+// ⚡ ASSISTANT « AJOUTER DES HEURES » (3 étapes)
 // =============================================================
-function bindQuickForm() {
-  const form = $('#quick-form');
-  $('#q-date').value = fmtDateInput(new Date());
-  $('#q-min').addEventListener('input', updateQuickRoundInfo);
-  $('#q-type').addEventListener('change', syncQuickRateFromType);
-  $('#q-client').addEventListener('change', syncQuickRateFromClient);
+const LAST_CLIENT_KEY = 'kopek_last_client_id';
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const date = new Date($('#q-date').value + 'T12:00:00');
-    const client_id = $('#q-client').value;
-    const description = $('#q-desc').value.trim();
-    const mins = parseInt($('#q-min').value, 10);
-    const type = $('#q-type').value;
-    const rateVal = parseFloat($('#q-rate').value || '0');
-    if (!client_id || !description || !mins || mins <= 0 || isNaN(mins)) {
-      toast('Veuillez renseigner Client, Description et Durée', 'alert-circle', 'warn');
-      return;
-    }
-    if (type === 'hourly' && (!rateVal || rateVal <= 0)) {
-      toast('Taux horaire invalide', 'alert-circle', 'warn');
-      return;
-    }
-    if (type === 'flat' && (!rateVal || rateVal <= 0)) {
-      toast('Prix forfait invalide', 'alert-circle', 'warn');
-      return;
-    }
-    const payload = {
-      client_id,
-      description,
-      real_minutes: mins,
-      billed_minutes: billedMinutes(mins),
-      rate_applied: type === 'hourly' ? rateVal : 0,
-      custom_price: type === 'flat' ? rateVal : null,
-      date,
-    };
-    try {
-      await createLog(payload);
-      toast('Encodage ajouté', 'check-circle');
-      // reset quick form
-      $('#q-desc').value = ''; $('#q-min').value = '';
-      updateQuickRoundInfo();
-      syncQuickRateFromClient();
-      refreshPeriod();
-      // Effet 3D : caméra + particules + son de chantier
-      triggerLogEffect(payload.client_id);
-      maybePuffSmoke(true);
-      setTimeout(maybePuffSmoke, 800, true);
-    } catch (ex) {
-      console.warn(ex);
-      toast('Erreur d\'enregistrement · index Firestore requis ?', 'alert-circle', 'danger');
-    }
-  });
-}
-function updateQuickRoundInfo() {
-  const info = $('#q-round-info');
-  const raw = parseInt($('#q-min').value, 10);
-  if (!raw || raw <= 0) {
-    info.innerHTML = `<i data-lucide="info" class="w-3.5 h-3.5 text-zinc-600"></i><span>Saisissez la durée pour voir l'arrondi de facturation.</span>`;
-    if (window.lucide) lucide.createIcons();
+const WIZ = { step: 1, minutes: 0, type: 'hourly' };
+
+function openHoursWizard(prefill) {
+  // Avant, un clic pendant le chargement des projets ouvrait la modale « Nouveau
+  // projet » à la place de l'assistant : la liste était vide simplement parce que
+  // Firestore n'avait pas encore répondu. On attend, on ne détourne plus.
+  if (!STATE.clientsLoaded && !STATE.dataTimeout) {
+    toast('Chargement des projets…', 'loader', 'warn');
     return;
   }
-  const billed = billedMinutes(raw);
-  const diff = billed - raw;
-  if (diff > 0) {
-    info.innerHTML = `<i data-lucide="arrow-up" class="w-3.5 h-3.5 text-amber-400"></i>
-      <span><b class="text-zinc-200">${raw} min</b> réelles <span class="text-zinc-500">➔</span> <b class="text-amber-300">${billed} min (${HHdecimal(billed)} h)</b> facturées <span class="text-amber-400/80">(+${diff} min)</span></span>`;
-  } else {
-    info.innerHTML = `<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400"></i>
-      <span><b class="text-zinc-200">${raw} min</b> ➔ <b class="text-emerald-300">${billed} min · ${HHdecimal(billed)} h</b> (tranche respectée)</span>`;
-  }
+  WIZ.step = 1;
+  WIZ.minutes = prefill?.real_minutes || 0;
+  const isFlat = prefill?.custom_price != null && prefill.custom_price > 0;
+  WIZ.type = isFlat ? 'flat' : 'hourly';
+
+  populateWizardClients();
+  const last = localStorage.getItem(LAST_CLIENT_KEY);
+  const wanted = prefill?.client_id || last;
+  if (wanted && STATE.clients.some((c) => c.id === wanted)) $('#w-client').value = wanted;
+
+  $('#w-desc').value = prefill?.description || '';
+  $('#w-date').value = fmtDateInput(prefill?.date || new Date());
+  $('#w-min').value = WIZ.minutes || '';
+  $('#w-rate').value = isFlat ? prefill.custom_price : (prefill?.rate_applied || clientRate($('#w-client').value));
+  $('#w-error').classList.add('hidden');
+  $('#w-custom-wrap').classList.add('hidden');
+  markDurationButtons();
+  updateWizardDescList();
+  applyWizardType();
+  showWizardStep(1);
+  $('#hours-modal').classList.remove('hidden');
   if (window.lucide) lucide.createIcons();
 }
-function syncQuickRateFromType() {
-  const type = $('#q-type').value;
-  const unit = $('#q-rate-unit');
-  const rateInput = $('#q-rate');
-  if (type === 'flat') {
-    unit.textContent = '€';
-    rateInput.placeholder = '3200';
-    rateInput.value = rateInput.value || '';
-  } else {
-    unit.textContent = '€';
-    rateInput.placeholder = '80';
-    syncQuickRateFromClient();
+
+function clientRate(id) {
+  const c = getClient(id);
+  return c ? (c.default_rate || NESSY.regieRate) : NESSY.regieRate;
+}
+
+function populateWizardClients() {
+  const list = STATE.clients.slice().sort((a, b) => {
+    if (!!a.is_external !== !!b.is_external) return a.is_external ? 1 : -1;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  $('#w-client').innerHTML = list
+    .map((c) => `<option value="${c.id}">${c.name}${c.is_external ? ' · Externe' : ''}</option>`)
+    .join('') + '<option value="__new__">➕ Nouveau projet…</option>';
+  syncNewClientField();
+}
+
+/** Affiche le champ « nom du nouveau projet » quand on choisit ➕ dans la liste. */
+function syncNewClientField() {
+  const isNew = $('#w-client').value === '__new__';
+  $('#w-newclient-wrap').classList.toggle('hidden', !isNew);
+  if (isNew) setTimeout(() => $('#w-newclient').focus(), 50);
+}
+
+function showWizardStep(n) {
+  WIZ.step = n;
+  $$('#hours-modal [data-step]').forEach((el) => {
+    el.classList.toggle('hidden', Number(el.getAttribute('data-step')) !== n);
+  });
+  $$('#hours-modal [data-step-bar]').forEach((el) => {
+    const i = Number(el.getAttribute('data-step-bar'));
+    el.className = `h-1 flex-1 rounded-full ${i <= n ? 'bg-indigo-500' : 'bg-zinc-800'}`;
+  });
+  const labels = { 1: 'Étape 1 sur 3 · Projet et description', 2: 'Étape 2 sur 3 · Durée', 3: 'Étape 3 sur 3 · Prix' };
+  $('#hours-step-label').textContent = labels[n];
+  $('#w-back').classList.toggle('invisible', n === 1);
+  $('#w-next-label').textContent = n === 3 ? 'Enregistrer' : 'Suivant';
+  $('#w-error').classList.add('hidden');
+  if (n === 3) renderWizardSummary();
+}
+
+function markDurationButtons() {
+  $$('#hours-modal .w-dur').forEach((b) => {
+    const m = Number(b.getAttribute('data-min'));
+    const on = m !== 0 && m === WIZ.minutes;
+    b.className = `w-dur px-3 py-3.5 rounded-xl text-sm font-mono font-semibold transition border ${
+      on ? 'bg-indigo-500/20 border-indigo-500/60 text-indigo-100' : 'bg-zinc-900 border-zinc-800 hover:border-indigo-500/50'}`;
+  });
+  const info = $('#w-round');
+  if (!WIZ.minutes) { info.innerHTML = '<span class="text-zinc-600">Choisissez une durée.</span>'; return; }
+  const billed = billedMinutes(WIZ.minutes);
+  const diff = billed - WIZ.minutes;
+  info.innerHTML = diff > 0
+    ? `<b class="text-zinc-200">${WIZ.minutes} min</b> réelles → <b class="text-amber-300">${billed} min (${FR(billed / 60)} h)</b> facturées <span class="text-amber-400/80">(+${diff} min)</span>`
+    : `<b class="text-zinc-200">${WIZ.minutes} min</b> → <b class="text-emerald-300">${FR(billed / 60)} h</b> facturées`;
+}
+
+function applyWizardType() {
+  const hourly = WIZ.type === 'hourly';
+  $('#w-type-hourly').className = `px-3 py-3 rounded-xl text-sm font-semibold transition border ${
+    hourly ? 'bg-indigo-500/15 border-indigo-500/50 text-indigo-200' : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-indigo-500/40'}`;
+  $('#w-type-flat').className = `px-3 py-3 rounded-xl text-sm font-semibold transition border ${
+    !hourly ? 'bg-indigo-500/15 border-indigo-500/50 text-indigo-200' : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-indigo-500/40'}`;
+  $('#w-rate-label').textContent = hourly ? 'Taux horaire (€)' : 'Prix forfaitaire (€)';
+  $$('#hours-modal .w-rate').forEach((b) => b.classList.toggle('hidden', !hourly));
+  if (WIZ.step === 3) renderWizardSummary();
+}
+
+function renderWizardSummary() {
+  const billed = billedMinutes(WIZ.minutes);
+  const rate = parseFloat($('#w-rate').value || '0');
+  const total = WIZ.type === 'flat' ? rate : (billed / 60) * rate;
+  const client = getClient($('#w-client').value);
+  $('#w-summary').innerHTML = `
+    <div class="flex justify-between gap-3"><span class="text-zinc-500">Projet</span><span class="text-right font-medium truncate">${client?.name || '—'}</span></div>
+    <div class="flex justify-between gap-3"><span class="text-zinc-500">Durée facturée</span><span class="font-mono chip">${FR(billed / 60)} h</span></div>
+    <div class="flex justify-between gap-3 pt-1.5 border-t border-zinc-800">
+      <span class="text-zinc-400 font-semibold">Total</span>
+      <span class="font-mono chip font-bold text-emerald-300">${EUR(total, 2)}</span>
+    </div>`;
+}
+
+function bindHoursWizard() {
+  $('#btn-add-hours').addEventListener('click', () => openHoursWizard(null));
+  $('#w-client').addEventListener('change', () => {
+    syncNewClientField();
+    if (WIZ.type === 'hourly' && $('#w-client').value !== '__new__') {
+      $('#w-rate').value = clientRate($('#w-client').value);
+    }
+    updateWizardDescList();
+  });
+
+  $$('#hours-modal .w-dur').forEach((b) => b.addEventListener('click', () => {
+    const m = Number(b.getAttribute('data-min'));
+    if (m === 0) {
+      $('#w-custom-wrap').classList.remove('hidden');
+      $('#w-min').focus();
+      WIZ.minutes = parseInt($('#w-min').value, 10) || 0;
+    } else {
+      $('#w-custom-wrap').classList.add('hidden');
+      WIZ.minutes = m;
+      $('#w-min').value = m;
+    }
+    markDurationButtons();
+  }));
+  $('#w-min').addEventListener('input', () => {
+    WIZ.minutes = parseInt($('#w-min').value, 10) || 0;
+    markDurationButtons();
+  });
+
+  $('#w-type-hourly').addEventListener('click', () => {
+    WIZ.type = 'hourly';
+    $('#w-rate').value = clientRate($('#w-client').value);
+    applyWizardType();
+  });
+  $('#w-type-flat').addEventListener('click', () => { WIZ.type = 'flat'; applyWizardType(); });
+  $$('#hours-modal .w-rate').forEach((b) => b.addEventListener('click', () => {
+    $('#w-rate').value = b.getAttribute('data-rate');
+    renderWizardSummary();
+  }));
+  $('#w-rate').addEventListener('input', renderWizardSummary);
+
+  $('#w-back').addEventListener('click', () => showWizardStep(Math.max(1, WIZ.step - 1)));
+  $('#w-next').addEventListener('click', onWizardNext);
+}
+
+function wizardError(msg) {
+  const el = $('#w-error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+async function onWizardNext() {
+  if (WIZ.step === 1) {
+    if (!$('#w-desc').value.trim()) return wizardError('Ajoutez une description.');
+
+    // Nouveau projet demandé : on le crée ici même, sans changer de fenêtre.
+    if ($('#w-client').value === '__new__') {
+      const name = $('#w-newclient').value.trim();
+      if (!name) return wizardError('Donnez un nom au nouveau projet.');
+      const btn = $('#w-next');
+      btn.disabled = true;
+      try {
+        const id = createClient({ name, default_rate: NESSY.regieRate, is_external: false });
+        populateWizardClients();
+        $('#w-client').value = id;
+        syncNewClientField();
+        $('#w-newclient').value = '';
+        $('#w-rate').value = NESSY.regieRate;
+        hideErrorBanner();
+        toast(`Projet « ${name} » créé`, 'check-circle');
+      } catch (ex) {
+        showErrorBanner('Création du projet impossible', ex);
+        return wizardError(explainFirebaseError(ex));
+      } finally {
+        btn.disabled = false;
+      }
+    }
+    if (!$('#w-client').value || $('#w-client').value === '__new__') return wizardError('Choisissez un projet.');
+    return showWizardStep(2);
+  }
+  if (WIZ.step === 2) {
+    if (!WIZ.minutes || WIZ.minutes <= 0) return wizardError('Choisissez une durée.');
+    return showWizardStep(3);
+  }
+
+  const rate = parseFloat($('#w-rate').value || '0');
+  if (!rate || rate <= 0) return wizardError(WIZ.type === 'flat' ? 'Indiquez le prix du forfait.' : 'Indiquez le taux horaire.');
+
+  const btn = $('#w-next');
+  const label = $('#w-next-label');
+  const previous = label.textContent;
+  btn.disabled = true;
+  label.textContent = 'Enregistrement…';
+  try {
+    createLog({
+      client_id: $('#w-client').value,
+      description: $('#w-desc').value.trim(),
+      real_minutes: WIZ.minutes,
+      billed_minutes: billedMinutes(WIZ.minutes),
+      rate_applied: WIZ.type === 'hourly' ? rate : 0,
+      custom_price: WIZ.type === 'flat' ? rate : null,
+      date: new Date($('#w-date').value + 'T12:00:00'),
+    });
+    localStorage.setItem(LAST_CLIENT_KEY, $('#w-client').value);
+    hideErrorBanner();
+    $('#hours-modal').classList.add('hidden');
+    toast('Heures ajoutées', 'check-circle');
+  } catch (ex) {
+    showErrorBanner("Enregistrement de l'encodage impossible", ex);
+    wizardError(explainFirebaseError(ex));
+  } finally {
+    btn.disabled = false;
+    label.textContent = previous;
   }
 }
-function syncQuickRateFromClient() {
-  const type = $('#q-type').value;
-  if (type === 'flat') return; // on garde la valeur
-  const cid = $('#q-client').value;
-  const c = getClient(cid);
-  if (c) $('#q-rate').value = c.default_rate || 0;
+
+/** Suggestions de description : dernières descriptions distinctes du projet choisi. */
+function updateWizardDescList() {
+  const dl = $('#w-desc-list');
+  if (!dl) return;
+  const cid = $('#w-client').value;
+  const seen = new Set();
+  const recent = [];
+  for (let i = STATE.allLogs.length - 1; i >= 0 && recent.length < 12; i--) {
+    const l = STATE.allLogs[i];
+    if (cid && l.client_id !== cid) continue;
+    const d = (l.description || '').trim();
+    if (!d || seen.has(d)) continue;
+    seen.add(d);
+    recent.push(d);
+  }
+  dl.innerHTML = recent.map((d) => `<option value="${d.replace(/"/g, '&quot;')}"></option>`).join('');
 }
 
-// =============================================================
-// 🗂️ POPULATE CLIENT DROPDOWNS
-// =============================================================
-function populateClientSelects() {
-  const main = getMainClient();
-  const list = STATE.clients.slice().sort((a, b) => {
-    if (a.is_main_contract && !b.is_main_contract) return -1;
-    if (!a.is_main_contract && b.is_main_contract) return 1;
-    return a.name.localeCompare(b.name);
-  });
-  const qSel = $('#q-client');
-  qSel.innerHTML = list.map((c) => `<option value="${c.id}">${c.name}${c.is_main_contract ? '  👑' : ''} · ${c.default_rate}€/h</option>`).join('');
-  // Si main client existe → présélection
-  if (main) qSel.value = main.id;
-  syncQuickRateFromClient();
+/** Le bouton « dupliquer » d'une ligne rouvre l'assistant pré-rempli. */
+function duplicateLogIntoQuickForm(log) {
+  openHoursWizard(log);
+}
 
-  // Edit modal
+// Le sélecteur de la modale d'édition suit la liste des projets.
+function populateClientSelects() {
+  const list = STATE.clients.slice().sort((a, b) => {
+    if (!!a.is_external !== !!b.is_external) return a.is_external ? 1 : -1;
+    return (a.name || '').localeCompare(b.name || '');
+  });
   const eSel = $('#e-client');
-  eSel.innerHTML = list.map((c) => `<option value="${c.id}">${c.name}${c.is_main_contract ? '  👑' : ''}</option>`).join('');
+  const prevEVal = eSel.value;
+  eSel.innerHTML = list.map((c) => `<option value="${c.id}">${c.name}${c.is_external ? ' · Externe' : ''}</option>`).join('');
+  if (list.some((c) => c.id === prevEVal)) eSel.value = prevEVal;
 }
 
 // =============================================================
@@ -1164,7 +1761,9 @@ function bindModals() {
     if (modal) modal.classList.add('hidden');
   }));
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') $$('.fixed').forEach((m) => m.classList.add('hidden'));
+    // Cible les vraies fenêtres : `.fixed` tout court attrapait aussi les halos
+    // décoratifs du fond, qui disparaissaient définitivement au premier Échap.
+    if (e.key === 'Escape') $$('#hours-modal, #client-modal, #manage-modal, #edit-modal').forEach((m) => m.classList.add('hidden'));
   });
   // New client
   $('#btn-new-client').addEventListener('click', () => openClientModal(null));
@@ -1184,10 +1783,10 @@ function bindModals() {
 function openClientModal(client) {
   STATE.editingClientId = client ? client.id : null;
   const err = $('#client-error'); err.classList.add('hidden');
-  $('#client-modal-title').textContent = client ? 'Modifier un Client' : 'Nouveau Client';
+  $('#client-modal-title').textContent = client ? 'Modifier le Projet' : 'Nouveau Projet';
   $('#c-name').value = client ? client.name : '';
-  $('#c-rate').value = client ? (client.default_rate ?? 80) : 80;
-  $('#c-main').checked = client ? !!client.is_main_contract : false;
+  $('#c-rate').value = client ? (client.default_rate ?? NESSY.regieRate) : NESSY.regieRate;
+  $('#c-main').checked = client ? !!client.is_external : false;
   $('#client-modal').classList.remove('hidden');
   setTimeout(() => $('#c-name').focus(), 50);
 }
@@ -1196,45 +1795,52 @@ async function handleClientFormSubmit(e) {
   const err = $('#client-error'); err.classList.add('hidden');
   const name = $('#c-name').value.trim();
   const rate = parseFloat($('#c-rate').value || '0');
-  const isMain = $('#c-main').checked;
+  const isExternal = $('#c-main').checked;
   if (!name) { err.textContent = 'Nom requis'; err.classList.remove('hidden'); return; }
   if (isNaN(rate) || rate < 0) { err.textContent = 'Taux invalide'; err.classList.remove('hidden'); return; }
+  const submitBtn = $('#client-form button[type=submit]');
+  const submitLabel = submitBtn ? submitBtn.querySelector('span:last-child') : null;
+  const previousLabel = submitLabel ? submitLabel.innerHTML : null;
+  if (submitBtn) submitBtn.disabled = true;
+  if (submitLabel) submitLabel.textContent = 'Enregistrement…';
   try {
     if (STATE.editingClientId) {
-      await updateClient(STATE.editingClientId, { name, default_rate: rate, is_main_contract: isMain });
-      toast('Client mis à jour', 'check');
+      updateClient(STATE.editingClientId, { name, default_rate: rate, is_external: isExternal });
+      toast('Projet mis à jour', 'check');
     } else {
-      await createClient({ name, default_rate: rate, is_main_contract: isMain });
-      toast('Client créé', 'check');
+      createClient({ name, default_rate: rate, is_external: isExternal });
+      toast('Projet créé', 'check');
     }
     $('#client-modal').classList.add('hidden');
-    refreshPeriod();
   } catch (ex) {
-    console.warn(ex);
-    err.textContent = 'Erreur · vérifiez Firestore rules.';
+    err.textContent = explainFirebaseError(ex) + ` (code : ${ex.code || 'inconnu'})`;
     err.classList.remove('hidden');
+    showErrorBanner('Enregistrement du projet impossible', ex);
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+    if (submitLabel && previousLabel !== null) submitLabel.innerHTML = previousLabel;
   }
 }
 
 function openManageClients() {
   const body = $('#manage-body');
   if (STATE.clients.length === 0) {
-    body.innerHTML = `<div class="text-sm text-zinc-500 text-center py-8">Aucun client.</div>`;
+    body.innerHTML = `<div class="text-sm text-zinc-500 text-center py-8">Aucun projet.</div>`;
   } else {
     body.innerHTML = STATE.clients.map((c) => `
       <div class="rounded-xl p-4 border border-zinc-800 bg-zinc-900/40 flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3 flex-1 min-w-0">
-          <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-none ${c.is_main_contract ? 'bg-gradient-to-br from-indigo-500/20 via-fuchsia-500/20 to-emerald-500/20 border border-fuchsia-500/30' : 'bg-zinc-800 border border-zinc-700'}">
-            ${c.is_main_contract ? '<i data-lucide="crown" class="w-5 h-5 text-fuchsia-300"></i>' : '<i data-lucide="building" class="w-5 h-5 text-zinc-400"></i>'}
+          <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-none ${!c.is_external ? 'bg-gradient-to-br from-indigo-500/20 via-fuchsia-500/20 to-emerald-500/20 border border-fuchsia-500/30' : 'bg-zinc-800 border border-zinc-700'}">
+            ${!c.is_external ? '<i data-lucide="crown" class="w-5 h-5 text-fuchsia-300"></i>' : '<i data-lucide="building" class="w-5 h-5 text-zinc-400"></i>'}
           </div>
           <div class="min-w-0 flex-1">
             <div class="font-semibold truncate">${c.name}</div>
-            <div class="text-[11px] text-zinc-500 font-mono chip">Taux ${c.default_rate || 0} €/h${c.is_main_contract ? ' · Contrat Principal' : ''}</div>
+            <div class="text-[11px] text-zinc-500 font-mono chip">Taux ${c.default_rate || 0} €/h${c.is_external ? ' · Client externe (hors jauge)' : ' · Projet Nessy (jauge)'}</div>
           </div>
         </div>
         <div class="flex items-center gap-1.5">
-          <button data-setmain="${c.id}" ${c.is_main_contract ? 'disabled' : ''} class="px-3 py-1.5 text-xs rounded-md ${c.is_main_contract ? 'bg-fuchsia-500/10 text-fuchsia-300 border border-fuchsia-500/30 cursor-default' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700'}">
-            ${c.is_main_contract ? '👑 Principal' : 'Définir Principal'}
+          <button data-toggleext="${c.id}" class="px-3 py-1.5 text-xs rounded-md ${c.is_external ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700' : 'bg-fuchsia-500/10 text-fuchsia-300 border border-fuchsia-500/30'}">
+            ${c.is_external ? 'Marquer Nessy' : 'Marquer Externe'}
           </button>
           <button data-editc="${c.id}" class="px-3 py-1.5 text-xs rounded-md bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
             <i data-lucide="pencil" class="w-3 h-3 inline mr-1"></i>Modifier
@@ -1256,16 +1862,19 @@ function openManageClients() {
   }));
   $$('#manage-body [data-delc]').forEach((b) => b.addEventListener('click', async () => {
     const id = b.getAttribute('data-delc');
-    if (!confirm('Supprimer ce client ? Les encodages liés seront orphelins.')) return;
-    try { await deleteClient(id); toast('Client supprimé', 'trash', 'warn'); refreshPeriod(); }
+    if (!confirm('Supprimer ce projet ? Les encodages liés deviendront orphelins.')) return;
+    try { deleteClient(id); toast('Projet supprimé', 'trash', 'warn'); openManageClients(); }
     catch { /* handled toast */ }
   }));
-  $$('#manage-body [data-setmain]').forEach((b) => b.addEventListener('click', async () => {
-    const id = b.getAttribute('data-setmain');
+  $$('#manage-body [data-toggleext]').forEach((b) => b.addEventListener('click', async () => {
+    const id = b.getAttribute('data-toggleext');
     const c = STATE.clients.find((x) => x.id === id);
-    if (!c || c.is_main_contract) return;
-    try { await updateClient(id, { is_main_contract: true }); toast(c.name + ' · Contrat principal', 'crown'); refreshPeriod(); }
-    catch { toast('Erreur mise à jour', 'alert-circle', 'danger'); }
+    if (!c) return;
+    try {
+      updateClient(id, { is_external: !c.is_external });
+      toast(c.name + (c.is_external ? ' · Projet Nessy' : ' · Client externe'), 'check');
+      openManageClients();
+    } catch (ex) { showErrorBanner('Mise à jour impossible', ex); }
   }));
 }
 
@@ -1306,13 +1915,15 @@ async function handleEditLogSubmit(e) {
     rate_applied: type === 'hourly' ? rateVal : 0,
     custom_price: type === 'flat' ? rateVal : null,
   };
+  const editBtn = $('#edit-form button[type=submit]');
+  if (editBtn) editBtn.disabled = true;
   try {
-    await updateLog(id, patch);
+    updateLog(id, patch);
     toast('Encodage mis à jour', 'check');
     $('#edit-modal').classList.add('hidden');
     refreshPeriod();
-    triggerLogEffect(client_id);
-  } catch { toast('Erreur mise à jour', 'alert-circle', 'danger'); }
+  } catch (ex) { showErrorBanner('Mise à jour impossible', ex); }
+  finally { if (editBtn) editBtn.disabled = false; }
 }
 
 // =============================================================
@@ -1321,7 +1932,7 @@ async function handleEditLogSubmit(e) {
 function exportCSV() {
   const agg = aggregateMonth();
   const months = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
-  const headers = ['Date', 'Client', 'Description', 'Min Réelles', 'Min Facturées', 'Durée (h)', 'Type', 'Tarif appliqué (€/h ou forfait)', '€ HTVA'];
+  const headers = ['Date', 'Projet', 'Description', 'Min Réelles', 'Min Facturées', 'Durée (h)', 'Type', 'Tarif appliqué (€/h ou forfait)', '€ HTVA'];
   const rows = [headers];
   for (const l of STATE.logs) {
     const client = getClient(l.client_id);
@@ -1329,7 +1940,7 @@ function exportCSV() {
     const eur = isFlat ? l.custom_price : ((l.billed_minutes || 0) / 60) * (l.rate_applied || 0);
     rows.push([
       fmtDateBE(l.date),
-      client?.name || 'Client supprimé',
+      client?.name || 'Projet supprimé',
       (l.description || '').replace(/"/g, '""'),
       String(l.real_minutes || 0),
       String(l.billed_minutes || 0),
@@ -1343,9 +1954,8 @@ function exportCSV() {
   rows.push(['TOTAL MOIS · ' + months[STATE.selectedMonth] + ' ' + STATE.selectedYear]);
   rows.push(['Heures réelles', '', '', agg.globalRealMin, agg.globalBilledMin, HHdecimal(agg.globalBilledMin), '', '', '']);
   rows.push(['', '', '', '', '', '', '', 'CA HTVA Facturé (brut)', agg.globalRawEur.toFixed(2)]);
-  rows.push(['', '', '', '', '', '', '', 'Min Garanti Principal appliqué', agg.minApplied ? 'OUI · ' + EUR(agg.minG) : 'NON']);
+  rows.push(['', '', '', '', '', '', '', 'Minimum garanti appliqué', agg.minApplied ? 'OUI · ' + EUR(agg.minG) : 'NON']);
   rows.push(['', '', '', '', '', '', '', 'CA HTVA FINAL (Tous clients)', agg.globalCA.toFixed(2)]);
-  rows.push(['', '', '', '', '', '', '', 'Reste NET Pocket', Math.round(agg.netPocket).toFixed(2)]);
 
   const csv = rows.map((r) => r.map((c) => {
     const s = String(c ?? '');
