@@ -18,6 +18,7 @@ import {
   serverTimestamp,
   setDoc,
 } from './firebase-config.js';
+import { initThreeGame, updateCity, triggerLogEffect } from './three-game.js';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -159,6 +160,7 @@ function initApp() {
   bindTopBar();
   bindQuickForm();
   bindModals();
+  initThreeGame();
   refreshPeriod();
   lucide.createIcons();
 }
@@ -731,248 +733,104 @@ function renderNessyGauge(agg) {
 // 🎮 GAMIFIED · MINE KOPEK 3D + SCOREBOARD
 // =================================================================
 function renderCity(agg) {
-  // ==========================================================================
-  // KOPEK CITY · VRAI RENDU "CITY BUILDER" 2,5D
-  //  - lecture visuelle façon SimCity / jeu de gestion
-  //  - districts organisés sur un plateau isométrique
-  //  - routes diagonales, lots, carrefour, place centrale, canal
-  //  - bâtiments plus "volumiques" avec faces gauche/droite/toit
-  // ==========================================================================
-  const root = document.getElementById('city-buildings');
-  if (!root) return;
+  // Collecter tous les clans (le clan principal + les autres clients)
+  const mainClient = agg.mainClient || (STATE.clients && STATE.clients.find(c => c.is_main_contract)) || { id: 'main', name: 'Nessy' };
+  
+  const clansData = [];
+  
+  // 1. Clan Principal (Votre Cité)
+  clansData.push({
+    id: mainClient.id,
+    name: mainClient.name || 'Métropole Principale',
+    isMain: true,
+    hours: agg.mainHoursHourly || 0,
+    refundedH: agg.refundedH || 0,
+    debtRemainH: agg.debtRemainH || 0,
+    minG: agg.minG || 0,
+    bonusEur: agg.bonusEur || 0,
+    ca: agg.mainFinalCA || 0,
+    rate: mainClient.default_rate || 80,
+    socleH: NESSY.socleHours,
+    garantiH: NESSY.minHoursEq,
+    tiers: agg.tiers,
+    count: (agg.byClient && agg.byClient.get(mainClient.id)?.count) || 0,
+  });
 
+  // 2. Autres Clans (Autres Clients)
+  const processedIds = new Set([mainClient.id]);
+  
+  // Clients existants dans STATE.clients
+  (STATE.clients || []).forEach(c => {
+    if (processedIds.has(c.id)) return;
+    processedIds.add(c.id);
+    const clientAgg = (agg.byClient && agg.byClient.get(c.id)) || { realMin: 0, billedMin: 0, eur: 0, count: 0 };
+    clansData.push({
+      id: c.id,
+      name: c.name || `Client ${c.id.substring(0, 4)}`,
+      isMain: false,
+      hours: (clientAgg.billedMin || 0) / 60,
+      ca: clientAgg.eur || 0,
+      rate: c.default_rate || 80,
+      count: clientAgg.count || 0,
+    });
+  });
+
+  // Clients trouvés dans byClient mais pas dans STATE.clients
+  if (agg.byClient) {
+    for (const [cid, b] of agg.byClient.entries()) {
+      if (processedIds.has(cid)) continue;
+      processedIds.add(cid);
+      clansData.push({
+        id: cid,
+        name: b.client?.name || 'Client',
+        isMain: false,
+        hours: (b.billedMin || 0) / 60,
+        ca: b.eur || 0,
+        rate: b.client?.default_rate || 80,
+        count: b.count || 0,
+      });
+    }
+  }
+
+  // Mettre à jour le moteur 3D Three.js
+  updateCity(clansData, agg);
+
+  // Mettre à jour l'affichage du HUD 2D
   const socleH = NESSY.socleHours;
   const fullH = NESSY.minHoursEq;
   const refunded = agg.refundedH || 0;
   const bonusH = agg.tiers?.t3?.h || 0;
   const soclePct = Math.min(100, (refunded / socleH) * 100);
-  const garantiPct = refunded >= socleH
-    ? Math.min(100, ((refunded - socleH) / (fullH - socleH)) * 100)
-    : 0;
-  const bonusPct = Math.min(150, (bonusH / 12) * 100);
+  const garantiPct = refunded >= socleH ? Math.min(100, ((refunded - socleH) / (fullH - socleH)) * 100) : 0;
+  const pctForBar = Math.min(120, (refunded / fullH) * 100 + Math.min(30, (bonusH / 24) * 30));
 
-  const factory = document.getElementById('k-factory');
-  if (factory) {
-    if (agg.mainHoursHourly > 0.01) factory.classList.add('lit');
-    else factory.classList.remove('lit');
-  }
-
-  const districtLots = {
-    socle: [
-      { x: 6, y: 29, type: 'villa' },
-      { x: 15, y: 34, type: 'shop' },
-      { x: 24, y: 29, type: 'villa' },
-      { x: 10, y: 19, type: 'villa' },
-      { x: 20, y: 23, type: 'shop' },
-      { x: 28, y: 18, type: 'villa' },
-    ],
-    garantie: [
-      { x: 34, y: 37, type: 'shop' },
-      { x: 44, y: 42, type: 'midrise' },
-      { x: 55, y: 37, type: 'midrise' },
-      { x: 38, y: 24, type: 'shop' },
-      { x: 49, y: 28, type: 'midrise' },
-      { x: 60, y: 23, type: 'midrise' },
-    ],
-    bonus: [
-      { x: 67, y: 39, type: 'tower' },
-      { x: 79, y: 44, type: 'spire' },
-      { x: 90, y: 39, type: 'tower' },
-      { x: 73, y: 24, type: 'tower' },
-      { x: 85, y: 21, type: 'spire' },
-    ],
-  };
-
-  function completionState(list, pct, index) {
-    const progress = (pct / 100) * list.length;
-    const completed = Math.floor(progress);
-    const hasActive = progress > 0 && completed < list.length;
-    return {
-      built: index < completed,
-      active: hasActive && index === completed,
-      empty: index > completed || (completed === 0 && progress === 0),
-    };
-  }
-
-  function buildingMarkup(type, state, idx) {
-    if (state.empty) return '';
-    const cls = [
-      'k-iso',
-      type,
-      state.built ? 'lit' : '',
-      state.active ? 'construction' : '',
-      idx % 2 === 0 ? 'k-twinkle' : '',
-    ].filter(Boolean).join(' ');
-    return `<div class="${cls}">
-      <div class="top"></div>
-      <div class="left"></div>
-      <div class="right"></div>
-      <div class="front"></div>
-      ${state.active ? '<div class="k-crane"><div class="hook"></div></div>' : ''}
-    </div>`;
-  }
-
-  function lotCluster(zone, pct, list) {
-    return list.map((lot, index) => {
-      const state = completionState(list, pct, index);
-      return `<div class="k-lot ${zone}" style="left:${lot.x}%; bottom:${lot.y}%;">
-        ${buildingMarkup(lot.type, state, index)}
-      </div>`;
-    }).join('');
-  }
-
-  const treePositions = [
-    [31, 19], [35, 14], [63, 18], [67, 13], [95, 19], [92, 13], [58, 47], [26, 42],
-  ];
-  const trees = treePositions.map(([x, y]) =>
-    `<div class="k-stage-tree" style="left:${x}%; bottom:${y}%"></div>`
-  ).join('');
-
-  const crowdPositions = [
-    [47, 29, '#f472b6'], [49, 31, '#60a5fa'], [51, 27, '#34d399'], [53, 29, '#facc15'],
-    [41, 24, '#f59e0b'], [57, 24, '#a78bfa'], [46, 21, '#fb7185'], [54, 21, '#22c55e'],
-  ];
-  const crowds = crowdPositions.map(([x, y, color], idx) =>
-    `<div class="k-crowd-dot" style="left:${x}%; bottom:${y}%; background:${color}; animation: sky-pulse-y ${2.2 + (idx % 3) * 0.4}s ease-in-out infinite; animation-delay:-${idx * 0.25}s;"></div>`
-  ).join('');
-
-  const vans = `
-    <div class="k-van" style="left:4%; bottom:15%; --v1:#60a5fa; --v2:#1d4ed8; animation:diagDriveA 11s linear infinite;"></div>
-    <div class="k-van" style="left:82%; bottom:33%; --v1:#34d399; --v2:#047857; animation:diagDriveB 13s linear infinite -4s;"></div>
-    <div class="k-van" style="left:12%; bottom:15%; --v1:#f59e0b; --v2:#b45309; animation:diagDriveA 15s linear infinite -7s;"></div>
-  `;
-
-  root.innerHTML = `
-    <div class="k-stage">
-      <div class="k-district-band"></div>
-      <div class="k-canal"></div>
-      <div class="k-rail"></div>
-      <div class="k-avenue a1"></div>
-      <div class="k-avenue a2"></div>
-      <div class="k-cross"></div>
-      <div class="k-plaza"></div>
-      <div class="k-district-tag socle" style="left:8%; bottom:57%;">District Socle</div>
-      <div class="k-district-tag garantie" style="left:41%; bottom:61%;">District Garantie</div>
-      <div class="k-district-tag bonus" style="left:73%; bottom:58%;">District Bonus</div>
-      ${lotCluster('socle', soclePct, districtLots.socle)}
-      ${lotCluster('garantie', garantiPct, districtLots.garantie)}
-      ${lotCluster('bonus', bonusPct, districtLots.bonus)}
-      ${trees}
-      ${crowds}
-      ${vans}
-    </div>
-  `;
-
-  // ---------------------------------------------------------------------------
-  // HUD · City Board (infobulle en bas à droite)
-  // ---------------------------------------------------------------------------
-  const pctForBar = Math.min(120,
-    (refunded / fullH) * 100 + Math.min(30, (bonusH / 24) * 30)
-  );
   const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  setText('hud-socle',  `${soclePct.toFixed(0)} %`);
+  setText('hud-socle', `${soclePct.toFixed(0)} %`);
   setText('hud-garanti', `${garantiPct.toFixed(0)} %`);
-  setText('hud-bonus',  `+${bonusH.toFixed(1).replace('.',',')} h`);
-  const population = Math.round(150 + refunded * 28 + bonusH * 60 + agg.secondaryEur / 8);
-  setText('hud-pop',    population.toLocaleString('fr-BE') + ' hab.');
+  setText('hud-bonus', `+${bonusH.toFixed(1).replace('.', ',')} h`);
+
+  const population = Math.round(150 + refunded * 28 + bonusH * 60 + (agg.secondaryEur || 0) / 8);
+  setText('hud-pop', population.toLocaleString('fr-BE') + ' hab.');
   setText('hud-acquis', EUR(agg.hasAnyNessy ? agg.minG : 0));
   setText('hud-ca-bonus', EUR(agg.bonusEur || 0));
+
   const bar = document.getElementById('hud-bar');
   if (bar) bar.style.width = `${pctForBar}%`;
+
   const label = document.getElementById('hud-label');
   if (label) {
-    if (!agg.hasAnyNessy) label.textContent = 'Contrat principal non activé sur la période';
-    else if (refunded < fullH) label.textContent = `Engagement ${refunded.toFixed(2).replace('.', ',')} / ${fullH.toFixed(2).replace('.', ',')} h · reste ${agg.debtRemainH.toFixed(2).replace('.', ',')} h`;
-    else label.textContent = `Engagement validé · Bonus ${EUR(agg.bonusEur || 0)} · Surplus ${bonusH.toFixed(1).replace('.', ',')} h`;
-  }
-
-  // ---------------------------------------------------------------------------
-  // POP-UP BULLE (info-bulle flottante comme Pixar)
-  // ---------------------------------------------------------------------------
-  const pop = document.getElementById('city-pop');
-  if (pop) {
-    pop.classList.remove('hidden');
-    let popHtml = '';
     if (!agg.hasAnyNessy) {
-      popHtml = `<span class="text-white font-bold">Contrat en attente</span><br><span class="text-zinc-400">Premier encodage nécessaire pour lancer la ville et activer ${EUR(agg.minG)}.</span>`;
-      pop.classList.remove('gain','loss');
-    } else if (refunded < socleH) {
-      popHtml = `<span class="text-white font-bold">Chantier Socle</span><br><span class="text-zinc-400">${soclePct.toFixed(0)}% du district livré · reste <b>${(socleH - refunded).toFixed(2).replace('.', ',')} h</b>.</span>`;
-      pop.classList.remove('gain','loss');
+      label.textContent = 'Contrat principal en attente d’encodage';
     } else if (refunded < fullH) {
-      popHtml = `<span class="text-white font-bold">Garantie en construction</span><br><span class="text-zinc-400">${garantiPct.toFixed(0)}% du centre-ville livré · encore <b>${agg.debtRemainH.toFixed(2).replace('.', ',')} h</b>.</span>`;
-      pop.classList.remove('gain','loss');
-    } else if (agg.bonusEur > 50) {
-      popHtml = `<span class="text-emerald-300 font-bold">District Bonus lancé</span><br><span class="text-zinc-300">${bonusH.toFixed(1).replace('.', ',')} h en surplus · <b>+${EUR(agg.bonusEur)}</b> facturables.</span>`;
-      pop.classList.add('gain'); pop.classList.remove('loss');
+      label.textContent = `Engagement : ${refunded.toFixed(2).replace('.', ',')} / ${fullH.toFixed(2).replace('.', ',')} h · reste ${agg.debtRemainH.toFixed(2).replace('.', ',')} h`;
     } else {
-      popHtml = `<span class="text-emerald-300 font-bold">Ville stabilisée</span><br><span class="text-zinc-300">Engagement contractuel couvert · continue pour ouvrir le quartier bonus.</span>`;
-      pop.classList.add('gain'); pop.classList.remove('loss');
+      label.textContent = `Engagement validé ! Bonus ${EUR(agg.bonusEur || 0)} · Surplus +${bonusH.toFixed(1).replace('.', ',')} h`;
     }
-    pop.innerHTML = popHtml;
   }
 
-  // ---------------------------------------------------------------------------
-  // VÉHICULE SUPPLÉMENTAIRE (camion-citerne d'or) qui apparaît quand BONUS > 0
-  // ---------------------------------------------------------------------------
-  let truckEl = document.getElementById('bonus-truck');
-  if (bonusH > 0.1) {
-    if (!truckEl) {
-      const section = document.getElementById('kopek-city');
-      if (section) {
-        truckEl = document.createElement('div');
-        truckEl.id = 'bonus-truck';
-        truckEl.className = 'k-car';
-        truckEl.style.cssText = `bottom: calc(22% + 52px);
-          --c1: linear-gradient(180deg,#facc15,#ca8a04); --c2: linear-gradient(180deg,#a16207,#713f12);
-          animation: k-car-right 11s linear infinite;
-          transform: scale(1.15);
-          filter: drop-shadow(0 6px 8px rgba(234,179,8,0.45));`;
-        truckEl.innerHTML = `<div class="cb" style="width: 92px; background: linear-gradient(180deg, #fde047 0%, #ca8a04 100%);
-          box-shadow: inset 0 -6px 0 rgba(0,0,0,0.2), inset 0 8px 0 rgba(255,255,255,0.28), 0 0 24px rgba(250,204,21,0.35);">
-          <div style="position:absolute; inset: 25% 8% 12% 38%;
-            background: repeating-linear-gradient(45deg,#0ea5e9 0 6px,#082f49 6px 12px);
-            border-radius: 8px; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.2);"></div>
-          </div><div class="cw"></div>`;
-        section.appendChild(truckEl);
-      }
-    }
-  } else if (truckEl) {
-    truckEl.remove();
-  }
-
-  // ---------------------------------------------------------------------------
-  // HÉLICOPTÈRE BONUS qui survole quand bonus > 2h
-  // ---------------------------------------------------------------------------
-  let heliEl = document.getElementById('bonus-heli');
-  if (bonusH > 2) {
-    if (!heliEl) {
-      const sky = document.querySelector('.k-sky-wrap');
-      if (sky) {
-        heliEl = document.createElement('div');
-        heliEl.id = 'bonus-heli';
-        heliEl.style.cssText = `position:absolute; top:15%; left:-10%;
-          font-size: 40px; filter: drop-shadow(0 8px 10px rgba(15,23,42,0.35));
-          animation: sky-drift-x 22s linear infinite reverse; animation-delay:-4s;`;
-        heliEl.textContent = '🚁';
-        sky.appendChild(heliEl);
-      }
-    }
-  } else if (heliEl) {
-    heliEl.remove();
-  }
-
-  // ---------------------------------------------------------------------------
-  // PETIT EFFET FUMÉE RÉGULIER (si on encode du temps cette heure-ci)
-  // ---------------------------------------------------------------------------
-  maybePuffSmoke(agg.mainHoursHourly > 0.01);
-
-  // Re-render icônes lucide (le HUD City Board en utilise)
   if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
 }
 
-// Déclencher un (ou 2) puits de fumée si usine allumée (pas d'accumulation)
-let puffCooldown = 0;
 function maybePuffSmoke(shouldRun) {
   if (!shouldRun) return;
   const smoke = document.getElementById('k-smoke');
@@ -1224,7 +1082,8 @@ function bindQuickForm() {
       updateQuickRoundInfo();
       syncQuickRateFromClient();
       refreshPeriod();
-      // Petit effet bonus : usine en ébullition + bonus confetti si la somme nous fait passer en bonus
+      // Effet 3D : caméra + particules + son de chantier
+      triggerLogEffect(payload.client_id);
       maybePuffSmoke(true);
       setTimeout(maybePuffSmoke, 800, true);
     } catch (ex) {
@@ -1452,6 +1311,7 @@ async function handleEditLogSubmit(e) {
     toast('Encodage mis à jour', 'check');
     $('#edit-modal').classList.add('hidden');
     refreshPeriod();
+    triggerLogEffect(client_id);
   } catch { toast('Erreur mise à jour', 'alert-circle', 'danger'); }
 }
 
