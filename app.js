@@ -15,7 +15,7 @@ import {
   setDoc,
   onSnapshot,
 } from './firebase-config.js?v=2026-09-09-01';
-import { initThreeGame, updateCity, triggerLogEffect } from './three-game.js?v=2026-09-09-05';
+import { initThreeGame, updateCity, triggerLogEffect } from './three-game.js?v=2026-09-09-06';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES

@@ -155,58 +155,66 @@ function clearWorld() {
   heightCache = null;
 }
 
-function stoneMaterial(tint = 0xffffff) {
-  return new THREE.MeshStandardMaterial({
+function stoneMaterial(tint = 0x9f937c) {
+  const mat = new THREE.MeshStandardMaterial({
     color: tint,
     map: textures.stoneColor,
     normalMap: textures.stoneNormal,
     roughnessMap: textures.stoneRough,
-    roughness: 0.96,
-    metalness: 0.02,
+    roughness: 0.97,
+    metalness: 0.0,
   });
+  if (mat.map) { mat.map.repeat.set(4, 4); mat.map.needsUpdate = true; }
+  if (mat.normalMap) { mat.normalMap.repeat.set(4, 4); mat.normalMap.needsUpdate = true; }
+  if (mat.roughnessMap) { mat.roughnessMap.repeat.set(4, 4); mat.roughnessMap.needsUpdate = true; }
+  return mat;
 }
 
-function roofMaterial(tint = 0x8b5e3c) {
-  return new THREE.MeshStandardMaterial({
+function roofMaterial(tint = 0x5a2f24) {
+  const mat = new THREE.MeshStandardMaterial({
     color: tint,
     map: textures.woodColor,
-    roughness: 0.94,
-    metalness: 0.02,
+    roughness: 0.95,
+    metalness: 0.0,
   });
+  if (mat.map) { mat.map.repeat.set(5, 5); mat.map.needsUpdate = true; }
+  return mat;
 }
 
 function grassMaterial() {
-  return new THREE.MeshStandardMaterial({
-    color: 0xa8c57e,
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x5c7244,
     map: textures.grass,
     roughness: 1,
     metalness: 0,
   });
+  if (mat.map) { mat.map.repeat.set(12, 12); mat.map.needsUpdate = true; }
+  return mat;
 }
 
 function waterMaterial() {
   return new THREE.MeshPhysicalMaterial({
-    color: 0x204463,
-    metalness: 0.08,
-    roughness: 0.1,
-    transmission: 0.06,
-    thickness: 1.4,
-    clearcoat: 0.95,
-    clearcoatRoughness: 0.08,
+    color: 0x15293a,
+    metalness: 0.0,
+    roughness: 0.06,
+    transmission: 0.08,
+    thickness: 1.8,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.03,
     normalMap: textures.waterNormal,
-    normalScale: new THREE.Vector2(0.45, 0.45),
+    normalScale: new THREE.Vector2(0.55, 0.55),
   });
 }
 
 function sandMaterial() {
   const mat = new THREE.MeshStandardMaterial({
-    color: 0xd9c58e,
+    color: 0xa89676,
     map: textures.sand,
     roughness: 1,
     metalness: 0,
   });
   if (mat.map) {
-    mat.map.repeat.set(8, 8);
+    mat.map.repeat.set(10, 10);
     mat.map.needsUpdate = true;
   }
   return mat;
@@ -214,13 +222,13 @@ function sandMaterial() {
 
 function plazaMaterial() {
   const mat = new THREE.MeshStandardMaterial({
-    color: 0xefe3cc,
+    color: 0xaca08c,
     map: textures.plaza,
     roughness: 0.98,
-    metalness: 0.01,
+    metalness: 0.0,
   });
   if (mat.map) {
-    mat.map.repeat.set(3, 3);
+    mat.map.repeat.set(5, 5);
     mat.map.needsUpdate = true;
   }
   return mat;
@@ -271,12 +279,13 @@ function createSkyDome() {
   canvas.height = 768;
   const ctx = canvas.getContext('2d');
   const grad = ctx.createLinearGradient(0, 0, 0, 768);
-  grad.addColorStop(0, '#120c28');
-  grad.addColorStop(0.18, '#1f1e46');
-  grad.addColorStop(0.38, '#3c476b');
-  grad.addColorStop(0.62, '#7a8aa6');
-  grad.addColorStop(0.82, '#d6c6a8');
-  grad.addColorStop(1, '#e6d4a8');
+  grad.addColorStop(0, '#0a0818');
+  grad.addColorStop(0.15, '#1a1638');
+  grad.addColorStop(0.32, '#2e224a');
+  grad.addColorStop(0.48, '#6b3a5a');
+  grad.addColorStop(0.62, '#b4543a');
+  grad.addColorStop(0.78, '#e68a44');
+  grad.addColorStop(1, '#f2c07a');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 16, 768);
   const tex = new THREE.CanvasTexture(canvas);
@@ -286,18 +295,18 @@ function createSkyDome() {
   scene.add(sky);
 
   const stars = new THREE.BufferGeometry();
-  const count = 380;
+  const count = 520;
   const positions = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) {
     const r = 620 + Math.random() * 120;
     const theta = Math.random() * Math.PI * 2;
-    const phi = Math.random() * Math.PI * 0.45;
+    const phi = Math.random() * Math.PI * 0.4;
     positions[i * 3] = Math.cos(theta) * Math.sin(phi) * r;
     positions[i * 3 + 1] = Math.cos(phi) * r * 0.9;
     positions[i * 3 + 2] = Math.sin(theta) * Math.sin(phi) * r;
   }
   stars.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const starMat = new THREE.PointsMaterial({ color: 0xfff3c2, size: 1.6, sizeAttenuation: true, transparent: true, opacity: 0.55 });
+  const starMat = new THREE.PointsMaterial({ color: 0xffdfa5, size: 1.4, sizeAttenuation: true, transparent: true, opacity: 0.75 });
   scene.add(new THREE.Points(stars, starMat));
 }
 
@@ -344,14 +353,14 @@ function createAtmosphereLayers() {
 }
 
 function setupLighting() {
-  scene.add(new THREE.AmbientLight(0xe9e2d4, 0.42));
+  scene.add(new THREE.AmbientLight(0x8a86a8, 0.28));
 
-  const hemi = new THREE.HemisphereLight(0xbfd5ef, 0x5a4c36, 0.92);
-  hemi.position.set(0, 160, 0);
+  const hemi = new THREE.HemisphereLight(0x8da0bd, 0x2a241a, 0.48);
+  hemi.position.set(0, 180, 0);
   scene.add(hemi);
 
-  const sun = new THREE.DirectionalLight(0xffe7bf, 2.8);
-  sun.position.set(-150, 170, -85);
+  const sun = new THREE.DirectionalLight(0xffbe80, 1.8);
+  sun.position.set(-210, 80, -60);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.near = 10;
@@ -360,16 +369,20 @@ function setupLighting() {
   sun.shadow.camera.right = 260;
   sun.shadow.camera.top = 260;
   sun.shadow.camera.bottom = -260;
-  sun.shadow.bias = -0.00025;
+  sun.shadow.bias = -0.0003;
   scene.add(sun);
 
-  const fill = new THREE.DirectionalLight(0xaec9ef, 0.6);
-  fill.position.set(120, 70, 140);
+  const fill = new THREE.DirectionalLight(0x5566aa, 0.45);
+  fill.position.set(140, 90, 160);
   scene.add(fill);
 
-  const rim = new THREE.DirectionalLight(0xfde68a, 0.42);
-  rim.position.set(130, 60, -150);
+  const rim = new THREE.DirectionalLight(0xff8e5e, 0.65);
+  rim.position.set(150, 40, -180);
   scene.add(rim);
+
+  const groundBounce = new THREE.DirectionalLight(0x554028, 0.22);
+  groundBounce.position.set(0, -80, 0);
+  scene.add(groundBounce);
 }
 
 function buildHeightmap(size) {
@@ -495,7 +508,7 @@ function createRiver(heightmap, heightmapSize, worldScale, terrainAltitude) {
     points.push(new THREE.Vector3(x, alt, z));
   }
   const curve = new THREE.CatmullRomCurve3(points);
-  const tube = new THREE.TubeGeometry(curve, 160, 4.4, 8, false);
+  const tube = new THREE.TubeGeometry(curve, 160, 2.2, 8, false);
   const riverMat = waterMaterial();
   const mesh = new THREE.Mesh(tube, riverMat);
   mesh.receiveShadow = true;
@@ -553,17 +566,17 @@ function createDistrictRoads(landAltitude, provinceSlots) {
 
 function createTree(scale = 1) {
   const group = new THREE.Group();
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5f4332, roughness: 0.95 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x3f6d2f, roughness: 0.92 });
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18 * scale, 0.24 * scale, 1.9 * scale, 8), trunkMat);
-  trunk.position.y = 0.95 * scale;
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x463322, roughness: 0.98 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x35582e, roughness: 0.94 });
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12 * scale, 0.18 * scale, 1.6 * scale, 7), trunkMat);
+  trunk.position.y = 0.8 * scale;
   trunk.castShadow = true;
   trunk.receiveShadow = true;
   group.add(trunk);
-  for (let i = 0; i < 4; i++) {
-    const s = 1 - i * 0.18;
-    const leaves = new THREE.Mesh(new THREE.SphereGeometry(0.92 * scale * s, 8, 8), leafMat);
-    leaves.position.set((Math.random() - 0.5) * 0.3 * scale, (1.9 + i * 0.45) * scale, (Math.random() - 0.5) * 0.3 * scale);
+  for (let i = 0; i < 3; i++) {
+    const s = 1 - i * 0.22;
+    const leaves = new THREE.Mesh(new THREE.SphereGeometry(0.72 * scale * s, 7, 7), leafMat);
+    leaves.position.set((Math.random() - 0.5) * 0.25 * scale, (1.5 + i * 0.4) * scale, (Math.random() - 0.5) * 0.25 * scale);
     leaves.castShadow = true;
     group.add(leaves);
   }
@@ -572,15 +585,15 @@ function createTree(scale = 1) {
 
 function scatterForest(landAltitude, worldScale) {
   const forest = new THREE.Group();
-  for (let i = 0; i < 420; i++) {
+  for (let i = 0; i < 240; i++) {
     const x = (Math.random() - 0.5) * worldScale * 0.88;
     const z = (Math.random() - 0.5) * worldScale * 0.88;
     const h = sampleHeight(heightCache.data, heightCache.size, x, z, worldScale);
-    if (h < 0.8) continue;
-    if (Math.hypot(x, z) < 24) continue;
+    if (h < 0.6) continue;
+    if (Math.hypot(x, z) < 28) continue;
     const dist = Math.hypot(x, z);
     if (dist > worldScale * 0.4) continue;
-    const scale = 0.6 + Math.random() * 0.9;
+    const scale = 0.45 + Math.random() * 0.7;
     const tree = createTree(scale);
     tree.position.set(x, landAltitude(x, z), z);
     tree.rotation.y = Math.random() * Math.PI * 2;
@@ -625,18 +638,18 @@ function createPlaza(center, size, landAltitude) {
   return mesh;
 }
 
-function createColumnBuilding(width, depth, height, tint = 0xefe3cc, roofTint = 0x925a3e) {
+function createColumnBuilding(width, depth, height, tint = 0x9e9282, roofTint = 0x5a2f24) {
   const group = new THREE.Group();
   const stone = stoneMaterial(tint);
   const roof = roofMaterial(roofTint);
 
-  const base = new THREE.Mesh(new THREE.BoxGeometry(width + 1.4, 1.6, depth + 1.4), stone);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(width + 1.4, 1.6, depth + 1.4), stoneMaterial(0x8a7e6e));
   base.position.y = 0.8;
   base.castShadow = true;
   base.receiveShadow = true;
   group.add(base);
 
-  const step = new THREE.Mesh(new THREE.BoxGeometry(width + 0.6, 0.6, depth + 0.6), stoneMaterial(0xe3d3b7));
+  const step = new THREE.Mesh(new THREE.BoxGeometry(width + 0.6, 0.6, depth + 0.6), stoneMaterial(0x9a8e7d));
   step.position.y = 1.9;
   step.castShadow = true;
   base.receiveShadow = true;
@@ -648,7 +661,7 @@ function createColumnBuilding(width, depth, height, tint = 0xefe3cc, roofTint = 
     for (let i = 0; i < columns; i++) {
       const x = -width / 2 + i * spacingX;
       const z = side * depth * 0.3;
-      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.32, height - 1, 12), stone);
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.32, height - 1, 12), stoneMaterial(0xb0a492));
       col.position.set(x, 2.2 + (height - 1) / 2, z);
       col.castShadow = true;
       col.receiveShadow = true;
@@ -656,12 +669,12 @@ function createColumnBuilding(width, depth, height, tint = 0xefe3cc, roofTint = 
     }
   }
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(width * 0.84, height - 1.5, depth * 0.66), stoneMaterial(0xe3d2b4));
+  const body = new THREE.Mesh(new THREE.BoxGeometry(width * 0.84, height - 1.5, depth * 0.66), stoneMaterial(0xa49988));
   body.position.y = 2.3 + (height - 1.5) / 2;
   body.castShadow = true;
   group.add(body);
 
-  const entablature = new THREE.Mesh(new THREE.BoxGeometry(width + 1, 0.9, depth + 0.8), stoneMaterial(0xe0d1b5));
+  const entablature = new THREE.Mesh(new THREE.BoxGeometry(width + 1, 0.9, depth + 0.8), stoneMaterial(0x8e8272));
   entablature.position.y = 2.2 + (height - 1) + 0.45;
   entablature.castShadow = true;
   group.add(entablature);
@@ -677,8 +690,8 @@ function createColumnBuilding(width, depth, height, tint = 0xefe3cc, roofTint = 
 
 function createTenement(w = 6, d = 7, h = 10) {
   const group = new THREE.Group();
-  const stone = stoneMaterial(0xddd2b6);
-  const roof = roofMaterial(0x9a5b37);
+  const stone = stoneMaterial(0x968a7a);
+  const roof = roofMaterial(0x5a2f24);
   const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), stone);
   body.position.y = h / 2;
   body.castShadow = true;
@@ -691,8 +704,8 @@ function createTenement(w = 6, d = 7, h = 10) {
       for (let x = -1; x <= 1; x++) {
         const wx = x * (w / 3.2);
         const win = new THREE.Mesh(
-          new THREE.BoxGeometry(0.7, 0.9, 0.1),
-          new THREE.MeshStandardMaterial({ color: 0xf6e7b3, emissive: 0x3a2b16, emissiveIntensity: 0.25, roughness: 0.3 }),
+          new THREE.BoxGeometry(0.6, 0.8, 0.1),
+          new THREE.MeshStandardMaterial({ color: 0x3a2e1d, emissive: 0xffa64d, emissiveIntensity: 0.38, roughness: 0.25, metalness: 0.05 }),
         );
         win.position.set(wx, y, (z * d) / 2 + (z * 0.06));
         group.add(win);
@@ -706,7 +719,7 @@ function createTenement(w = 6, d = 7, h = 10) {
   roofMesh.castShadow = true;
   group.add(roofMesh);
 
-  const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.8, 0.6), stoneMaterial(0xc6b28f));
+  const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.8, 0.6), stoneMaterial(0x7e7366));
   chimney.position.set(w / 4, h + 2, -d / 4);
   chimney.castShadow = true;
   group.add(chimney);
@@ -715,8 +728,8 @@ function createTenement(w = 6, d = 7, h = 10) {
 
 function createWarehouse(w = 11, d = 8, h = 6) {
   const group = new THREE.Group();
-  const walls = stoneMaterial(0xd9ccb2);
-  const roof = roofMaterial(0x8c5a3a);
+  const walls = stoneMaterial(0x8a7e6e);
+  const roof = roofMaterial(0x5a2f24);
   const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), walls);
   body.position.y = h / 2;
   body.castShadow = true;
@@ -728,7 +741,7 @@ function createWarehouse(w = 11, d = 8, h = 6) {
     const x = -w / 2 + (w / (arches - 1)) * i;
     const door = new THREE.Mesh(
       new THREE.BoxGeometry(1.2, 2.4, 0.22),
-      new THREE.MeshStandardMaterial({ color: 0x6a4b35, roughness: 0.95 }),
+      new THREE.MeshStandardMaterial({ color: 0x4a3626, roughness: 0.95 }),
     );
     door.position.set(x, 1.2, d / 2 + 0.12);
     group.add(door);
