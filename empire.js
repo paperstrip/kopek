@@ -299,16 +299,20 @@ export function ressourceAccessible(etat, tuiles, ressource) {
 
 // ---------- État de la partie -------------------------------------------------
 export const VERSION_ETAT = 2;
-export const TOURS_MAX = 24;                  // réserve de tours
-export const MS_PAR_TOUR = 12 * 60 * 1000;    // un tour se recharge en 12 minutes
-export const TOURS_PAR_HEURE = 2;             // chaque heure facturée en offre deux
+// La réserve doit être large. Un joueur qui découvre le jeu passe ses premiers
+// tours à chercher quoi faire : avec huit tours au départ et un toutes les
+// douze minutes, il se retrouvait au tour 33 avec une seule ville et zéro tour
+// en réserve — c'est-à-dire bloqué, sans avoir jamais rien pu essayer.
+export const TOURS_MAX = 40;
+export const MS_PAR_TOUR = 4 * 60 * 1000;     // un tour se recharge en 4 minutes
+export const TOURS_PAR_HEURE = 3;             // chaque heure facturée en offre trois
 
 export function nouvelEtat(graine, maintenant = Date.now()) {
   const etat = {
     version: VERSION_ETAT,
     graine: String(graine),
     tour: 1,
-    tours: 8,                    // de quoi jouer tout de suite
+    tours: 20,                   // de quoi apprendre sans se bloquer
     dernierRecharge: maintenant,
     toursAccordes: 0,            // heures déjà converties, pour ne pas les compter deux fois
     or: 60, science: 0,
@@ -1145,3 +1149,61 @@ export const REGLES = [
   { titre: 'Vos heures comptent',
     texte: 'Elles ne donnent que des tours et un bonus d’assaut : +10 % au socle des 25 h, +20 % au minimum garanti. Le jeu ne modifie jamais vos heures, vos projets ni votre facturation.' },
 ];
+
+// ---------- « Je fais quoi, là, maintenant ? » --------------------------------
+/**
+ * Le geste suivant, un seul, avec la case à regarder. Un objectif comme
+ * « fonder une deuxième ville » ne dit pas OÙ est le colon ni quoi toucher :
+ * sur un téléphone, retrouver un pion de trois millimètres parmi deux cent
+ * soixante-et-onze hexagones est un jeu en soi, et ce n'est pas celui-là qu'on
+ * voulait faire jouer.
+ */
+export function prochaineAction(etat, tuiles) {
+  if (etat.fini) {
+    return { texte: etat.fini === 'victoire' ? 'La partie est gagnée.' : 'La partie est perdue.', cible: null };
+  }
+  const mesVilles = villesDe(etat);
+  if (!mesVilles.length) return { texte: 'Vous n’avez plus de ville.', cible: null };
+
+  // 1. Un colon posé sur un site valide : c'est LE coup à jouer.
+  const colons = unitesDe(etat).filter((u) => UNITES[u.type].fonde);
+  const pret = colons.find((u) => peutFonder(etat, tuiles, u.q, u.r).ok);
+  if (pret) {
+    return { texte: 'Votre colon peut fonder une ville ici. Touchez-le, puis « Fonder une ville ».',
+             cible: { q: pret.q, r: pret.r }, unite: pret.id, geste: 'fonder' };
+  }
+  // 2. Un colon qui n'est pas encore au bon endroit.
+  if (colons.length && colons.some((u) => u.mp > 0)) {
+    const u = colons.find((x) => x.mp > 0);
+    const t = tuiles[tileKey(u.q, u.r)];
+    const pourquoi = !t || !franchissable(t) ? 'il lui faut la terre ferme'
+      : t.terrain === 'montagne' ? 'la montagne ne nourrit personne'
+      : 'il faut trois cases entre deux villes';
+    return { texte: `Éloignez votre colon — ${pourquoi}. Touchez-le : les cases bleues sont à sa portée.`,
+             cible: { q: u.q, r: u.r }, unite: u.id, geste: 'deplacer' };
+  }
+  // 3. Une ville qui ne construit rien est une ville qui ne sert à rien.
+  const oisive = mesVilles.find((v) => !v.chantier);
+  if (oisive) {
+    return { texte: `${oisive.nom} ne construit rien. Touchez la ville, puis choisissez un chantier.`,
+             cible: { q: oisive.q, r: oisive.r }, ville: oisive.id, geste: 'chantier' };
+  }
+  // 4. Des unités qui n'ont pas bougé.
+  const dormante = unitesDe(etat).find((u) => u.mp > 0 && !u.fortifie && UNITES[u.type].atk > 0);
+  if (dormante) {
+    return { texte: `${UNITES[dormante.type].label} n’a pas bougé. Déplacez-la, ou fortifiez-la pour tenir la position.`,
+             cible: { q: dormante.q, r: dormante.r }, unite: dormante.id, geste: 'deplacer' };
+  }
+  // 5. Plus rien à faire : c'est le moment de finir le tour.
+  return { texte: 'Tout est en ordre. Terminez le tour pour faire avancer le monde.', cible: null, geste: 'tour' };
+}
+
+/** Ce qui reste en suspens avant de finir un tour, pour ne pas le gâcher. */
+export function enSuspens(etat, tuiles) {
+  const villesSansChantier = villesDe(etat).filter((v) => !v.chantier).length;
+  const unitesImmobiles = unitesDe(etat).filter((u) => u.mp >= u.mpMax && !u.fortifie).length;
+  const bouts = [];
+  if (villesSansChantier) bouts.push(`${villesSansChantier} ville${villesSansChantier > 1 ? 's' : ''} sans chantier`);
+  if (unitesImmobiles) bouts.push(`${unitesImmobiles} unité${unitesImmobiles > 1 ? 's' : ''} qui n’${unitesImmobiles > 1 ? 'ont' : 'a'} pas bougé`);
+  return { rien: bouts.length === 0, texte: bouts.join(' · '), villesSansChantier, unitesImmobiles };
+}

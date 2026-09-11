@@ -121,7 +121,7 @@ prestations, il n'en écrit jamais :
 
 | Heures | Effet en jeu |
 |---|---|
-| 1 h facturée | 2 tours de jeu |
+| 1 h facturée | 3 tours de jeu |
 | 25 h · socle | +10 % à l'assaut |
 | 43,75 h · garantie | +20 % à l'assaut |
 
@@ -129,11 +129,37 @@ prestations, il n'en écrit jamais :
 lit le fichier source pour le vérifier, parce qu'une règle qu'on ne peut pas
 enfreindre vaut mieux qu'une règle qu'on promet de respecter.
 
+### « Je fais quoi, là, maintenant ? »
+
+C'est la question qui tue un jeu de stratégie quand elle reste sans réponse — et
+elle est restée sans réponse : une partie réelle a atteint le **tour 33 avec une
+seule ville et zéro tour en réserve**. L'objectif disait « fondez une deuxième
+ville » sans dire ni où était le colon, ni sur quoi appuyer. Sur un téléphone,
+retrouver un pion de trois millimètres parmi 271 hexagones est un jeu en soi, et
+ce n'est pas celui-là qu'on voulait faire jouer.
+
+Trois réponses, toutes visibles à l'écran :
+
+- `prochaineAction()` renvoie **un seul geste**, avec la case concernée : fonder
+  ici, éloigner ce colon, mettre cette ville en chantier, déplacer cette unité,
+  ou finir le tour. Le bandeau de consigne ne se cache jamais, même quand un
+  panneau s'ouvre — le masquer, c'est le retirer au moment où il sert.
+- Le bouton **Montrer** cadre la caméra sur la case, la sélectionne et ouvre le
+  bon panneau.
+- `enSuspens()` alimente un avertissement au premier appui sur « Tour suivant »
+  quand des villes ne construisent rien ou que des unités n'ont pas bougé. On ne
+  bloque pas ; on prévient une fois.
+
+Et une **légende des camps** en permanence sur la carte, parce que sans elle le
+joueur en est réduit à « des zones jaunes, moi j'imagine, et des zones rouges ».
+
 ### Des tours, pas une horloge
 
 Rien ne bouge sans le joueur : le monde n'avance que lorsqu'il termine un tour.
-La réserve se recharge d'un tour toutes les douze minutes, plafonnée à 24, et
-les heures facturées en ajoutent. C'est ce qui règle d'un coup le reproche « il
+La réserve se recharge d'un tour toutes les quatre minutes, plafonnée à 40, et
+démarre à 20. Elle a d'abord été bien plus avare — huit tours au départ, un
+toutes les douze minutes — et c'est ce qui a enfermé une vraie partie au tour 33
+sans plus aucun coup jouable. C'est ce qui règle d'un coup le reproche « il
 ne se passe rien » : il y a toujours un coup à jouer, et c'est le joueur qui
 fait avancer le monde.
 

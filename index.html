@@ -10,7 +10,7 @@
   // se retrouve avec un vieux HTML qui charge du vieux JS. On compare donc la
   // version embarquée à celle publiée dans version.json (jamais mise en cache),
   // et on recharge une seule fois sur une URL différente si ça diffère.
-  window.KOPEK_VERSION = '2026-09-11-01';
+  window.KOPEK_VERSION = '2026-09-11-02';
   (function () {
     try {
       fetch('./version.json?t=' + Date.now(), { cache: 'no-store' })
@@ -34,7 +34,7 @@
 <!-- Feuille Tailwind compilée et commitée (styles.css) : le CDN cdn.tailwindcss.com
      est un outil de DEV qui recompile le CSS dans le navigateur à chaque chargement.
      Pour régénérer après avoir ajouté des classes : voir README.md -->
-<link rel="stylesheet" href="./styles.css?v=2026-09-11-01">
+<link rel="stylesheet" href="./styles.css?v=2026-09-11-02">
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 </head>
 <body class="min-h-screen text-zinc-100 font-sans relative overflow-x-hidden">
@@ -411,11 +411,12 @@
 
           <div class="flex flex-col items-end gap-1.5 pointer-events-auto">
             <button type="button" id="g-fin-tour"
-              class="rounded-xl px-3 py-2 backdrop-blur-xl bg-indigo-500/90 hover:bg-indigo-400 disabled:bg-zinc-800/80 disabled:text-zinc-500
-                     border border-indigo-300/40 text-white text-[12px] font-bold shadow-lg transition flex items-center gap-1.5">
-              <i data-lucide="chevrons-right" class="w-4 h-4"></i>
+              class="whitespace-nowrap rounded-xl px-2.5 sm:px-3 py-2 backdrop-blur-xl bg-indigo-500/90 hover:bg-indigo-400
+                     disabled:bg-zinc-800/80 disabled:text-zinc-500 border border-indigo-300/40 text-white text-[12px]
+                     font-bold shadow-lg transition inline-flex items-center gap-1.5">
+              <i data-lucide="chevrons-right" class="w-4 h-4 flex-none"></i>
               <span class="hidden sm:inline">Tour suivant</span><span class="sm:hidden">Tour</span>
-              <span class="font-mono bg-black/25 rounded px-1.5 py-0.5 text-[11px]"><span id="g-reserve">0</span></span>
+              <span class="font-mono bg-black/25 rounded px-1.5 py-0.5 text-[11px] flex-none"><span id="g-reserve">0</span></span>
             </button>
             <div class="flex items-center gap-1.5">
               <span id="g-tour" class="rounded-lg px-2 py-0.5 backdrop-blur-xl bg-zinc-950/75 border border-white/10 text-[10px] font-semibold text-zinc-300">Tour 1</span>
@@ -425,20 +426,26 @@
           </div>
         </div>
 
-        <!-- ===== Objectif : la réponse à « je fais quoi ? » ===== -->
-        <div id="g-objectif" class="absolute left-2 right-2 sm:left-3 sm:right-auto sm:w-[24rem] top-[6.4rem] sm:top-[5.6rem]
-                    rounded-2xl px-3 py-2.5 backdrop-blur-xl bg-indigo-500/15 border border-indigo-400/40 shadow-lg z-10">
-          <div class="flex items-start gap-2.5">
-            <i data-lucide="flag" class="w-4 h-4 text-indigo-300 flex-none mt-0.5"></i>
-            <div class="min-w-0 flex-1">
-              <div class="flex items-baseline gap-2">
-                <span id="g-obj-titre" class="text-[12px] font-bold text-white">—</span>
-                <span id="g-obj-compte" class="text-[10px] font-mono text-indigo-300/70">0/0</span>
-              </div>
-              <p id="g-obj-aide" class="text-[11px] text-indigo-100/75 leading-snug mt-0.5"></p>
-            </div>
+        <!-- ===== La consigne : elle ne se cache jamais ===== -->
+        <div id="g-objectif" class="absolute left-2 right-2 sm:left-3 sm:right-auto sm:w-[26rem] top-[5.6rem] sm:top-[5.2rem]
+                    rounded-xl px-2.5 py-2 backdrop-blur-xl bg-indigo-500/20 border border-indigo-400/45 shadow-lg z-20 pointer-events-auto">
+          <div class="flex items-center gap-2">
+            <i data-lucide="flag" class="w-3.5 h-3.5 text-indigo-200 flex-none"></i>
+            <span id="g-obj-titre" class="text-[11px] font-bold text-white truncate flex-1">—</span>
+            <span id="g-obj-compte" class="text-[9px] font-mono text-indigo-200/70 flex-none">0/0</span>
           </div>
+          <div class="flex items-start gap-2 mt-1">
+            <p id="g-geste" class="text-[11px] text-white/95 leading-snug flex-1"></p>
+            <button type="button" id="g-montrer"
+              class="flex-none rounded-lg px-2 py-1 bg-white/20 hover:bg-white/30 border border-white/30
+                     text-[10px] font-bold text-white transition whitespace-nowrap">Montrer</button>
+          </div>
+          <p id="g-obj-aide" class="hidden sm:block text-[10px] text-indigo-100/60 leading-snug mt-1"></p>
         </div>
+
+        <!-- ===== Légende des camps ===== -->
+        <div id="g-legende" class="absolute right-2 sm:right-3 top-[11.5rem] sm:top-[10rem] z-10 rounded-xl px-2 py-1.5
+                    backdrop-blur-xl bg-zinc-950/75 border border-white/10 flex flex-col gap-1"></div>
 
         <!-- ===== Panneau de case ===== -->
         <div id="g-panneau" class="hidden absolute left-2 right-2 sm:left-3 sm:right-auto sm:w-[22rem] bottom-2 sm:bottom-3
@@ -774,7 +781,7 @@
 <!-- ===== TOAST ===== -->
 <div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] px-4 py-2.5 bg-zinc-900/95 border border-zinc-700 text-sm rounded-xl shadow-2xl flex items-center gap-2 fade-in"></div>
 
-<script type="module" src="./firebase-config.js?v=2026-09-11-01"></script>
-<script type="module" src="./app.js?v=2026-09-11-01"></script>
+<script type="module" src="./firebase-config.js?v=2026-09-11-02"></script>
+<script type="module" src="./app.js?v=2026-09-11-02"></script>
 </body>
 </html>

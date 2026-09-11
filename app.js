@@ -14,8 +14,8 @@ import {
   serverTimestamp,
   setDoc,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-11-01';
-import * as EMPIRE from './empire.js?v=2026-09-11-01';
+} from './firebase-config.js?v=2026-09-11-02';
+import * as EMPIRE from './empire.js?v=2026-09-11-02';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -965,7 +965,7 @@ async function assurerCarte() {
   if (carteEtat !== 'repos') return;
   carteEtat = 'chargement';
   try {
-    carteMod = await import('./carte3d.js?v=2026-09-11-01');
+    carteMod = await import('./carte3d.js?v=2026-09-11-02');
     const canvas = document.getElementById('game-canvas');
     if (!canvas) throw new Error('canvas #game-canvas introuvable');
     carteMod.initCarte(canvas, { onSelect: surCaseTouchee });
@@ -1040,11 +1040,33 @@ function rendreHud() {
     } else rech.textContent = 'Tout est découvert';
   }
 
-  // L'objectif répond à « je fais quoi ? », qui est la question qui tue un jeu.
+  // L'objectif dit où l'on va ; le geste dit quoi toucher maintenant. C'est ce
+  // second point qui manquait : « fondez une deuxième ville » ne dit ni où est
+  // le colon ni sur quoi appuyer, et on peut y passer trente tours sans avancer.
   const { objectif, index, total } = EMPIRE.objectifCourant(e);
   txt('g-obj-compte', `${index}/${total}`);
   txt('g-obj-titre', objectif ? objectif.label : 'Tous les objectifs sont accomplis');
   txt('g-obj-aide', objectif ? objectif.aide : 'Prenez les capitales restantes.');
+
+  const geste = EMPIRE.prochaineAction(e, JEU.tuiles);
+  JEU.geste = geste;
+  txt('g-geste', geste.texte);
+  const montrer = document.getElementById('g-montrer');
+  if (montrer) {
+    montrer.classList.toggle('hidden', !geste.cible);
+    montrer.textContent = geste.geste === 'tour' ? 'Finir le tour' : 'Montrer';
+  }
+
+  // La légende : sans elle on devine « des zones jaunes, moi j'imagine ».
+  const legende = document.getElementById('g-legende');
+  if (legende && !legende.dataset.faite) {
+    legende.innerHTML = EMPIRE.PEUPLES.map((p) => `
+      <span class="flex items-center gap-1 text-[9px] ${p.id === EMPIRE.JOUEUR ? 'text-white font-bold' : 'text-zinc-400'}">
+        <span class="w-2.5 h-2.5 rounded-sm flex-none" style="background:${p.couleur}"></span>
+        ${echapper(p.id === EMPIRE.JOUEUR ? 'Vous' : p.nom.replace(/^(Clan de l.|Marche de |Seigneurs de )/, ''))}
+      </span>`).join('');
+    legende.dataset.faite = '1';
+  }
 
   const journal = document.getElementById('g-journal-corps');
   if (journal) {
@@ -1128,14 +1150,10 @@ function rendrePanneau() {
   if (!panneau || !JEU.tuiles) return;
   const sel = JEU.selection;
   const t = sel ? JEU.tuiles[EMPIRE.tileKey(sel.q, sel.r)] : null;
-  const objectif = document.getElementById('g-objectif');
-  if (!t) {
-    panneau.classList.add('hidden');
-    objectif?.classList.remove('max-sm:hidden');
-    return;
-  }
+  // La consigne reste affichée même quand un panneau s'ouvre : la masquer,
+  // c'est la retirer exactement au moment où le joueur en a besoin.
+  if (!t) { panneau.classList.add('hidden'); return; }
   panneau.classList.remove('hidden');
-  objectif?.classList.add('max-sm:hidden');
 
   const u = EMPIRE.uniteEn(JEU.etat, t.q, t.r);
   const ville = t.ville ? (JEU.etat.villes || []).find((v) => v.id === t.ville) : null;
@@ -1331,8 +1349,19 @@ function ouvrirRecherche() {
 }
 
 // ---------- Finir le tour -----------------------------------------------------
+let toursGaches = 0;
 function finirLeTour() {
   if (!JEU.etat) return;
+  // Trente-trois tours passés à ne rien faire, c'est trente-trois tours perdus
+  // sans que rien ne le signale. Le premier avertissement suffit : on ne bloque
+  // pas, on prévient, et on laisse passer si le joueur insiste.
+  const suspens = EMPIRE.enSuspens(JEU.etat, JEU.tuiles);
+  if (!suspens.rien && toursGaches < 1) {
+    toursGaches++;
+    toastJeu(`${suspens.texte} — appuyez encore pour finir quand même`, false);
+    return;
+  }
+  toursGaches = 0;
   const res = EMPIRE.finirTour(JEU.etat, JEU.tuiles);
   if (!res.ok) { toastJeu(res.error, false); return; }
   const r = res.resume;
@@ -1389,6 +1418,18 @@ function sauverMaintenant() {
 // ---------- Câblage -----------------------------------------------------------
 function brancherJeu() {
   document.getElementById('g-fin-tour')?.addEventListener('click', finirLeTour);
+  document.getElementById('g-montrer')?.addEventListener('click', () => {
+    const g = JEU.geste;
+    if (!g) return;
+    if (g.geste === 'tour') { finirLeTour(); return; }
+    if (!g.cible) return;
+    // On cadre, on sélectionne, et on ouvre le bon panneau : trois gestes que
+    // le joueur devrait sinon deviner, sur une carte où son pion fait trois
+    // millimètres.
+    if (carteMod && carteEtat === 'prete') carteMod.viser(g.cible.q, g.cible.r);
+    surCaseTouchee({ q: g.cible.q, r: g.cible.r });
+    if (g.ville) ouvrirVille(g.ville);
+  });
   document.getElementById('g-aide')?.addEventListener('click', ouvrirRegles);
   document.getElementById('g-regles-fermer')?.addEventListener('click', fermerRegles);
   document.getElementById('g-regles-ok')?.addEventListener('click', fermerRegles);

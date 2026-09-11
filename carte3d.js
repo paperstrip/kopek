@@ -10,11 +10,11 @@
 // l'effort : la lumière, la caméra, l'animation, et le fait que chaque chose
 // affichée réponde à une question du joueur.
 // =============================================================================
-import * as THREE from './vendor/three/three.module.js?v=2026-09-11-01';
-import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-11-01';
-import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-11-01';
-import { GLTFLoader } from './vendor/three/GLTFLoader.js?v=2026-09-11-01';
-import { axialToWorld, tileKey, TERRAINS, RESSOURCES, peupleById, JOUEUR } from './empire.js?v=2026-09-11-01';
+import * as THREE from './vendor/three/three.module.js?v=2026-09-11-02';
+import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-11-02';
+import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-11-02';
+import { GLTFLoader } from './vendor/three/GLTFLoader.js?v=2026-09-11-02';
+import { axialToWorld, tileKey, TERRAINS, RESSOURCES, peupleById, JOUEUR } from './empire.js?v=2026-09-11-02';
 
 const HEX = 1.0;
 const PALETTE = {
