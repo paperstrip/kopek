@@ -14,8 +14,8 @@ import {
   serverTimestamp,
   setDoc,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-11-02';
-import * as EMPIRE from './empire.js?v=2026-09-11-02';
+} from './firebase-config.js?v=2026-09-11-03';
+import * as EMPIRE from './empire.js?v=2026-09-11-03';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -965,7 +965,7 @@ async function assurerCarte() {
   if (carteEtat !== 'repos') return;
   carteEtat = 'chargement';
   try {
-    carteMod = await import('./carte3d.js?v=2026-09-11-02');
+    carteMod = await import('./carte3d.js?v=2026-09-11-03');
     const canvas = document.getElementById('game-canvas');
     if (!canvas) throw new Error('canvas #game-canvas introuvable');
     carteMod.initCarte(canvas, { onSelect: surCaseTouchee });
@@ -1196,11 +1196,7 @@ function rendrePanneau() {
       : a.genre === 'attaquer' ? `contre ${echapper(a.cible || '')}`
       : (a.actif ? '' : (a.pourquoi || ''));
     return `<button type="button" data-act="${i}" ${a.actif ? '' : 'disabled'}
-      class="rounded-xl px-2.5 py-2 text-left border transition text-[11px] font-semibold
-             ${a.actif ? (a.genre === 'attaquer'
-                 ? 'bg-red-500/15 border-red-400/40 text-red-100 hover:bg-red-500/25 active:scale-[0.98]'
-                 : 'bg-white/5 border-white/15 text-zinc-100 hover:bg-white/10 active:scale-[0.98]')
-               : 'bg-white/[0.02] border-white/10 text-zinc-500 cursor-not-allowed'}">
+      class="jeu-bouton ${a.genre === 'attaquer' ? 'jeu-bouton-guerre' : ''} rounded-xl px-2.5 py-2 text-left text-[11px] font-semibold">
       <span class="block">${echapper(a.label)}</span>
       ${detail ? `<span class="block text-[9px] mt-0.5 leading-tight ${a.actif ? 'opacity-70 font-mono' : 'text-amber-400/70'}">${echapper(detail)}</span>` : ''}
     </button>`;
@@ -1294,10 +1290,9 @@ function rendreVille() {
 
   const possibles = EMPIRE.chantiersPossibles(JEU.etat, v, JEU.tuiles);
   document.getElementById('g-ville-choix').innerHTML = possibles.map((c, i) => `
-    <button type="button" data-ch="${i}"
-      class="rounded-lg px-2 py-1.5 text-left border border-white/10 bg-white/5 hover:bg-white/10 transition">
-      <span class="block text-[11px] font-semibold text-zinc-100">${echapper(c.label)}</span>
-      <span class="block text-[9px] font-mono text-zinc-500">${c.cout} prod${c.effet ? ' · ' + echapper(c.effet) : ''}</span>
+    <button type="button" data-ch="${i}" class="jeu-bouton rounded-lg px-2 py-1.5 text-left">
+      <span class="block text-[11px] font-semibold">${echapper(c.label)}</span>
+      <span class="block text-[9px] font-mono opacity-70">${c.cout} prod${c.effet ? ' · ' + echapper(c.effet) : ''}</span>
     </button>`).join('');
   document.querySelectorAll('#g-ville-choix button[data-ch]').forEach((b) => {
     b.addEventListener('click', () => {
@@ -1394,6 +1389,58 @@ function fermerRegles() {
   try { localStorage.setItem(REGLES_VUES, '1'); } catch { /* navigation privée */ }
 }
 
+// ---------- Plein écran -------------------------------------------------------
+function basculerPleinEcran() {
+  const section = document.getElementById('game-section');
+  if (!section) return;
+  const enCours = document.fullscreenElement || document.webkitFullscreenElement;
+  if (enCours) {
+    (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+    return;
+  }
+  const demander = section.requestFullscreen || section.webkitRequestFullscreen;
+  if (demander) {
+    Promise.resolve(demander.call(section)).catch(() => replierPleinEcranSimule(true));
+  } else {
+    // iOS refuse le plein écran sur un élément quelconque : on se rabat sur un
+    // plein écran simulé, qui règle le vrai problème — le doigt qui fait
+    // défiler la page au lieu de faire tourner la carte.
+    replierPleinEcranSimule(!section.classList.contains('jeu-plein'));
+  }
+}
+
+function replierPleinEcranSimule(actif) {
+  const section = document.getElementById('game-section');
+  if (!section) return;
+  section.classList.toggle('jeu-plein', actif);
+  document.body.classList.toggle('overflow-hidden', actif);
+  majPleinEcran();
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+}
+
+function majPleinEcran() {
+  const section = document.getElementById('game-section');
+  const plein = !!(document.fullscreenElement || document.webkitFullscreenElement)
+             || (section && section.classList.contains('jeu-plein'));
+  const b = document.getElementById('g-plein');
+  if (b) b.innerHTML = `<i data-lucide="${plein ? 'minimize' : 'maximize'}" class="w-3.5 h-3.5"></i>`;
+  if (window.lucide) lucide.createIcons();
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+}
+
+/** Sélectionne l'unité suivante qui a encore du mouvement, et cadre dessus. */
+function uniteSuivante() {
+  if (!JEU.etat) return;
+  const dispo = EMPIRE.unitesDe(JEU.etat).filter((u) => u.mp > 0 && !u.fortifie);
+  if (!dispo.length) { toastJeu('Toutes vos unités ont joué ce tour.', true); return; }
+  const i = dispo.findIndex((u) => u.id === JEU.unite);
+  const suiv = dispo[(i + 1) % dispo.length];
+  if (carteMod && carteEtat === 'prete') carteMod.viser(suiv.q, suiv.r);
+  JEU.unite = null;                       // sinon le toucher serait lu comme un ordre
+  surCaseTouchee({ q: suiv.q, r: suiv.r });
+  toastJeu(`${EMPIRE.UNITES[suiv.type].label} · ${dispo.length} unité${dispo.length > 1 ? 's' : ''} à jouer`, true);
+}
+
 // ---------- Sauvegarde --------------------------------------------------------
 function planifierSauvegarde() {
   clearTimeout(jeuSaveTimer);
@@ -1430,6 +1477,17 @@ function brancherJeu() {
     surCaseTouchee({ q: g.cible.q, r: g.cible.r });
     if (g.ville) ouvrirVille(g.ville);
   });
+  // Plein écran : sur téléphone, la page qui défile et le glissement de la
+  // carte se disputent le même doigt. En plein écran, le doigt n'appartient
+  // plus qu'au jeu.
+  document.getElementById('g-plein')?.addEventListener('click', basculerPleinEcran);
+  document.addEventListener('fullscreenchange', majPleinEcran);
+  document.addEventListener('webkitfullscreenchange', majPleinEcran);
+
+  // Passer d'une unité à l'autre : c'est ainsi qu'on commande une armée sans
+  // avoir à retrouver chaque pion à l'œil sur la carte.
+  document.getElementById('g-unite-suiv')?.addEventListener('click', uniteSuivante);
+
   document.getElementById('g-aide')?.addEventListener('click', ouvrirRegles);
   document.getElementById('g-regles-fermer')?.addEventListener('click', fermerRegles);
   document.getElementById('g-regles-ok')?.addEventListener('click', fermerRegles);

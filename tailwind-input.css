@@ -70,3 +70,70 @@
     font-size: 16px !important;
   }
 }
+
+
+/* Plein écran simulé : iOS refuse requestFullscreen sur autre chose qu'une
+   vidéo. Sans cela, sur téléphone, le même glissement fait défiler la page ET
+   tourner la carte — et c'est la page qui gagne. */
+.jeu-plein {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 60 !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+}
+
+
+/* ===========================================================================
+   Habillage des panneaux du jeu.
+   Le verre dépoli gris de l'application ne collait pas avec un décor de pierre
+   et de bois : deux univers posés l'un sur l'autre. Ces panneaux reprennent la
+   matière du jeu — pierre chaude, liseré doré, ombre portée franche — pour
+   qu'ils se lisent comme faisant partie de la carte, pas collés dessus.
+   =========================================================================== */
+.jeu-panneau {
+  background:
+    linear-gradient(180deg, rgba(63,50,38,0.94) 0%, rgba(41,32,25,0.96) 100%);
+  border: 1px solid rgba(214,178,116,0.38);
+  box-shadow:
+    0 18px 40px -18px rgba(0,0,0,0.85),
+    inset 0 1px 0 rgba(255,236,199,0.14),
+    inset 0 -1px 0 rgba(0,0,0,0.35);
+  backdrop-filter: blur(10px);
+}
+.jeu-panneau-clair {
+  background:
+    linear-gradient(180deg, rgba(78,63,47,0.92) 0%, rgba(54,43,33,0.94) 100%);
+  border: 1px solid rgba(214,178,116,0.30);
+  box-shadow: 0 10px 24px -12px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,236,199,0.10);
+  backdrop-filter: blur(8px);
+}
+/* Le bandeau de consigne garde sa couleur propre : c'est la voix du jeu, elle
+   doit se distinguer de la pierre sans jurer avec. */
+.jeu-consigne {
+  background: linear-gradient(180deg, rgba(72,60,104,0.92) 0%, rgba(48,40,74,0.94) 100%);
+  border: 1px solid rgba(178,166,255,0.42);
+  box-shadow: 0 14px 32px -16px rgba(0,0,0,0.8), inset 0 1px 0 rgba(226,220,255,0.16);
+  backdrop-filter: blur(10px);
+}
+.jeu-titre {
+  font-variant: small-caps;
+  letter-spacing: 0.03em;
+  color: #f0dcb4;
+}
+.jeu-bouton {
+  background: linear-gradient(180deg, rgba(120,96,64,0.85), rgba(84,66,44,0.9));
+  border: 1px solid rgba(214,178,116,0.40);
+  color: #f5e9d2;
+  transition: background .15s ease, transform .08s ease;
+}
+.jeu-bouton:hover:not(:disabled) { background: linear-gradient(180deg, rgba(146,118,78,0.95), rgba(104,82,54,0.95)); }
+.jeu-bouton:active:not(:disabled) { transform: scale(.975); }
+.jeu-bouton:disabled { opacity: .45; cursor: not-allowed; }
+.jeu-bouton-guerre {
+  background: linear-gradient(180deg, rgba(150,58,58,0.9), rgba(104,36,36,0.92));
+  border-color: rgba(240,140,140,0.45);
+  color: #ffe4e4;
+}

@@ -214,6 +214,33 @@ vont du simple au double selon l'angle.
 
 ### Le rendu · `carte3d.js`
 
+⚠️ **Le socle du pack mesure 2,0 de plat à plat**, soit un hexagone de rayon
+2/√3 ≈ 1,1547. En espaçant les tuiles de 1,0, elles se chevauchaient de 13 % :
+les falaises d'une tuile ressortaient à travers sa voisine et le relief semblait
+empilé plutôt que continu. `HEX` vaut donc `2 / Math.sqrt(3)`, et les socles se
+touchent — il ne reste que la falaise du littoral.
+
+Sur du plat, des socles parfaitement uniformes font ressortir chaque couture
+d'hexagone : la carte ressemble alors à un carrelage. Chaque case reçoit une
+des six nuances de sa teinte de terrain (±9 %), et le décor est trois fois plus
+dense sur prairie et plaine. C'est ce qui brouille la grille.
+
+### Plein écran
+
+Sur téléphone, le même glissement fait défiler la page **et** tourner la carte,
+et c'est la page qui gagne. Le bouton plein écran règle cela. iOS refuse
+`requestFullscreen` sur autre chose qu'une vidéo : on se rabat alors sur la
+classe `.jeu-plein` (`position: fixed`, `100dvh`), qui résout le vrai problème
+même sans API native.
+
+### Commander ses unités
+
+Un bouton « unité suivante » fait le tour des unités qui ont encore du
+mouvement, cadre dessus et les sélectionne. Sans lui, commander une armée
+revient à retrouver chaque pion à l'œil sur 271 hexagones.
+
+
+
 Modèles KayKit (CC0, voir `assets/LICENCES.md`), éclairage d'ambiance HDR,
 ombres douces, socles en `InstancedMesh`. Ce qui sépare un prototype d'un jeu
 tient surtout à quatre choses, et c'est là qu'est l'effort : la lumière, la

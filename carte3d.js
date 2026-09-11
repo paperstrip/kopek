@@ -10,15 +10,20 @@
 // l'effort : la lumière, la caméra, l'animation, et le fait que chaque chose
 // affichée réponde à une question du joueur.
 // =============================================================================
-import * as THREE from './vendor/three/three.module.js?v=2026-09-11-02';
-import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-11-02';
-import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-11-02';
-import { GLTFLoader } from './vendor/three/GLTFLoader.js?v=2026-09-11-02';
-import { axialToWorld, tileKey, TERRAINS, RESSOURCES, peupleById, JOUEUR } from './empire.js?v=2026-09-11-02';
+import * as THREE from './vendor/three/three.module.js?v=2026-09-11-03';
+import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-11-03';
+import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-11-03';
+import { GLTFLoader } from './vendor/three/GLTFLoader.js?v=2026-09-11-03';
+import { axialToWorld, tileKey, TERRAINS, RESSOURCES, peupleById, JOUEUR } from './empire.js?v=2026-09-11-03';
 
-const HEX = 1.0;
+// Le socle du pack mesure exactement 2,0 de plat à plat, soit un hexagone de
+// rayon 2/√3. En les espaçant à 1,0 on les faisait se chevaucher de 13 % : les
+// falaises d'une tuile ressortaient à travers sa voisine, et le relief semblait
+// empilé au lieu d'être continu. À la bonne mesure, les socles se touchent et
+// il ne reste que la falaise du littoral.
+const HEX = 2 / Math.sqrt(3);      // 1,1547
 const PALETTE = {
-  mer: '#2f7fa8', brume: '#93aec2',
+  mer: '#2a7ba6', brume: '#a9c2d4',
   selection: '#ffffff', marche: '#5eb0ff', assaut: '#ff5f5f',
 };
 
@@ -104,7 +109,7 @@ export function initCarte(canvas, opts = {}) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.92;
+  renderer.toneMappingExposure = 1.02;
 
   scene = new THREE.Scene();
   scene.background = cielDegrade();
@@ -125,9 +130,9 @@ export function initCarte(canvas, opts = {}) {
 
   // Soleil rasant et ciel froid : c'est ce contraste qui donne du relief à des
   // volumes simples. Une lumière frontale les aplatit complètement.
-  const ciel = new THREE.HemisphereLight('#cfe3f5', '#55493a', 0.55);
+  const ciel = new THREE.HemisphereLight('#bcd8f2', '#6a5637', 0.48);
   scene.add(ciel);
-  soleil = new THREE.DirectionalLight('#fff0d6', 1.6);
+  soleil = new THREE.DirectionalLight('#ffe7b8', 1.85);
   soleil.position.set(-11, 15, 8);
   soleil.castShadow = true;
   soleil.shadow.mapSize.set(2048, 2048);
@@ -162,10 +167,11 @@ function cielDegrade() {
   const c = document.createElement('canvas');
   c.width = 8; c.height = 256;
   const g = c.getContext('2d').createLinearGradient(0, 0, 0, 256);
-  g.addColorStop(0.0, '#2c5f86');
-  g.addColorStop(0.45, '#7fb2d4');
-  g.addColorStop(0.75, '#cfe0e8');
-  g.addColorStop(1.0, '#e8d9c0');
+  g.addColorStop(0.0, '#1d4a70');
+  g.addColorStop(0.40, '#6ea8d2');
+  g.addColorStop(0.70, '#c8dde9');
+  g.addColorStop(0.88, '#f0dcbd');
+  g.addColorStop(1.0, '#d9b489');
   const ctx = c.getContext('2d');
   ctx.fillStyle = g; ctx.fillRect(0, 0, 8, 256);
   const tex = new THREE.CanvasTexture(c);
@@ -192,8 +198,8 @@ function construireMer() {
   const geo = new THREE.PlaneGeometry(120, 120, 28, 28);
   geo.rotateX(-Math.PI / 2);
   const mat = new THREE.MeshStandardMaterial({
-    color: PALETTE.mer, roughness: 0.18, metalness: 0.1,
-    transparent: true, opacity: 0.93,
+    color: PALETTE.mer, roughness: 0.12, metalness: 0.25,
+    transparent: true, opacity: 0.9,
   });
   mer = new THREE.Mesh(geo, mat);
   mer.position.y = -0.22;
@@ -282,7 +288,7 @@ function redimensionner() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   const etroit = w / h < 1.15;
-  const dist = etroit ? 24 : 19;
+  const dist = etroit ? 27 : 22;
   controls.minDistance = dist * 0.35;
   controls.maxDistance = dist * 3.4;
   if (!controls._bouge) {
@@ -333,6 +339,20 @@ const TEINTE_SOL = {
   foret:   0x76b866,
   desert:  0xf2dda6,
 };
+
+/** Six variations discrètes autour d'une teinte, indexées pour rester en cache. */
+const cacheNuance = new Map();
+function nuance(base, n) {
+  const cle = base * 10 + n;
+  if (cacheNuance.has(cle)) return cacheNuance.get(cle);
+  const c = new THREE.Color(base);
+  const k = 1 + (n - 2.5) * 0.035;                 // ±9 %
+  c.multiplyScalar(k);
+  c.offsetHSL((n - 2.5) * 0.006, 0, 0);
+  const v = c.getHex();
+  cacheNuance.set(cle, v);
+  return v;
+}
 
 const cacheTeinte = new Map();
 function matTeinte(src, teinte) {
@@ -449,8 +469,13 @@ export function rendre(p, { force = false } = {}) {
     const { x, z } = axialToWorld(t.q, t.r, HEX);
     const alea = alea3(t.q, t.r);
     const brume = !t.explore;
+    // Une variation de teinte case par case : sur du plat, un aplat parfaitement
+    // uniforme fait ressortir chaque couture d'hexagone et la carte ressemble à
+    // un carrelage. Six nuances suffisent à casser la grille.
+    const base = TEINTE_SOL[t.terrain] || 0;
     sols.push({ nom: modeleSol(t, alea), x, z, y: brume ? -0.04 : 0,
-                ry: Math.floor(alea() * 6) * Math.PI / 3, brume, teinte: TEINTE_SOL[t.terrain] || 0 });
+                ry: Math.floor(alea() * 6) * Math.PI / 3, brume,
+                teinte: base ? nuance(base, Math.floor(alea() * 6)) : 0 });
 
     // Cible de clic : un hexagone plat invisible. Viser les maillages du décor
     // rendrait le toucher imprécis selon ce qui pousse dessus.
@@ -494,8 +519,8 @@ function decorerCase(t, x, z, alea) {
       if (arbre) { arbre.position.set(x + Math.cos(a) * d, 0.16, z + Math.sin(a) * d); groupeDecor.add(arbre); }
     }
   }
-  if ((t.terrain === 'prairie' || t.terrain === 'plaine') && alea() < 0.35) {
-    const n = 1 + (alea() < 0.4 ? 1 : 0);
+  if ((t.terrain === 'prairie' || t.terrain === 'plaine') && alea() < 0.7) {
+    const n = 1 + (alea() < 0.55 ? 1 : 0) + (alea() < 0.25 ? 1 : 0);
     for (let i = 0; i < n; i++) {
       const a = alea() * 6.28, d = 0.2 + alea() * 0.3;
       const objet = instance(alea() < 0.55 ? 'tree_single_A' : 'rock_single_B', 0.3 + alea() * 0.12, alea() * 6.28);
