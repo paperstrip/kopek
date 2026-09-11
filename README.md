@@ -10,8 +10,8 @@ Aucune étape de build n'est nécessaire pour la faire tourner : `index.html` pe
 |---|---|
 | `index.html` | Structure de la page (login + tableau de bord bento) |
 | `app.js` | Logique métier : paliers Nessy, CRUD Firestore, assistant d'encodage |
-| `game.js` | Règles du jeu — carte, armées, ressources, combat, objectifs, tours hors ligne. Aucun DOM, aucun Firestore : testable dans node |
-| `world3d.js` | Rendu 3D de l'archipel (Three.js) — matières réelles et éclairage par image |
+| `empire.js` | Règles du jeu — carte, villes, unités, technologies, combat, IA, tours. N'importe rien : testable dans node |
+| `carte3d.js` | Rendu 3D de la carte (Three.js) — modèles KayKit, éclairage HDR, animation |
 | `assets/` | Textures et carte HDR embarquées — provenance et licences dans `assets/LICENCES.md` |
 | `firebase-config.js` | Initialisation Firebase Auth + Firestore |
 | `styles.css` | **Généré** — feuille Tailwind compilée (voir ci-dessous) |
@@ -111,187 +111,101 @@ match /{col}/{doc} {
 }
 ```
 
-## Le jeu · « Les Marches de Nessy »
+## Le jeu · « L'Empire de Nessy »
 
-Un 4X asynchrone greffé sur le time-tracking, dans son propre document Firestore
-(`game_state/{uid}`). Trois principes tiennent l'ensemble :
+Un jeu de conquête au tour par tour dans la lignée de Civilization, greffé sur
+le suivi du temps, dans son propre document Firestore (`game_state/{uid}`).
 
-**1. Le lien avec les heures est à sens unique.** Le jeu lit les prestations,
-il n'en écrit jamais. Aucune action de jeu ne peut modifier une prestation, un
-projet ou la facturation — un test le vérifie explicitement. Ce que les heures
-apportent :
+**Le lien avec les heures est à sens unique et il est étroit.** Le jeu lit les
+prestations, il n'en écrit jamais :
 
 | Heures | Effet en jeu |
 |---|---|
-| 1 h facturée | 1 Sceau (monnaie de guerre, sert à lever une garde d'élite) |
-| 25 h · socle | +12 % d'assaut |
-| 43,75 h · garantie | +25 % d'assaut, et le donjon doré apparaît sur la capitale |
-| toutes périodes | comptent pour le rang du domaine, avec le nombre de territoires |
+| 1 h facturée | 2 tours de jeu |
+| 25 h · socle | +10 % à l'assaut |
+| 43,75 h · garantie | +20 % à l'assaut |
 
-**2. Le temps passe même application fermée.** On ne stocke aucun compteur qui
-« tourne » : seule la date du dernier tour résolu (`lastTick`) est persistée, et
-`catchUp()` rattrape les tours écoulés au chargement. Un tour dure trois
-minutes. Le rattrapage est plafonné
-à 24 h — au-delà, le nombre de tours ignorés est renvoyé plutôt que passé sous
-silence. Les clans adverses renforcent leurs garnisons et lancent des incursions
-pendant ces tours : revenir a un enjeu.
+`empire.js` **n'importe rien** : ni Firestore, ni le DOM, ni three.js. Un test
+lit le fichier source pour le vérifier, parce qu'une règle qu'on ne peut pas
+enfreindre vaut mieux qu'une règle qu'on promet de respecter.
 
-⚠️ `lastTick` peut valoir 0. Le test `D` existe parce qu'un `||` au lieu d'un `??`
-traitait cette valeur comme absente et gelait toute production.
+### Des tours, pas une horloge
 
-**3. La carte n'est pas stockée.** Les 217 tuiles de terrain sont régénérées à
-l'identique depuis une graine (`generateWorld`), et seules les tuiles modifiées
-partent en base (`state.changes`). Un document de partie pèse quelques
-centaines d'octets, pas des dizaines de kilo-octets. C'est ce qui permet une
-carte vaste sans faire grossir la sauvegarde.
+Rien ne bouge sans le joueur : le monde n'avance que lorsqu'il termine un tour.
+La réserve se recharge d'un tour toutes les douze minutes, plafonnée à 24, et
+les heures facturées en ajoutent. C'est ce qui règle d'un coup le reproche « il
+ne se passe rien » : il y a toujours un coup à jouer, et c'est le joueur qui
+fait avancer le monde.
 
-Le rendu dessine **les 217 tuiles**. Ce qui n'est pas exploré garde son relief
-mais passe en sourdine (`fogMaterial()`), un cran plus bas, avec la bannière des
-sièges de clan repérés. N'afficher que les tuiles révélées et leur lisière —
-une quarantaine — donnait un monde minuscule dont on ne comprenait ni l'échelle
-ni où se trouvaient les adversaires. Les socles partent en `InstancedMesh` par
-couple (modèle, brume) : tout dessiner coûte moins que ne dessiner qu'un tiers
-sans regroupement.
+⚠️ Les heures déjà converties en tours sont mémorisées dans `toursAccordes` :
+sans ça, le même total en redonnerait à chaque ouverture de la page.
 
-### Armées · le cœur du jeu
+### Les villes font tout
 
-Sans unité qu'on déplace soi-même, il n'y a pas de jeu : on touche un hexagone,
-on appuie sur un bouton, rien ne bouge. Une armée est une entité posée sur la
-carte (`state.armies`), avec des points de mouvement, qu'on sélectionne, dont on
-voit la portée en surbrillance, et qu'on déplace tuile par tuile.
+Une ville exploite sa case centrale plus une case par habitant, choisies parmi
+les meilleures de son territoire. Nourriture pour grandir, production pour la
+file de chantier, or pour l'entretien. Les frontières s'étendent avec la
+culture, et sept bâtiments changent ces équilibres.
 
-La boucle tient en une phrase : **recruter → lever une armée → la déplacer →
-entrer chez l'adversaire, c'est l'attaquer.**
+⚠️ La case centrale a un **plancher** de rendement. Sans lui, une capitale
+tombée sur des collines aurifères affichait un surplus nul : le joueur voyait
+de l'or s'entasser sans que rien ne grandisse jamais.
 
-- `reachable()` fait un parcours en largeur borné par les points de mouvement.
-  Les cases hostiles sont marquées `attack` : on peut toujours frapper un
-  voisin, mais l'assaut consomme tout le mouvement restant — pas de raid en
-  chaîne dans le même tour.
-- Le rendu colore la portée : **bleu** pour un déplacement, **rouge** pour un
-  assaut. La couleur dit ce qui va se passer avant qu'on touche.
-- Lever une armée laisse toujours une troupe en garnison. Un territoire vidé
-  tomberait à la première incursion sans que le joueur comprenne pourquoi.
-- `clanTurn()` fait marcher les clans : ils lèvent des colonnes depuis leurs
-  places fortes et avancent d'un pas par tour vers le territoire joueur le plus
-  proche. Sans adversaire qui bouge, la carte est un décor.
+### Le combat
 
-⚠️ Il n'y a **qu'un seul** système d'attaque. L'ancienne attaque de tuile à tuile
-depuis le panneau a été retirée : deux mécaniques concurrentes rendaient le jeu
-illisible.
+Des points de vie des deux côtés, pas un tirage en tout ou rien : `degats()`
+donne 30 à forces égales, 79 au double, 11 à la moitié. Le terrain, la
+fortification et les murailles entrent dans la défense. Une ville se défend même
+sans garnison et répare ses murs chaque tour — il faut un siège pour la prendre,
+et c'est vrai pour le joueur comme pour les rivaux.
 
-### Objectifs · ce qui rend le jeu compréhensible
+**La victoire est aux capitales**, pas à chaque hameau : prendre la capitale
+d'un peuple le fait capituler, et ses villes rejoignent votre bannière. Avec
+trois rivaux à trois villes, la conquête exhaustive demandait une dizaine de
+sièges et la partie n'avait plus de fin lisible.
 
-Un jeu sans but affiché n'est qu'une carte d'hexagones. `OBJECTIVES` enchaîne
-six étapes — coloniser, produire, lever une armée, prendre un repaire, toucher
-un clan, prendre son siège — chacune avec une **consigne concrète** et une
-récompense. `nextStepHint()` calcule à tout moment la phrase « que faire
-maintenant » à partir de l'état réel : elle change quand l'or manque.
+### L'équilibre vient de la simulation, pas du goût
 
-⚠️ Un objectif doit être hors de portée au premier chargement. Le seuil de
-garnison est à 9 parce que la capitale en démarre avec 6 : à 5, l'objectif se
-validait tout seul avant le premier clic, ce qui apprend au joueur que les
-objectifs ne veulent rien dire.
+`equilibre.mjs` fait jouer un joueur volontairement médiocre et compte les
+survivants. Trois verdicts successifs :
 
-Les combats renvoient leur rapport de force chiffré (`attack()` expose
-`result` et `bonus`). « Assaut repoussé » sans chiffres ne dit pas au joueur ce
-qu'il a raté.
+- **balayé au tour 10** : les villes tombaient en trois coups d'épée ;
+- **balayé au tour 51** : les trois rivaux montaient à treize villes contre une ;
+- **survit** : villes qui valent un siège, rivaux plafonnés à trois villes,
+  joueur qui démarre avec deux colons, paix garantie jusqu'au tour 14.
 
-### Direction artistique · modèles réels
+### La carte
 
-**Le décor n'est plus généré par du code.** Trois tentatives successives —
-géométrie procédurale, textures PBR réelles, matcaps — ont buté sur la même
-limite : on peut habiller une forme, on ne peut pas lui inventer une silhouette.
-Or c'est la silhouette qui se lit de loin.
+271 tuiles régénérées depuis une graine ; seules les cases modifiées partent en
+base, donc une partie pèse 7 Ko. Les terrains sont attribués **par quantiles**
+sur deux champs continus (altitude, humidité) : comparer à des seuils absolus
+dépendait de l'échelle du bruit et donnait cent quarante-cinq montagnes sur deux
+cent soixante-et-onze.
 
-Les modèles viennent du **KayKit Medieval Hexagon Pack** (CC0), embarqué dans
-`assets/models/` — voir `assets/LICENCES.md` pour le détail et la façon d'en
-changer.
+⚠️ Les rivaux sont posés sur un **anneau hexagonal**, pas sur un cercle
+trigonométrique : `cos/sin` sur des coordonnées axiales donne des distances qui
+vont du simple au double selon l'angle.
 
-- `loadModels()` charge les 31 `.gltf` au démarrage du jeu et force un redessin
-  à leur arrivée : sans ça la carte resterait vide jusqu'au prochain coup joué.
-- ⚠️ Montagnes et collines du pack **embarquent leur propre socle hexagonal**.
-  Les poser sur une tuile d'herbe donnait des dalles grises flottantes : elles
-  remplacent la tuile (`tileModel()`), elles ne s'y ajoutent pas.
-- ⚠️ Le château est modélisé pour occuper plusieurs tuiles. À l'échelle 1 il
-  écrase ses voisines ; `SCALE_CASTLE` le ramène à un hexagone.
-- La sélection tape sur un hexagone plat invisible (`GEO.pick`), pas sur les
-  maillages du décor : viser un arbre ou un toit rendait le toucher imprévisible.
-- L'atlas du pack doit être déclaré en sRGB à l'import, sinon tout ressort
-  délavé.
+### Le rendu · `carte3d.js`
 
-Les tuiles inconnues utilisent le modèle d'eau : le brouillard de guerre devient
-une mer qu'on n'a pas encore franchie, au lieu d'un tapis d'hexagones gris.
+Modèles KayKit (CC0, voir `assets/LICENCES.md`), éclairage d'ambiance HDR,
+ombres douces, socles en `InstancedMesh`. Ce qui sépare un prototype d'un jeu
+tient surtout à quatre choses, et c'est là qu'est l'effort : la lumière, la
+caméra, l'animation, et le fait que chaque chose affichée réponde à une question
+du joueur.
 
-### Voir ce qui se passe · le reproche le plus juste
+Trois pièges payés comptant :
 
-« On ne voit pas d'activité, comment on attaque, comment on se fait attaquer ? »
-Le moteur faisait déjà tout cela ; rien n'en arrivait à l'écran. Quatre causes,
-toutes corrigées :
+- **Prairie, plaine et désert partagent le même modèle d'hexagone.** Sans teinte
+  par terrain, la carte est un aplat où rien ne se distingue.
+- **La teinte du bâti doit suivre la couleur du peuple.** Le joueur avait des
+  bâtiments bleus et une frontière dorée, un rival l'inverse : illisible.
+- **Les unités empilées sur la capitale étaient invisibles** sous le château, et
+  contredisaient la règle « une unité par case » que le déplacement applique
+  déjà. Elles se répartissent au départ.
 
-- **Le tour durait dix minutes.** Une partie ouverte dix minutes ne montrait
-  donc rien. `TICK_MS` est passé à trois minutes.
-- **Les clans ne sortaient presque jamais de chez eux** : levée à 25 % depuis
-  les seules places à cinq troupes. Désormais la première colonne part
-  systématiquement, puis une chance sur deux, dès quatre troupes.
-- **Les colonnes ennemies étaient invisibles dans la brume** (`drawArmies()`
-  écartait les tuiles non révélées). On perdait un territoire sans avoir rien
-  vu venir. Elles sont maintenant dessinées, posées plus bas et sans jetons :
-  on voit qu'une colonne approche, pas encore sa force exacte.
-- **Aucune trace des combats.** `pushMark()` pose une marque datée sur la case ;
-  `recentMarks()` renvoie celles de la dernière demi-heure, que le rendu affiche
-  en deux lames croisées, vertes ou rouges.
-
-S'y ajoutent `menaces(state, tiles)` — les colonnes adverses triées par distance
-à vos terres — affichée dans le bandeau rouge `#g-menace`, qui sélectionne la
-colonne quand on le touche, et le journal des Chroniques désormais ouvert par
-défaut : replié, il ne racontait rien à personne.
-
-### Diagnostics du rendu
-
-`debugMeshesAt(x, z)` renvoie les dimensions monde des volumes posés autour d'un
-point ; `debugArmyMeshesAt(x, z)` compte les maillages d'armée. Écrits après une
-séance à supposer pourquoi le bâti paraissait plat : la géométrie était juste,
-seules les proportions étaient trop basses. Mesurer a tranché en un appel.
-
-⚠️ **Le banc d'essai rend à moins d'une image par seconde** (GL logiciel
-swiftshader). Les aides de Playwright qui attendent deux images stables —
-`scrollIntoViewIfNeeded` en tête — expirent donc sans que l'application n'ait
-rien à se reprocher. Les suites scrollent au niveau du DOM. Ce plancher ne dit
-rien des performances sur un vrai GPU.
-
-### Le banc d'essai se régénère
-
-`_app_test.js`, `_index_test.html` et `_mock-firebase-config.js` sont
-**produits** par `gen.mjs` (dans le dossier de travail, hors dépôt) à partir de
-`app.js`, `index.html` et d'une doublure Firebase qui vit elle aussi hors dépôt.
-Les recopier à la main revient tôt ou tard à tester une version périmée de
-l'application — et supprimer la doublure avant un commit, sans copie ailleurs,
-revient à la perdre. C'est arrivé une fois ; le générateur est la réponse.
-
-⚠️ Un test qui fait `import('./world3d.js?v=autre-chose')` obtient une **seconde
-instance** du module, avec ses groupes vides : il mesurerait une scène qui
-n'existe pas. Les suites passent par `window.__world`, l'instance réellement
-utilisée par l'application.
-
-### Lire la carte · à qui est ce territoire
-
-Une case sans bâtiment n'avait aucune couleur de camp : rien, en regardant la
-carte, ne disait ce qui était à soi et ce qui était à l'adversaire.
-`drawFrontieres()` pose sur chaque case possédée un anneau hexagonal à la
-couleur du camp — doré pour le joueur, la couleur du clan sinon, en sourdine
-dans la brume. Les anneaux partent en `InstancedMesh` par couleur, et
-`debugFrontieres()` permet de les vérifier depuis un test.
-
-Le bouton « Attaquer » n'apparaît plus que là où l'assaut est réellement sur la
-table : une armée à portée, ou une case qui touche vos terres. Le proposer,
-grisé, sur les deux cents cases de la carte n'offrait pas un choix, seulement du
-bruit. Ailleurs, `situation()` dit en une phrase ce qu'est la case et à quelle
-distance elle se trouve — un panneau qui annonce « aucune action possible ici »
-sans dire pourquoi laisse croire que le jeu est cassé.
-
-⚠️ Conséquence voulue : sur une carte neuve, **aucun** repaire ne touche la
-capitale (ils commencent à deux cases), donc aucun bouton d'attaque tant qu'on
-n'a pas colonisé. C'est l'ordre que les objectifs demandent déjà.
+La caméra vise **votre capitale**, pas le centre géométrique de la carte : elle
+n'y est pas, et le jeu s'ouvrait sur un coin de prairie vide.
 
 ## Écritures optimistes · pourquoi le mock de test est asynchrone
 

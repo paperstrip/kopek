@@ -10,7 +10,7 @@
   // se retrouve avec un vieux HTML qui charge du vieux JS. On compare donc la
   // version embarquée à celle publiée dans version.json (jamais mise en cache),
   // et on recharge une seule fois sur une URL différente si ça diffère.
-  window.KOPEK_VERSION = '2026-09-09-01';
+  window.KOPEK_VERSION = '2026-09-11-01';
   (function () {
     try {
       fetch('./version.json?t=' + Date.now(), { cache: 'no-store' })
@@ -34,7 +34,7 @@
 <!-- Feuille Tailwind compilée et commitée (styles.css) : le CDN cdn.tailwindcss.com
      est un outil de DEV qui recompile le CSS dans le navigateur à chaque chargement.
      Pour régénérer après avoir ajouté des classes : voir README.md -->
-<link rel="stylesheet" href="./styles.css?v=2026-09-09-01">
+<link rel="stylesheet" href="./styles.css?v=2026-09-11-01">
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 </head>
 <body class="min-h-screen text-zinc-100 font-sans relative overflow-x-hidden">
@@ -379,115 +379,150 @@
       <!-- BENTO · LES MARCHES DE NESSY · archipel 3D jouable            -->
       <!-- La capitale grandit avec les heures encodées ; tout le reste  -->
       <!-- est un vrai jeu de conquête, stocké à part dans Firestore.    -->
-      <!-- ============================================================= -->
-      <section id="game-section" class="col-span-12 relative rounded-3xl overflow-hidden select-none h-[540px] sm:h-[600px] lg:h-[700px]"
+      <!-- ===================== L'EMPIRE DE NESSY ===================== -->
+      <section id="game-section" class="col-span-12 relative rounded-3xl overflow-hidden select-none h-[560px] sm:h-[640px] lg:h-[760px]"
         style="background:#0b1120; border:1px solid rgba(129,140,248,0.28);
                box-shadow: 0 40px 120px -40px rgba(99,102,241,0.5), inset 0 1px 0 rgba(255,255,255,0.05);">
 
-        <canvas id="game-canvas" class="absolute inset-0 w-full h-full block touch-none" aria-label="Archipel des Marches de Nessy"></canvas>
+        <canvas id="game-canvas" class="absolute inset-0 w-full h-full block touch-none" aria-label="Carte de l'Empire de Nessy"></canvas>
 
         <div id="game-fallback" class="hidden absolute inset-0 flex flex-col items-center justify-center text-center px-6 gap-2">
           <i data-lucide="box" class="w-8 h-8 text-indigo-400/70"></i>
-          <div class="text-sm font-semibold text-zinc-300">Vue 3D indisponible sur cet appareil</div>
-          <div class="text-[11px] text-zinc-500 max-w-xs">Vos chiffres et votre facturation restent exacts — seul le jeu est désactivé.</div>
-          <code id="game-fallback-detail" class="text-[10px] text-zinc-600 font-mono mt-1"></code>
+          <p class="text-sm font-semibold text-zinc-300">La carte 3D n'a pas pu s'afficher</p>
+          <p id="game-fallback-detail" class="text-[11px] text-zinc-500 max-w-xs"></p>
         </div>
 
-        <!-- ===== Bandeau du haut · rang et ressources ===== -->
-        <div class="absolute left-2 right-2 top-2 sm:left-4 sm:right-4 sm:top-4 flex items-start justify-between gap-2 pointer-events-none">
-          <div class="rounded-2xl px-3 py-2 backdrop-blur-xl bg-zinc-950/70 border border-white/10">
-            <div class="text-[9px] uppercase tracking-wider text-indigo-300/90">Votre domaine</div>
-            <div id="g-rank" class="font-bold text-white text-sm leading-tight">—</div>
-            <div id="g-rank-next" class="text-[10px] text-zinc-400 mt-0.5 truncate max-w-[10rem] sm:max-w-none">—</div>
-          </div>
-          <div class="flex flex-col items-end gap-1.5">
-            <div class="rounded-2xl px-2.5 sm:px-3 py-1.5 sm:py-2 backdrop-blur-xl bg-zinc-950/70 border border-white/10 flex items-center gap-2 sm:gap-3 font-mono text-[11px] sm:text-[12px] whitespace-nowrap">
+        <!-- ===== Bandeau du haut : ressources, tour, boutons ===== -->
+        <div class="absolute inset-x-0 top-0 p-2 sm:p-3 flex items-start justify-between gap-2 pointer-events-none z-20">
+          <div class="rounded-2xl px-2.5 sm:px-3 py-1.5 sm:py-2 backdrop-blur-xl bg-zinc-950/75 border border-white/10 pointer-events-auto">
+            <div class="flex items-center gap-2.5 sm:gap-3.5 font-mono text-[11px] sm:text-[12px] whitespace-nowrap">
               <span class="flex items-center gap-1 text-amber-300" title="Or"><i data-lucide="coins" class="w-3.5 h-3.5"></i><span id="g-or">0</span></span>
-              <span class="flex items-center gap-1 text-emerald-300" title="Vivres"><i data-lucide="wheat" class="w-3.5 h-3.5"></i><span id="g-vivres">0</span></span>
-              <span class="flex items-center gap-1 text-fuchsia-300" title="Sceaux · gagnés en encodant vos heures"><i data-lucide="stamp" class="w-3.5 h-3.5"></i><span id="g-sceaux">0</span></span>
+              <span class="flex items-center gap-1 text-sky-300" title="Science"><i data-lucide="flask-conical" class="w-3.5 h-3.5"></i><span id="g-science">0</span></span>
+              <span class="flex items-center gap-1 text-emerald-300" title="Vos villes"><i data-lucide="landmark" class="w-3.5 h-3.5"></i><span id="g-villes">0</span></span>
             </div>
-            <div id="g-bonus" class="rounded-xl px-2.5 py-1 backdrop-blur-xl bg-zinc-950/70 border border-white/10 text-[10px] font-semibold text-zinc-400 whitespace-nowrap">—</div>
-          </div>
-        </div>
-
-        <!-- ===== Règles du jeu ===== -->
-        <button type="button" id="g-help"
-          class="absolute right-2 sm:right-4 top-[3.4rem] sm:top-[4.6rem] z-20 w-8 h-8 rounded-full backdrop-blur-xl
-                 bg-zinc-950/75 border border-white/15 text-zinc-200 text-sm font-bold hover:bg-zinc-900/90 transition"
-          title="Règles du jeu">?</button>
-
-        <div id="g-rules" class="hidden absolute inset-0 z-30 backdrop-blur-md bg-zinc-950/85 overflow-y-auto scrollbar-thin p-4 sm:p-6">
-          <div class="max-w-lg mx-auto">
-            <div class="flex items-center justify-between mb-3">
-              <h3 class="text-base font-bold text-white">Les Marches de Nessy · règles</h3>
-              <button type="button" id="g-rules-close" class="p-1.5 -m-1 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition">
-                <i data-lucide="x" class="w-5 h-5"></i>
+            <div class="flex items-center gap-2 mt-1">
+              <span id="g-bonus" class="rounded-lg px-2 py-0.5 text-[10px] font-semibold border border-white/10 text-zinc-400 bg-white/5">—</span>
+              <button type="button" id="g-techs-bouton"
+                class="rounded-lg px-2 py-0.5 text-[10px] font-semibold border border-sky-400/30 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 transition">
+                <span id="g-recherche">Recherche</span>
               </button>
             </div>
-            <div id="g-rules-body" class="space-y-3"></div>
-            <button type="button" id="g-rules-ok"
-              class="mt-4 w-full py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold transition">
-              J'ai compris
+          </div>
+
+          <div class="flex flex-col items-end gap-1.5 pointer-events-auto">
+            <button type="button" id="g-fin-tour"
+              class="rounded-xl px-3 py-2 backdrop-blur-xl bg-indigo-500/90 hover:bg-indigo-400 disabled:bg-zinc-800/80 disabled:text-zinc-500
+                     border border-indigo-300/40 text-white text-[12px] font-bold shadow-lg transition flex items-center gap-1.5">
+              <i data-lucide="chevrons-right" class="w-4 h-4"></i>
+              <span class="hidden sm:inline">Tour suivant</span><span class="sm:hidden">Tour</span>
+              <span class="font-mono bg-black/25 rounded px-1.5 py-0.5 text-[11px]"><span id="g-reserve">0</span></span>
             </button>
+            <div class="flex items-center gap-1.5">
+              <span id="g-tour" class="rounded-lg px-2 py-0.5 backdrop-blur-xl bg-zinc-950/75 border border-white/10 text-[10px] font-semibold text-zinc-300">Tour 1</span>
+              <button type="button" id="g-aide" title="Règles du jeu"
+                class="w-7 h-7 rounded-full backdrop-blur-xl bg-zinc-950/75 border border-white/15 text-zinc-200 text-[13px] font-bold hover:bg-zinc-900/90 transition">?</button>
+            </div>
           </div>
         </div>
 
-        <!-- ===== Objectif courant · c'est lui qui répond à « je fais quoi ? » ===== -->
-        <div id="g-goal" class="absolute left-2 right-2 sm:left-4 sm:right-auto sm:w-[24rem] top-[10.5rem] sm:top-[7.5rem] rounded-2xl px-3 py-2.5 backdrop-blur-xl
-                    bg-indigo-500/15 border border-indigo-400/40 shadow-lg z-10">
+        <!-- ===== Objectif : la réponse à « je fais quoi ? » ===== -->
+        <div id="g-objectif" class="absolute left-2 right-2 sm:left-3 sm:right-auto sm:w-[24rem] top-[6.4rem] sm:top-[5.6rem]
+                    rounded-2xl px-3 py-2.5 backdrop-blur-xl bg-indigo-500/15 border border-indigo-400/40 shadow-lg z-10">
           <div class="flex items-start gap-2.5">
             <i data-lucide="flag" class="w-4 h-4 text-indigo-300 flex-none mt-0.5"></i>
             <div class="min-w-0 flex-1">
               <div class="flex items-baseline gap-2">
-                <div id="g-goal-label" class="text-[13px] font-bold text-white truncate">—</div>
-                <div id="g-goal-count" class="text-[10px] font-mono text-indigo-300/80 flex-none">—</div>
+                <span id="g-obj-titre" class="text-[12px] font-bold text-white">—</span>
+                <span id="g-obj-compte" class="text-[10px] font-mono text-indigo-300/70">0/0</span>
               </div>
-              <div id="g-goal-hint" class="text-[11px] text-indigo-100/75 mt-0.5 leading-snug max-h-8 sm:max-h-none overflow-hidden">—</div>
+              <p id="g-obj-aide" class="text-[11px] text-indigo-100/75 leading-snug mt-0.5"></p>
             </div>
           </div>
         </div>
 
-        <!-- ===== Message de jeu ===== -->
-        <div id="g-toast" class="hidden absolute left-1/2 -translate-x-1/2 top-24 sm:top-28 z-20 rounded-xl px-3.5 py-2 text-[12px] font-semibold backdrop-blur-xl border shadow-lg"></div>
-
-        <!-- ===== Panneau du territoire sélectionné ===== -->
-        <div id="g-tile-panel" class="hidden absolute left-2 right-2 bottom-2 sm:left-4 sm:right-auto sm:bottom-4 sm:w-[22rem] rounded-2xl p-2.5 sm:p-3 backdrop-blur-xl
-                    bg-zinc-950/85 border border-white/10 shadow-[0_30px_60px_-10px_rgba(0,0,0,0.7)] z-10">
+        <!-- ===== Panneau de case ===== -->
+        <div id="g-panneau" class="hidden absolute left-2 right-2 sm:left-3 sm:right-auto sm:w-[22rem] bottom-2 sm:bottom-3
+                    rounded-2xl p-3 backdrop-blur-xl bg-zinc-950/85 border border-white/12 shadow-2xl z-20">
           <div class="flex items-start justify-between gap-2">
             <div class="min-w-0">
-              <div id="g-tile-title" class="font-bold text-white text-sm truncate">—</div>
-              <div id="g-tile-sub" class="text-[11px] text-zinc-400 mt-0.5">—</div>
+              <div id="g-panneau-titre" class="text-[13px] font-bold text-white truncate">—</div>
+              <div id="g-panneau-sous" class="text-[10px] text-zinc-400 leading-snug mt-0.5"></div>
             </div>
-            <button type="button" id="g-tile-close" class="p-1.5 -m-1 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-white/10 transition flex-none" title="Fermer">
+            <button type="button" id="g-panneau-fermer" class="p-1 -m-1 rounded-lg text-zinc-500 hover:text-white hover:bg-white/10 transition flex-none">
               <i data-lucide="x" class="w-4 h-4"></i>
             </button>
           </div>
-          <div id="g-tile-actions" class="mt-2 grid grid-cols-2 gap-1.5 max-h-[9.5rem] sm:max-h-none overflow-y-auto scrollbar-thin"></div>
+          <div id="g-panneau-unite" class="hidden mt-2 rounded-xl px-2.5 py-2 bg-white/5 border border-white/10 text-[11px]"></div>
+          <div id="g-panneau-actions" class="grid grid-cols-2 gap-1.5 mt-2"></div>
         </div>
 
-        <!-- ===== Menace · ce qui marche sur vous ===== -->
-        <div id="g-menace" class="hidden absolute left-2 right-2 sm:left-4 sm:right-auto sm:w-[24rem] bottom-3 rounded-2xl px-3 py-2
-                    backdrop-blur-xl bg-red-500/15 border border-red-400/40 shadow-lg z-20 pointer-events-auto">
-          <button type="button" id="g-menace-go" class="w-full flex items-center gap-2.5 text-left">
-            <i data-lucide="swords" class="w-4 h-4 text-red-300 flex-none"></i>
-            <span id="g-menace-text" class="text-[11px] font-semibold text-red-100 leading-snug min-w-0 flex-1"></span>
-            <i data-lucide="crosshair" class="w-3.5 h-3.5 text-red-300/70 flex-none"></i>
-          </button>
+        <!-- ===== Panneau de ville ===== -->
+        <div id="g-ville" class="hidden absolute inset-x-2 sm:inset-x-auto sm:right-3 sm:w-[21rem] top-2 bottom-2 sm:top-3 sm:bottom-3
+                    rounded-2xl p-3 backdrop-blur-xl bg-zinc-950/90 border border-white/12 shadow-2xl z-30 overflow-y-auto scrollbar-thin">
+          <div class="flex items-start justify-between gap-2 mb-2">
+            <div class="min-w-0">
+              <div id="g-ville-nom" class="text-[14px] font-bold text-white truncate">—</div>
+              <div id="g-ville-sous" class="text-[10px] text-zinc-400"></div>
+            </div>
+            <button type="button" id="g-ville-fermer" class="p-1 -m-1 rounded-lg text-zinc-500 hover:text-white hover:bg-white/10 transition flex-none">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+          <div id="g-ville-revenus" class="text-[11px]"></div>
+          <div class="mt-3 text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">Chantier</div>
+          <div id="g-ville-chantier" class="mt-1 rounded-xl px-2.5 py-2 bg-white/5 border border-white/10"></div>
+          <div class="mt-3 text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">Mettre en chantier</div>
+          <div id="g-ville-choix" class="grid grid-cols-2 gap-1.5 mt-1"></div>
+          <div class="mt-3 text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">Bâtiments</div>
+          <div id="g-ville-batiments" class="flex flex-wrap gap-1 mt-1"></div>
         </div>
 
-        <!-- ===== Journal ===== -->
-        <div class="absolute right-2 top-[6.2rem] sm:top-auto sm:right-4 sm:bottom-4 w-[11rem] sm:w-[16rem] pointer-events-auto z-20">
-          <button type="button" id="g-log-toggle"
+        <!-- ===== Recherche ===== -->
+        <div id="g-techs" class="hidden absolute inset-x-2 sm:inset-x-auto sm:left-3 sm:w-[21rem] top-2 bottom-2 sm:top-3 sm:bottom-3
+                    rounded-2xl p-3 backdrop-blur-xl bg-zinc-950/90 border border-white/12 shadow-2xl z-30 overflow-y-auto scrollbar-thin">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-[14px] font-bold text-white">Recherche</h3>
+            <button type="button" id="g-techs-fermer" class="p-1 -m-1 rounded-lg text-zinc-500 hover:text-white hover:bg-white/10 transition">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+          <div id="g-techs-corps" class="space-y-1.5"></div>
+        </div>
+
+        <!-- ===== Règles ===== -->
+        <div id="g-regles" class="hidden absolute inset-0 z-40 backdrop-blur-md bg-zinc-950/88 overflow-y-auto scrollbar-thin p-4 sm:p-6">
+          <div class="max-w-lg mx-auto">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-base font-bold text-white">L'Empire de Nessy · règles</h3>
+              <button type="button" id="g-regles-fermer" class="p-1.5 -m-1 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition">
+                <i data-lucide="x" class="w-5 h-5"></i>
+              </button>
+            </div>
+            <div id="g-regles-corps" class="space-y-3"></div>
+            <button type="button" id="g-regles-ok"
+              class="mt-4 w-full py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-bold transition">J'ai compris</button>
+          </div>
+        </div>
+
+        <!-- ===== Chroniques ===== -->
+        <div class="absolute right-2 sm:right-3 bottom-2 sm:bottom-3 w-[11rem] sm:w-[15rem] z-10 pointer-events-auto">
+          <button type="button" id="g-journal-bascule"
             class="w-full rounded-xl px-3 py-1.5 backdrop-blur-xl bg-zinc-950/75 border border-white/10 text-[11px] font-semibold text-zinc-300 flex items-center justify-between gap-2 hover:bg-zinc-900/85 transition">
             <span class="flex items-center gap-1.5"><i data-lucide="scroll-text" class="w-3.5 h-3.5 text-indigo-400"></i> Chroniques</span>
             <i data-lucide="chevron-up" class="w-3.5 h-3.5"></i>
           </button>
-          <div id="g-log-body" class="mt-1.5 rounded-xl p-2 backdrop-blur-xl bg-zinc-950/85 border border-white/10 max-h-40 overflow-y-auto scrollbar-thin space-y-1"></div>
+          <div id="g-journal-corps" class="mt-1.5 rounded-xl p-2 backdrop-blur-xl bg-zinc-950/85 border border-white/10 max-h-40 overflow-y-auto scrollbar-thin space-y-1"></div>
         </div>
 
-        <div class="hidden sm:flex absolute left-1/2 -translate-x-1/2 bottom-3 text-[10px] text-white/30 tracking-wide pointer-events-none items-center gap-1.5">
-          <i data-lucide="hand" class="w-3 h-3"></i> Touchez un territoire · glissez pour tourner
+        <!-- ===== Fin de partie ===== -->
+        <div id="g-fin" class="hidden absolute inset-0 z-40 backdrop-blur-md bg-zinc-950/85 flex items-center justify-center px-6">
+          <div class="text-center max-w-sm">
+            <div id="g-fin-titre" class="text-xl font-black text-white"></div>
+            <p id="g-fin-texte" class="text-[12px] text-zinc-400 mt-2"></p>
+          </div>
         </div>
+
+        <div id="g-toast" class="hidden absolute left-1/2 -translate-x-1/2 top-16 sm:top-20 z-30 rounded-xl px-3.5 py-2 text-[12px] font-semibold"></div>
       </section>
 
     </div>
@@ -739,7 +774,7 @@
 <!-- ===== TOAST ===== -->
 <div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] px-4 py-2.5 bg-zinc-900/95 border border-zinc-700 text-sm rounded-xl shadow-2xl flex items-center gap-2 fade-in"></div>
 
-<script type="module" src="./firebase-config.js?v=2026-09-09-01"></script>
-<script type="module" src="./app.js?v=2026-09-09-01"></script>
+<script type="module" src="./firebase-config.js?v=2026-09-11-01"></script>
+<script type="module" src="./app.js?v=2026-09-11-01"></script>
 </body>
 </html>

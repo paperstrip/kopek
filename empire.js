@@ -31,6 +31,20 @@ export function axialToWorld(q, r, size = 1) {
   return { x: size * Math.sqrt(3) * (q + r / 2), z: size * 1.5 * r };
 }
 
+/** Les cases situées exactement à `rayon` du centre, dans l'ordre du tour. */
+export function anneau(cq, cr, rayon) {
+  if (rayon <= 0) return [[cq, cr]];
+  const out = [];
+  let q = cq + HEX_DIRS[4][0] * rayon, r = cr + HEX_DIRS[4][1] * rayon;
+  for (let d = 0; d < 6; d++) {
+    for (let i = 0; i < rayon; i++) {
+      out.push([q, r]);
+      q += HEX_DIRS[d][0]; r += HEX_DIRS[d][1];
+    }
+  }
+  return out;
+}
+
 /** Toutes les cases à portée `rayon`, la case centrale comprise. */
 export function disque(q, r, rayon) {
   const out = [];
@@ -318,23 +332,45 @@ function installerPeuples(etat, tuiles) {
   // Deux colons : fonder sa deuxième et sa troisième ville est le vrai premier
   // objectif, et attendre d'en produire un coûtait quinze tours de retard sur
   // des rivaux qui, eux, commencent déjà avec le leur.
-  creerUnite(etat, capitale.q, capitale.r, 'colon', JOUEUR);
-  creerUnite(etat, capitale.q, capitale.r, 'colon', JOUEUR);
-  creerUnite(etat, capitale.q, capitale.r, 'guerrier', JOUEUR);
-  creerUnite(etat, capitale.q, capitale.r, 'guerrier', JOUEUR);
-  creerUnite(etat, capitale.q, capitale.r, 'eclaireur', JOUEUR);
+  //
+  // On les pose sur des cases distinctes. Le déplacement interdit déjà deux
+  // unités du même camp sur une case ; les empiler au départ contredisait la
+  // règle et, surtout, les rendait toutes invisibles sous le château.
+  poserDepart(etat, tuiles, capitale, ['colon', 'guerrier', 'colon', 'guerrier', 'eclaireur'], JOUEUR);
 
-  const anneau = Math.round(RAYON_CARTE * 0.68);
-  PEUPLES.filter((p) => p.ia).forEach((p, i) => {
-    const angle = (i / 3) * Math.PI * 2 + 0.6 + rng() * 0.3;
-    const site = meilleurSite(tuiles,
-      Math.round(Math.cos(angle) * anneau), Math.round(Math.sin(angle) * anneau));
-    if (!site || site.ville) return;
+  // Un anneau hexagonal, pas un cercle trigonométrique : `cos/sin` sur des
+  // coordonnées axiales donne des distances qui vont du simple au double selon
+  // l'angle, et un rival se retrouvait parfois à six cases quand un autre était
+  // à dix. On répartit sur le vrai anneau.
+  const ring = anneau(capitale.q, capitale.r, 6);
+  const ias = PEUPLES.filter((p) => p.ia);
+  ias.forEach((p, i) => {
+    const depart = Math.floor((i / ias.length) * ring.length + rng() * 2);
+    let site = null;
+    for (let pas = 0; pas < ring.length && !site; pas++) {
+      const [rq, rr] = ring[(depart + pas) % ring.length];
+      const essai = meilleurSite(tuiles, rq, rr);
+      if (!essai || essai.ville) continue;
+      if (hexDistance(essai.q, essai.r, capitale.q, capitale.r) < 5) continue;
+      if ((etat.villes || []).some((v) => hexDistance(v.q, v.r, essai.q, essai.r) < 5)) continue;
+      site = essai;
+    }
+    if (!site) return;
     fonderVille(etat, tuiles, site.q, site.r, p.id, p.nom.split(' ').pop(), true);
-    creerUnite(etat, site.q, site.r, 'guerrier', p.id);
-    creerUnite(etat, site.q, site.r, 'colon', p.id);
+    poserDepart(etat, tuiles, site, ['guerrier', 'colon'], p.id);
   });
   explorerAutour(etat, tuiles, capitale.q, capitale.r, 3);
+}
+
+/** Répartit les unités de départ sur la ville et ses voisines libres. */
+function poserDepart(etat, tuiles, centre, types, peuple) {
+  const places = [tuiles[tileKey(centre.q, centre.r)],
+    ...neighbors(centre.q, centre.r).map(([q, r]) => tuiles[tileKey(q, r)])]
+    .filter((t) => t && franchissable(t));
+  types.forEach((type, i) => {
+    const t = places.find((c) => !uniteEn(etat, c.q, c.r)) || places[i % places.length];
+    if (t) creerUnite(etat, t.q, t.r, type, peuple);
+  });
 }
 
 /** Reconstruit la carte depuis la graine et réapplique les cases modifiées. */
