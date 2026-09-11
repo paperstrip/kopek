@@ -14,8 +14,8 @@ import {
   serverTimestamp,
   setDoc,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-11-03';
-import * as EMPIRE from './empire.js?v=2026-09-11-03';
+} from './firebase-config.js?v=2026-09-11-04';
+import * as EMPIRE from './empire.js?v=2026-09-11-04';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -965,7 +965,7 @@ async function assurerCarte() {
   if (carteEtat !== 'repos') return;
   carteEtat = 'chargement';
   try {
-    carteMod = await import('./carte3d.js?v=2026-09-11-03');
+    carteMod = await import('./carte3d.js?v=2026-09-11-04');
     const canvas = document.getElementById('game-canvas');
     if (!canvas) throw new Error('canvas #game-canvas introuvable');
     carteMod.initCarte(canvas, { onSelect: surCaseTouchee });
@@ -1012,10 +1012,9 @@ function rendreHud() {
 
   const bouton = document.getElementById('g-fin-tour');
   if (bouton) {
-    const possible = e.tours > 0 && !e.fini;
+    const possible = e.tours > 0;
     bouton.disabled = !possible;
-    bouton.title = e.fini ? 'La partie est terminée'
-      : (possible ? '' : 'Plus de tour — ils reviennent avec le temps, et vos heures en donnent');
+    bouton.title = possible ? '' : 'Plus de tour — ils reviennent avec le temps, et vos heures en donnent';
   }
 
   const bonus = EMPIRE.bonusHeures(heuresDuMois(dernierAgg), NESSY.socleHours, NESSY.minHoursEq);
@@ -1078,17 +1077,9 @@ function rendreHud() {
       : '<div class="text-[10px] text-zinc-500">Rien à raconter pour l’instant.</div>';
   }
 
-  const fin = document.getElementById('g-fin');
-  if (fin) {
-    if (!e.fini) fin.classList.add('hidden');
-    else {
-      fin.classList.remove('hidden');
-      txt('g-fin-titre', e.fini === 'victoire' ? 'L’empire est fondé' : 'La marche de Nessy n’est plus');
-      txt('g-fin-texte', e.fini === 'victoire'
-        ? `Les trois capitales rivales sont à vous, au tour ${e.tour}.`
-        : `Votre dernière ville est tombée au tour ${e.tour}.`);
-    }
-  }
+  // Le titre du domaine remplace l'écran de fin : la partie ne se gagne ni ne
+  // se perd, elle se poursuit, et c'est lui qui dit où l'on en est.
+  txt('g-titre', EMPIRE.titre(e));
 }
 
 function echapper(s) {
@@ -1315,6 +1306,21 @@ function ouvrirRecherche() {
   if (!p || !JEU.etat) return;
   const acquises = JEU.etat.techs || [];
   const dispo = EMPIRE.techsDisponibles(JEU.etat).map((t) => t.cle);
+  const edits = Object.entries(EMPIRE.EDITS).map(([cle, ed]) => {
+    const n = EMPIRE.nbEdits(JEU.etat, cle);
+    const encours = JEU.etat.recherche === cle;
+    return `<button type="button" data-tech="${cle}"
+      class="w-full text-left rounded-xl px-3 py-2 border transition ${
+        encours ? 'bg-indigo-500/20 border-indigo-400/50 text-indigo-100'
+                : 'bg-white/5 border-white/15 text-zinc-100 hover:bg-white/10'}">
+      <div class="flex justify-between items-baseline gap-2">
+        <span class="text-[12px] font-semibold">${echapper(ed.label)}${n ? ` · ${n}×` : ''}</span>
+        <span class="text-[10px] font-mono opacity-70">${EMPIRE.coutEdit(JEU.etat, cle)} science</span>
+      </div>
+      <div class="text-[9px] text-zinc-400 mt-0.5">+${Math.round(ed.gain * 100)} % ${echapper(ed.effet)} · se repromulgue sans fin</div>
+    </button>`;
+  }).join('');
+
   p.querySelector('#g-techs-corps').innerHTML = Object.entries(EMPIRE.TECHS).map(([cle, t]) => {
     const etat = acquises.includes(cle) ? 'acquise' : dispo.includes(cle) ? 'dispo' : 'bloquee';
     const encours = JEU.etat.recherche === cle;
@@ -1331,7 +1337,7 @@ function ouvrirRecherche() {
       ${etat === 'bloquee' ? `<div class="text-[9px] text-amber-400/70 mt-0.5">Il faut d’abord ${t.requiert.map((r) => EMPIRE.TECHS[r].label).join(' et ')}</div>` : ''}
       ${encours ? '<div class="text-[9px] text-indigo-300 mt-0.5">Recherche en cours</div>' : ''}
     </button>`;
-  }).join('');
+  }).join('') + `<div class="pt-2 mt-1 border-t border-white/10 text-[10px] uppercase tracking-wider text-zinc-500 font-semibold">Édits · sans fin</div>` + edits;
   p.querySelectorAll('button[data-tech]').forEach((b) => {
     b.addEventListener('click', () => {
       const res = EMPIRE.choisirRecherche(JEU.etat, b.getAttribute('data-tech'));

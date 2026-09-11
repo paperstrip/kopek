@@ -10,11 +10,11 @@
 // l'effort : la lumière, la caméra, l'animation, et le fait que chaque chose
 // affichée réponde à une question du joueur.
 // =============================================================================
-import * as THREE from './vendor/three/three.module.js?v=2026-09-11-03';
-import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-11-03';
-import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-11-03';
-import { GLTFLoader } from './vendor/three/GLTFLoader.js?v=2026-09-11-03';
-import { axialToWorld, tileKey, TERRAINS, RESSOURCES, peupleById, JOUEUR } from './empire.js?v=2026-09-11-03';
+import * as THREE from './vendor/three/three.module.js?v=2026-09-11-04';
+import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-11-04';
+import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-11-04';
+import { GLTFLoader } from './vendor/three/GLTFLoader.js?v=2026-09-11-04';
+import { axialToWorld, tileKey, TERRAINS, RESSOURCES, peupleById, JOUEUR } from './empire.js?v=2026-09-11-04';
 
 // Le socle du pack mesure exactement 2,0 de plat à plat, soit un hexagone de
 // rayon 2/√3. En les espaçant à 1,0 on les faisait se chevaucher de 13 % : les
@@ -466,6 +466,10 @@ export function rendre(p, { force = false } = {}) {
   const tuiles = p.tuiles || {};
   const sols = [];
   Object.values(tuiles).forEach((t) => {
+    // Le hors-monde n'est pas encore là : l'horizon recule à mesure que
+    // l'empire grandit, et dessiner d'emblée les huit cents tuiles engendrées
+    // coûterait cher pour montrer des terres qu'on ne peut pas fouler.
+    if (t.hors) return;
     const { x, z } = axialToWorld(t.q, t.r, HEX);
     const alea = alea3(t.q, t.r);
     const brume = !t.explore;

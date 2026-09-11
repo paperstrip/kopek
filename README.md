@@ -153,6 +153,43 @@ Trois réponses, toutes visibles à l'écran :
 Et une **légende des camps** en permanence sur la carte, parce que sans elle le
 joueur en est réduit à « des zones jaunes, moi j'imagine, et des zones rouges ».
 
+### Une partie sans fin
+
+Il n'y a **ni victoire ni défaite**. Le jeu se joue pendant des mois à côté des
+heures encodées : un écran de fin l'arrêterait net, et une partie terminée est
+une partie qu'on ne rouvre plus. Soumettre un peuple est un jalon, pas une
+conclusion.
+
+Quatre mécanismes entretiennent le monde :
+
+- **L'horizon recule.** Les 817 tuiles sont engendrées d'un coup jusqu'à
+  `RAYON_MONDE`, mais seul un disque de rayon `etat.rayon` fait partie du monde ;
+  il grandit quand l'empire s'en approche. Engendrer au fur et à mesure aurait
+  cassé le déterminisme : les terrains sont attribués par quantiles sur
+  l'ensemble des terres, donc ajouter une couronne changerait rétroactivement le
+  terrain des cases déjà découvertes.
+- **Des peuples sans fin.** Six en réserve, puis `peupleEngendre(n)` compose nom
+  et couleur — il y en a toujours un de plus.
+- **Les empires se fissurent.** Au-delà de six villes, une province entière peut
+  faire sécession sous une nouvelle bannière, et la région qui se détache grandit
+  avec l'empire.
+- **L'exil plutôt que la mort.** Perdre sa dernière ville fait repartir vos
+  derniers fidèles avec un colon ; perdre sa capitale déplace la cour.
+
+⚠️ **Une capitale prise cesse d'en être une.** Sans cette règle, un conquérant
+accumulait les capitales — cinquante pour un seul peuple — plus aucune ville ne
+pouvait faire sécession, et le monde se figeait définitivement autour de lui.
+C'est le bug qui gelait les parties longues au tour 232.
+
+La simulation le vérifie sur 220 tours : le plus gros empire plafonne sous
+trente villes là où il montait à cinquante, il reste toujours des adversaires, et
+le journal vit encore au dernier tour.
+
+La recherche non plus ne s'arrête pas : après l'arbre, les **édits** se
+repromulguent indéfiniment, chacun plus cher que le précédent. Les jalons
+continuent de la même façon (`jalonEngendre`), et le titre du domaine passe de
+Hameau à « Empire · 18ᵉ couronne » sans plafond.
+
 ### Des tours, pas une horloge
 
 Rien ne bouge sans le joueur : le monde n'avance que lorsqu'il termine un tour.
@@ -202,8 +239,8 @@ survivants. Trois verdicts successifs :
 
 ### La carte
 
-271 tuiles régénérées depuis une graine ; seules les cases modifiées partent en
-base, donc une partie pèse 7 Ko. Les terrains sont attribués **par quantiles**
+817 tuiles régénérées depuis une graine, dont 271 dans le monde connu au premier
+tour ; seules les cases modifiées partent en base, donc une partie pèse 7 Ko. Les terrains sont attribués **par quantiles**
 sur deux champs continus (altitude, humidité) : comparer à des seuils absolus
 dépendait de l'échelle du bruit et donnait cent quarante-cinq montagnes sur deux
 cent soixante-et-onze.

@@ -10,7 +10,7 @@
   // se retrouve avec un vieux HTML qui charge du vieux JS. On compare donc la
   // version embarquée à celle publiée dans version.json (jamais mise en cache),
   // et on recharge une seule fois sur une URL différente si ça diffère.
-  window.KOPEK_VERSION = '2026-09-11-03';
+  window.KOPEK_VERSION = '2026-09-11-04';
   (function () {
     try {
       fetch('./version.json?t=' + Date.now(), { cache: 'no-store' })
@@ -34,7 +34,7 @@
 <!-- Feuille Tailwind compilée et commitée (styles.css) : le CDN cdn.tailwindcss.com
      est un outil de DEV qui recompile le CSS dans le navigateur à chaque chargement.
      Pour régénérer après avoir ajouté des classes : voir README.md -->
-<link rel="stylesheet" href="./styles.css?v=2026-09-11-03">
+<link rel="stylesheet" href="./styles.css?v=2026-09-11-04">
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 </head>
 <body class="min-h-screen text-zinc-100 font-sans relative overflow-x-hidden">
@@ -419,6 +419,7 @@
               <span class="font-mono bg-black/25 rounded px-1.5 py-0.5 text-[11px] flex-none"><span id="g-reserve">0</span></span>
             </button>
             <div class="flex items-center gap-1.5">
+              <span id="g-titre" class="jeu-panneau-clair whitespace-nowrap rounded-lg px-2 py-0.5 text-[10px] font-bold text-amber-200">Hameau</span>
               <span id="g-tour" class="jeu-panneau-clair whitespace-nowrap rounded-lg px-2 py-0.5 text-[10px] font-semibold text-amber-100/85">Tour 1</span>
               <button type="button" id="g-unite-suiv" title="Unité suivante à jouer"
                 class="jeu-bouton w-7 h-7 rounded-full flex items-center justify-center">
@@ -526,14 +527,6 @@
             <i data-lucide="chevron-up" class="w-3.5 h-3.5"></i>
           </button>
           <div id="g-journal-corps" class="jeu-panneau mt-1.5 rounded-xl p-2 max-h-40 overflow-y-auto scrollbar-thin space-y-1"></div>
-        </div>
-
-        <!-- ===== Fin de partie ===== -->
-        <div id="g-fin" class="hidden absolute inset-0 z-40 backdrop-blur-md bg-zinc-950/85 flex items-center justify-center px-6">
-          <div class="text-center max-w-sm">
-            <div id="g-fin-titre" class="text-xl font-black text-white"></div>
-            <p id="g-fin-texte" class="text-[12px] text-zinc-400 mt-2"></p>
-          </div>
         </div>
 
         <div id="g-toast" class="hidden absolute left-1/2 -translate-x-1/2 top-16 sm:top-20 z-30 rounded-xl px-3.5 py-2 text-[12px] font-semibold"></div>
@@ -788,7 +781,7 @@
 <!-- ===== TOAST ===== -->
 <div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] px-4 py-2.5 bg-zinc-900/95 border border-zinc-700 text-sm rounded-xl shadow-2xl flex items-center gap-2 fade-in"></div>
 
-<script type="module" src="./firebase-config.js?v=2026-09-11-03"></script>
-<script type="module" src="./app.js?v=2026-09-11-03"></script>
+<script type="module" src="./firebase-config.js?v=2026-09-11-04"></script>
+<script type="module" src="./app.js?v=2026-09-11-04"></script>
 </body>
 </html>

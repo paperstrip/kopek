@@ -91,8 +91,10 @@ export const TERRAINS = {
   eau:      { label: 'Mer',      f: 2, p: 0, o: 2, def: 0,  cout: null },   // cout null = infranchissable
 };
 
-/** Un terrain sans `cout` ne se traverse pas. */
-export function franchissable(t) { return !!t && TERRAINS[t.terrain] && TERRAINS[t.terrain].cout != null; }
+/** Un terrain sans `cout` ne se traverse pas — et le hors-monde non plus. */
+export function franchissable(t) {
+  return !!t && !t.hors && TERRAINS[t.terrain] && TERRAINS[t.terrain].cout != null;
+}
 
 // ---------- Ressources spéciales ---------------------------------------------
 // Elles donnent une raison de vouloir UNE case précise plutôt qu'une autre :
@@ -125,10 +127,53 @@ export const PEUPLES = [
   { id: 'givre',  nom: 'Marche de Givre',   couleur: '#3f8fb0', ia: true },
   { id: 'ronce',  nom: 'Seigneurs de Ronce',couleur: '#5c8f3a', ia: true },
 ];
-export const peupleById = (id) => PEUPLES.find((p) => p.id === id) || PEUPLES[0];
+// Réserve de peuples, puis génération : quand l'un est soumis, un autre se
+// lève. Une partie sans fin ne peut pas s'arrêter faute d'adversaire, et six
+// peuples de réserve s'épuisent en quelques mois de jeu.
+export const VIVIER = [
+  { id: 'brume',  nom: 'Fils de la Brume',  couleur: '#7d6fb5' },
+  { id: 'silex',  nom: 'Tribu du Silex',    couleur: '#c08a3e' },
+  { id: 'maree',  nom: 'Gens de la Marée',  couleur: '#3fa8a0' },
+  { id: 'braise', nom: 'Ordre de Braise',   couleur: '#c25b3a' },
+  { id: 'saule',  nom: 'Cercle du Saule',   couleur: '#6f9e5c' },
+  { id: 'roche',  nom: 'Maîtres de Roche',  couleur: '#8e8b98' },
+];
+const TOUS_PEUPLES = [...PEUPLES, ...VIVIER.map((p) => ({ ...p, ia: true }))];
+
+const TETES = ['Fils', 'Gens', 'Clan', 'Ordre', 'Tribu', 'Cercle', 'Maîtres', 'Marche', 'Ligue', 'Sires'];
+const QUEUES = ['du Corbeau', 'des Sables', 'de l’Aulne', 'du Granit', 'des Cendres', 'du Héron',
+                'de la Faille', 'des Tourbes', 'du Vent', 'de l’Ombre longue', 'des Hauts', 'du Sel'];
+export function peupleEngendre(n) {
+  return {
+    id: 'peuple' + n,
+    nom: `${TETES[n % TETES.length]} ${QUEUES[(n * 7 + 3) % QUEUES.length]}`,
+    couleur: `hsl(${(n * 47 + 15) % 360} 52% 52%)`,
+    ia: true,
+  };
+}
+
+export const peupleById = (id) => {
+  const connu = TOUS_PEUPLES.find((p) => p.id === id);
+  if (connu) return connu;
+  const m = /^peuple(\d+)$/.exec(String(id || ''));
+  return m ? peupleEngendre(Number(m[1])) : PEUPLES[0];
+};
+
+/** Les peuples adverses qui tiennent encore au moins une ville. */
+export function rivauxActifs(etat) {
+  const vivants = new Set((etat.villes || []).map((v) => v.peuple));
+  return [...vivants].filter((id) => id !== JOUEUR).map(peupleById);
+}
 
 // ---------- Génération de la carte -------------------------------------------
-export const RAYON_CARTE = 9;          // 271 tuiles : vaste sans être illisible
+// Le monde est engendré une seule fois jusqu'à RAYON_MONDE, mais seul un disque
+// de rayon `etat.rayon` en fait partie au départ ; il grandit avec l'empire.
+// Engendrer au fur et à mesure aurait cassé le déterminisme : les terrains sont
+// attribués par quantiles sur l'ensemble des terres, donc ajouter une couronne
+// changerait rétroactivement le terrain des cases déjà découvertes.
+export const RAYON_MONDE = 16;         // 817 tuiles engendrées d'un coup
+export const RAYON_CARTE = 9;          // le monde connu au premier tour
+export const MARGE_EXTENSION = 2;      // on repousse l'horizon à cette distance
 
 /**
  * Carte déterministe. On pose d'abord un relief par bruit sommé, puis on en
@@ -139,16 +184,16 @@ export function genererCarte(graine) {
   const rng = mulberry32(hashSeed(graine));
   // Quelques centres d'altitude tirés au sort : c'est eux qui créent les
   // chaînes de collines et de montagnes plutôt qu'un semis uniforme.
-  const reliefs = Array.from({ length: 7 }, () => ({
-    q: Math.round((rng() * 2 - 1) * RAYON_CARTE * 0.8),
-    r: Math.round((rng() * 2 - 1) * RAYON_CARTE * 0.8),
+  const reliefs = Array.from({ length: 14 }, () => ({
+    q: Math.round((rng() * 2 - 1) * RAYON_MONDE * 0.8),
+    r: Math.round((rng() * 2 - 1) * RAYON_MONDE * 0.8),
     force: 0.55 + rng() * 0.75,
-    portee: 2.2 + rng() * 3.0,
+    portee: 3.0 + rng() * 4.5,
   }));
-  const humides = Array.from({ length: 5 }, () => ({
-    q: Math.round((rng() * 2 - 1) * RAYON_CARTE * 0.8),
-    r: Math.round((rng() * 2 - 1) * RAYON_CARTE * 0.8),
-    portee: 2.5 + rng() * 3.5,
+  const humides = Array.from({ length: 10 }, () => ({
+    q: Math.round((rng() * 2 - 1) * RAYON_MONDE * 0.8),
+    r: Math.round((rng() * 2 - 1) * RAYON_MONDE * 0.8),
+    portee: 3.5 + rng() * 5.0,
   }));
 
   // On calcule d'abord les deux champs continus, puis on découpe par quantiles.
@@ -157,7 +202,7 @@ export function genererCarte(graine) {
   // soixante-et-onze. Les quantiles garantissent le même mélange à chaque carte.
   const tuiles = {};
   const terres = [];
-  disque(0, 0, RAYON_CARTE).forEach(([q, r]) => {
+  disque(0, 0, RAYON_MONDE).forEach(([q, r]) => {
     const d = hexDistance(0, 0, q, r);
     let alt = 0;
     reliefs.forEach((c) => {
@@ -174,7 +219,7 @@ export function genererCarte(graine) {
 
     const t = { q, r, terrain: 'eau', ressource: null, proprietaire: null, ville: null, explore: false, _alt: alt, _hum: hum };
     tuiles[tileKey(q, r)] = t;
-    if (d < RAYON_CARTE) terres.push(t);          // la mer ferme la carte
+    if (d < RAYON_MONDE) terres.push(t);          // la mer ferme le monde
   });
 
   const part = (liste, champ, debut, fin) => {
@@ -209,9 +254,9 @@ export function genererCarte(graine) {
 }
 
 /** Un site correct pour une capitale de départ : de la terre, pas un désert. */
-function meilleurSite(tuiles, q, r) {
+function meilleurSite(tuiles, q, r, rayonMax = 2) {
   let best = null, bestScore = -Infinity;
-  disque(q, r, 2).forEach(([sq, sr]) => {
+  disque(q, r, rayonMax).forEach(([sq, sr]) => {
     const t = tuiles[tileKey(sq, sr)];
     if (!t || !franchissable(t) || t.terrain === 'montagne') return;
     // La nourriture pèse lourd : une ville qui ne grandit pas ne produit rien
@@ -227,6 +272,10 @@ function meilleurSite(tuiles, q, r) {
     if (nourriture < 8) score -= 40;          // un site qui affame est écarté
     if (score > bestScore) { bestScore = score; best = t; }
   });
+  // Rien de viable à deux cases ? On élargit plutôt que de renoncer : une
+  // capitale tombée au milieu d'un massif montagneux empêchait purement et
+  // simplement la partie de démarrer.
+  if (!best && rayonMax < 6) return meilleurSite(tuiles, q, r, rayonMax + 2);
   return best;
 }
 
@@ -266,6 +315,33 @@ export const TECHS = {
   mathematiques:{ label: 'Mathématiques', cout: 150, requiert: ['ecriture', 'maconnerie'] },
   feodalite:    { label: 'Féodalité',     cout: 210, requiert: ['equitation', 'mathematiques'] },
 };
+
+/**
+ * Après l'arbre, la recherche ne s'arrête pas : elle devient des édits, qu'on
+ * repromulgue indéfiniment, chacun plus cher que le précédent. Un arbre fini
+ * dans une partie infinie laisserait la science sans emploi au bout d'un mois.
+ */
+export const EDITS = {
+  edit_labour: { label: 'Édit des labours',  effet: 'nourriture', gain: 0.08, base: 260 },
+  edit_forge:  { label: 'Édit des forges',   effet: 'production', gain: 0.08, base: 280 },
+  edit_taille: { label: 'Édit de la taille', effet: 'or',         gain: 0.10, base: 300 },
+  edit_ban:    { label: 'Édit du ban',       effet: 'combat',     gain: 0.06, base: 340 },
+};
+
+export const nbEdits = (etat, cle) => ((etat.edits || {})[cle] || 0);
+
+/** Coût du prochain exemplaire : il monte, donc promulguer reste un choix. */
+export function coutEdit(etat, cle) {
+  const e = EDITS[cle];
+  return e ? Math.round(e.base * Math.pow(1.45, nbEdits(etat, cle))) : Infinity;
+}
+
+/** Le multiplicateur accumulé pour un effet donné. */
+export function bonusEdits(etat, effet) {
+  let m = 1;
+  Object.entries(EDITS).forEach(([cle, e]) => { if (e.effet === effet) m += e.gain * nbEdits(etat, cle); });
+  return m;
+}
 
 /** Une technologie est accessible si tous ses prérequis sont acquis. */
 export function techsDisponibles(etat) {
@@ -311,17 +387,18 @@ export function nouvelEtat(graine, maintenant = Date.now()) {
   const etat = {
     version: VERSION_ETAT,
     graine: String(graine),
+    rayon: RAYON_CARTE,          // le monde connu, qui grandit avec l'empire
     tour: 1,
     tours: 20,                   // de quoi apprendre sans se bloquer
     dernierRecharge: maintenant,
     toursAccordes: 0,            // heures déjà converties, pour ne pas les compter deux fois
     or: 60, science: 0,
-    techs: [], recherche: 'agriculture', progresRecherche: 0,
+    techs: [], edits: {}, recherche: 'agriculture', progresRecherche: 0,
     villes: [], unites: [], seqUnite: 0, seqVille: 0,
     changements: {},             // seules les tuiles modifiées sont persistées
     journal: [], marques: [],
-    vaincus: [], fini: null,
-    stats: { villesFondees: 0, villesPrises: 0, combatsGagnes: 0, unitesPerdues: 0 },
+    vaincus: [], peuplesLeves: [],
+    stats: { villesFondees: 0, villesPrises: 0, combatsGagnes: 0, unitesPerdues: 0, peuplesSoumis: 0, exils: 0 },
   };
   const tuiles = genererCarte(etat.graine);
   installerPeuples(etat, tuiles);
@@ -383,7 +460,31 @@ export function hydrater(etat) {
   Object.entries(etat.changements || {}).forEach(([cle, patch]) => {
     if (tuiles[cle]) Object.assign(tuiles[cle], patch);
   });
+  marquerFrontiere(etat, tuiles);
   return tuiles;
+}
+
+/** Ce qui est au-delà du monde connu n'existe pas encore : ni traversable, ni dessiné. */
+export function marquerFrontiere(etat, tuiles) {
+  const rayon = etat.rayon || RAYON_CARTE;
+  Object.values(tuiles).forEach((t) => { t.hors = hexDistance(0, 0, t.q, t.r) > rayon; });
+}
+
+/**
+ * Repousse l'horizon quand l'empire s'en approche. Une partie sans fin ne peut
+ * pas se jouer sur une carte finie : on en fait le tour en quelques heures et il
+ * ne reste plus rien à découvrir.
+ */
+export function etendreMonde(etat, tuiles) {
+  const rayon = etat.rayon || RAYON_CARTE;
+  if (rayon >= RAYON_MONDE) return 0;
+  const proche = [...villesDe(etat), ...unitesDe(etat)]
+    .some((x) => hexDistance(0, 0, x.q, x.r) >= rayon - MARGE_EXTENSION);
+  if (!proche) return 0;
+  etat.rayon = Math.min(RAYON_MONDE, rayon + 2);
+  marquerFrontiere(etat, tuiles);
+  noter(etat, 'L’horizon recule : de nouvelles terres apparaissent au-delà des marches.', 'bien');
+  return etat.rayon - rayon;
 }
 
 /** Toute modification de tuile passe par ici, sinon elle ne serait pas sauvée. */
@@ -438,7 +539,7 @@ export function fonderVille(etat, tuiles, q, r, peuple = JOUEUR, nom = null, cap
   const ville = {
     id: 'v' + etat.seqVille,
     nom: nom || nomDeVille(etat, peuple),
-    peuple, q, r, capitale,
+    peuple, fondateur: peuple, q, r, capitale,
     pop: 1, nourriture: 0, culture: 0, rayon: RAYON_INITIAL,
     production: 0, chantier: null,
     batiments: [], pv: 100,
@@ -502,6 +603,11 @@ export function revenusVille(etat, tuiles, ville) {
   if (b.includes('grenier')) f = Math.round(f * 1.4);
   if (b.includes('atelier')) p = Math.round(p * 1.3);
   if (b.includes('marche')) o += 3;
+  if (ville.peuple === JOUEUR) {
+    f = Math.round(f * bonusEdits(etat, 'nourriture'));
+    p = Math.round(p * bonusEdits(etat, 'production'));
+    o = Math.round(o * bonusEdits(etat, 'or'));
+  }
   const science = 1 + ville.pop + (b.includes('bibliotheque') ? 3 : 0);
   const culture = 1 + (b.includes('temple') ? 3 : 0);
   const entretien = b.reduce((a, k) => a + (BATIMENTS[k] ? BATIMENTS[k].or : 0), 0);
@@ -612,7 +718,8 @@ export function degats(attaque, defense) {
 export function forceAttaque(etat, u, bonusPct = 0) {
   const m = UNITES[u.type];
   const blesse = 0.5 + 0.5 * (u.pv / u.pvMax);      // une unité à moitié morte frappe moins fort
-  return m.atk * blesse * (1 + bonusPct / 100);
+  const edits = u.peuple === JOUEUR ? bonusEdits(etat, 'combat') : 1;
+  return m.atk * blesse * (1 + bonusPct / 100) * edits;
 }
 
 /** Force de défense effective : terrain, fortification, murailles. */
@@ -707,6 +814,14 @@ export function attaquer(etat, tuiles, u, q, r, bonusPct = 0, rng = Math.random)
 function prendreVille(etat, tuiles, ville, peuple) {
   const ancien = ville.peuple;
   ville.peuple = peuple;
+  // Une capitale prise cesse d'en être une : le vainqueur garde la sienne.
+  // Sans cette ligne, un conquérant accumulait les capitales — cinquante pour
+  // un seul peuple — plus aucune ville ne pouvait faire sécession, et le monde
+  // se figeait définitivement autour de lui.
+  if (ville.capitale) {
+    ville.capitale = (etat.villes || []).some((v) => v.peuple === peuple && v.capitale && v !== ville)
+      ? false : true;
+  }
   ville.pv = 60;
   ville.pop = Math.max(1, Math.floor(ville.pop * 0.6));
   ville.chantier = null; ville.production = 0;
@@ -723,7 +838,7 @@ function prendreVille(etat, tuiles, ville, peuple) {
     ? `${ville.nom} est prise !`
     : `${ville.nom} est tombée aux mains ${deQui(ancien === JOUEUR ? peuple : peuple)}.`,
     peuple === JOUEUR ? 'bien' : 'mal');
-  verifierFin(etat, tuiles);
+  verifierMonde(etat, tuiles);
   return { villePrise: ville.nom, ancien };
 }
 function deQui(id) { return 'de ' + peupleById(id).nom; }
@@ -755,6 +870,7 @@ export function mettreEnChantier(etat, ville, genre, cle) {
 }
 
 export function choisirRecherche(etat, cle) {
+  if (EDITS[cle]) { etat.recherche = cle; return { ok: true }; }
   if (!TECHS[cle]) return { ok: false, error: 'Technologie inconnue.' };
   if ((etat.techs || []).includes(cle)) return { ok: false, error: 'Déjà acquise.' };
   const manque = TECHS[cle].requiert.filter((r) => !(etat.techs || []).includes(r));
@@ -798,7 +914,6 @@ export function bonusHeures(heuresMois, socle = 25, garantie = 43.75) {
 
 /** Joue un tour complet : vos villes, la recherche, puis les rivaux. */
 export function finirTour(etat, tuiles, rng = Math.random) {
-  if (etat.fini) return { ok: false, error: 'La partie est terminée.' };
   if ((etat.tours || 0) <= 0) return { ok: false, error: 'Plus de tour disponible. Ils se rechargent avec le temps, et vos heures facturées en donnent.' };
   etat.tours -= 1;
   etat.tour += 1;
@@ -852,16 +967,27 @@ export function finirTour(etat, tuiles, rng = Math.random) {
   });
 
   // 2. La recherche avance.
-  if (etat.recherche && !(etat.techs || []).includes(etat.recherche)) {
+  if (etat.recherche) {
     etat.progresRecherche += resume.science;
-    const cible = TECHS[etat.recherche];
-    if (cible && etat.progresRecherche >= cible.cout) {
-      etat.progresRecherche -= cible.cout;
-      etat.techs = [...(etat.techs || []), etat.recherche];
-      resume.tech = cible.label;
-      noter(etat, `${cible.label} découverte.`, 'bien');
-      const suite = techsDisponibles(etat)[0];
-      etat.recherche = suite ? suite.cle : null;
+    if (EDITS[etat.recherche]) {
+      const cout = coutEdit(etat, etat.recherche);
+      if (etat.progresRecherche >= cout) {
+        etat.progresRecherche -= cout;
+        etat.edits = { ...(etat.edits || {}) };
+        etat.edits[etat.recherche] = nbEdits(etat, etat.recherche) + 1;
+        resume.tech = `${EDITS[etat.recherche].label} (${etat.edits[etat.recherche]})`;
+        noter(etat, `${EDITS[etat.recherche].label} promulgué pour la ${etat.edits[etat.recherche]}ᵉ fois.`, 'bien');
+      }
+    } else if (!(etat.techs || []).includes(etat.recherche)) {
+      const cible = TECHS[etat.recherche];
+      if (cible && etat.progresRecherche >= cible.cout) {
+        etat.progresRecherche -= cible.cout;
+        etat.techs = [...(etat.techs || []), etat.recherche];
+        resume.tech = cible.label;
+        noter(etat, `${cible.label} découverte.`, 'bien');
+        const suite = techsDisponibles(etat)[0];
+        etat.recherche = suite ? suite.cle : 'edit_labour';
+      }
     }
   }
 
@@ -873,7 +999,9 @@ export function finirTour(etat, tuiles, rng = Math.random) {
 
   // 4. Les rivaux jouent.
   tourDesRivaux(etat, tuiles, rng);
-  verifierFin(etat, tuiles);
+  secessions(etat, tuiles, rng);
+  etendreMonde(etat, tuiles);
+  verifierMonde(etat, tuiles);
   return { ok: true, resume };
 }
 
@@ -1001,39 +1129,163 @@ function distMin(villes, c) {
 }
 
 // ---------- Fin de partie -----------------------------------------------------
-export function verifierFin(etat, tuiles = null) {
-  // On gagne en prenant les capitales, pas en ratissant chaque hameau : avec
-  // trois rivaux à trois villes, la conquête exhaustive demandait une dizaine
-  // de sièges et la partie n'avait plus de fin lisible. Prendre une capitale
-  // fait capituler le peuple entier — et ses villes passent sous votre bannière.
-  PEUPLES.filter((p) => p.ia).forEach((p) => {
-    if ((etat.vaincus || []).includes(p.id)) return;
-    const capitale = (etat.villes || []).find((v) => v.peuple === p.id && v.capitale);
-    if (capitale) return;
-    etat.vaincus = [...(etat.vaincus || []), p.id];
-    const restantes = villesDe(etat, p.id);
+/**
+ * Il n'y a ni victoire ni défaite : la partie se joue pendant des mois à côté
+ * des heures encodées, et un écran de fin l'arrêterait net. Soumettre un peuple
+ * est un jalon, pas une conclusion — un autre se lève, et l'horizon recule.
+ */
+export function verifierMonde(etat, tuiles = null) {
+  rivauxConnus(etat).forEach((id) => {
+    if ((etat.vaincus || []).includes(id)) return;
+    if ((etat.villes || []).some((v) => v.peuple === id && v.capitale)) return;
+    // Sa capitale a changé de main : le vainqueur est celui qui la tient. Sans
+    // cela, une capitale prise par un clan adverse faisait tomber tout son
+    // domaine dans votre escarcelle sans que vous y soyez pour rien.
+    const ancienne = (etat.villes || []).find((v) => v.fondateur === id && v.capitale);
+    const vainqueur = ancienne ? ancienne.peuple : JOUEUR;
+    etat.vaincus = [...(etat.vaincus || []), id];
+    const restantes = villesDe(etat, id);
     restantes.forEach((v) => {
-      v.peuple = JOUEUR;
+      v.peuple = vainqueur;
       if (tuiles) {
         disque(v.q, v.r, v.rayon).forEach(([q, r]) => {
           const t = tuiles[tileKey(q, r)];
-          if (t && t.proprietaire === p.id) { t.proprietaire = JOUEUR; marquer(etat, t); }
+          if (t && t.proprietaire === id) { t.proprietaire = vainqueur; marquer(etat, t); }
         });
       }
     });
-    noter(etat, restantes.length
-      ? `${p.nom} capitule : ${restantes.length} ville${restantes.length > 1 ? 's' : ''} rejoignent votre bannière.`
-      : `${p.nom} est soumis.`, 'bien');
+    if (vainqueur === JOUEUR) {
+      etat.stats.peuplesSoumis = (etat.stats.peuplesSoumis || 0) + 1;
+      noter(etat, restantes.length
+        ? `${peupleById(id).nom} capitule : ${restantes.length} ville${restantes.length > 1 ? 's' : ''} rejoignent votre bannière.`
+        : `${peupleById(id).nom} est soumis.`, 'bien');
+    } else {
+      noter(etat, `${peupleById(id).nom} tombe sous la coupe de ${peupleById(vainqueur).nom}.`, 'mal');
+    }
   });
 
-  const mesVilles = villesDe(etat, JOUEUR);
-  if (!mesVilles.length) {
-    etat.fini = 'defaite';
-    noter(etat, 'Votre dernière ville est tombée. La marche de Nessy n’est plus.', 'mal');
-  } else if ((etat.vaincus || []).length >= PEUPLES.filter((p) => p.ia).length) {
-    etat.fini = 'victoire';
-    noter(etat, 'Toutes les capitales rivales sont à vous. L’empire est fondé.', 'bien');
+  // Votre cour se déplace plutôt que de disparaître : perdre sa capitale ne doit
+  // pas vous effacer de la carte comme un rival.
+  const miennes = villesDe(etat, JOUEUR);
+  if (miennes.length && !miennes.some((v) => v.capitale)) {
+    const nouvelle = miennes.slice().sort((a, b) => b.pop - a.pop)[0];
+    nouvelle.capitale = true;
+    noter(etat, `La cour se replie sur ${nouvelle.nom}, qui devient votre capitale.`, 'info');
   }
+  if (tuiles && !miennes.length) exil(etat, tuiles);
+  if (tuiles) leverUnPeuple(etat, tuiles);
+}
+
+/** Les peuples adverses déjà entrés dans la partie. */
+function rivauxConnus(etat) {
+  return [...new Set([...PEUPLES.filter((p) => p.ia).map((p) => p.id), ...(etat.peuplesLeves || [])])];
+}
+
+/**
+ * Les derniers fidèles repartent avec un colon. Une partie perdue pour de bon
+ * serait une partie qu'on ne rouvre plus — exactement ce qu'on ne veut pas d'un
+ * compagnon qu'on ouvre tous les jours.
+ */
+function exil(etat, tuiles) {
+  if (unitesDe(etat).some((u) => UNITES[u.type].fonde)) return;
+  const libres = Object.values(tuiles).filter((t) => franchissable(t) && !t.ville
+    && !t.proprietaire && !uniteEn(etat, t.q, t.r) && t.terrain !== 'montagne');
+  if (!libres.length) return;
+  const rng = mulberry32(hashSeed(etat.graine + ':exil' + etat.tour));
+  const t = libres[Math.floor(rng() * libres.length)];
+  poserDepart(etat, tuiles, t, ['colon', 'guerrier'], JOUEUR);
+  etat.stats.exils = (etat.stats.exils || 0) + 1;
+  noter(etat, 'Vos derniers fidèles ont fui vers des terres libres. Refondez une ville.', 'mal');
+}
+
+/** Choisit un peuple qui n'a pas encore paru, du vivier ou engendré. */
+function peupleNeuf(etat) {
+  const deja = new Set([...PEUPLES.map((x) => x.id), ...(etat.peuplesLeves || [])]);
+  const duVivier = VIVIER.find((x) => !deja.has(x.id));
+  if (duVivier) return duVivier;
+  for (let n = 0; n < 500; n++) {
+    const cand = peupleEngendre(n);
+    if (!deja.has(cand.id)) return cand;
+  }
+  return null;
+}
+
+/** Fait se lever un nouveau peuple tant qu'il en manque. */
+function leverUnPeuple(etat, tuiles) {
+  if (rivauxActifs(etat).length >= 3) return;
+  const neuf = peupleNeuf(etat);
+  if (!neuf) return;
+  const rng = mulberry32(hashSeed(etat.graine + ':lever' + etat.tour));
+  const cap = villesDe(etat)[0] || { q: 0, r: 0 };
+  // On cherche loin de vous, puis on desserre : renoncer laissait le monde à un
+  // seul empire, et il ne se passait plus rien du tout.
+  for (const ecart of [5, 4, 3]) {
+    for (let d = (etat.rayon || RAYON_CARTE) - 1; d >= 4; d--) {
+      const ring = anneau(cap.q, cap.r, d);
+      const depart = Math.floor(rng() * ring.length);
+      for (let i = 0; i < ring.length; i++) {
+        const [q, r] = ring[(depart + i) % ring.length];
+        const site = meilleurSite(tuiles, q, r);
+        if (!site || site.ville || site.hors) continue;
+        if ((etat.villes || []).some((v) => hexDistance(v.q, v.r, site.q, site.r) < ecart)) continue;
+        etat.peuplesLeves = [...(etat.peuplesLeves || []), neuf.id];
+        fonderVille(etat, tuiles, site.q, site.r, neuf.id, neuf.nom.split(' ').pop(), true);
+        poserDepart(etat, tuiles, site, ['guerrier', 'guerrier', 'archer', 'colon'], neuf.id);
+        noter(etat, `${neuf.nom} se lève aux marches du monde.`, 'mal');
+        return;
+      }
+    }
+  }
+}
+
+export const VILLES_AVANT_SECESSION = 6;
+
+/**
+ * Les grands empires se fissurent. Sans cela, un rival chanceux monte à
+ * cinquante villes, écrase tout ce qui se lève, et le monde se fige : plus
+ * d'adversaire, plus rien à faire. Une sécession borne la boule de neige et
+ * fournit un nouveau peuple de façon naturelle.
+ *
+ * Elle emporte toute une région, pas une ville isolée : un bourg seul face à un
+ * empire de trente villes est repris au tour suivant, et la révolte ne servait
+ * qu'à faire du bruit dans le journal.
+ */
+function secessions(etat, tuiles, rng) {
+  rivauxActifs(etat).forEach((p) => {
+    const siennes = villesDe(etat, p.id);
+    if (siennes.length <= VILLES_AVANT_SECESSION) return;
+    const risque = 0.10 + 0.05 * (siennes.length - VILLES_AVANT_SECESSION);
+    if (rng() > Math.min(0.6, risque)) return;
+
+    const capitale = siennes.find((v) => v.capitale) || siennes[0];
+    const rebelle = siennes.filter((v) => !v.capitale)
+      .sort((a, b) => hexDistance(b.q, b.r, capitale.q, capitale.r) - hexDistance(a.q, a.r, capitale.q, capitale.r))[0];
+    if (!rebelle) return;
+    const neuf = peupleNeuf(etat);
+    if (!neuf) return;
+
+    // La région qui se détache grandit avec l'empire : un rayon fixe de quatre
+    // cases ne prélevait que deux ou trois villes sur cinquante, et la boule de
+    // neige repartait aussitôt. Un empire tentaculaire perd une province entière.
+    const rayonRegion = 3 + Math.floor(siennes.length / 5);
+    const region = siennes.filter((v) => !v.capitale
+      && hexDistance(v.q, v.r, rebelle.q, rebelle.r) <= rayonRegion);
+    etat.peuplesLeves = [...(etat.peuplesLeves || []), neuf.id];
+    region.forEach((v, i) => {
+      v.peuple = neuf.id;
+      v.fondateur = neuf.id;
+      v.capitale = v === rebelle;
+      disque(v.q, v.r, v.rayon).forEach(([q, r]) => {
+        const t = tuiles[tileKey(q, r)];
+        if (t && t.proprietaire === p.id) { t.proprietaire = neuf.id; marquer(etat, t); }
+      });
+      if (i < 3) creerUnite(etat, v.q, v.r, 'guerrier', neuf.id);
+    });
+    unitesDe(etat, p.id).forEach((u) => {
+      if (hexDistance(u.q, u.r, rebelle.q, rebelle.r) <= 3 && rng() < 0.5) u.peuple = neuf.id;
+    });
+    noter(etat, `${neuf.nom} fait sécession : ${region.length} ville${region.length > 1 ? 's' : ''} se détachent de ${p.nom}.`, 'info');
+  });
 }
 
 // ---------- Ce que l'interface demande ---------------------------------------
@@ -1116,20 +1368,50 @@ export const OBJECTIFS = [
     fait: (e) => unitesDe(e).filter((u) => UNITES[u.type].atk > 0).length >= 3,
     aide: 'Mettez vos villes en chantier sur des guerriers ou des archers.' },
   { cle: 'premiere', label: 'Prendre une ville rivale',
-    fait: (e) => (e.stats || {}).villesPrises > 0,
+    fait: (e) => ((e.stats || {}).villesPrises || 0) > 0,
     aide: 'Amenez deux ou trois unités sur une ville adverse : une seule ne suffit jamais.' },
-  { cle: 'capitale', label: 'Prendre une capitale rivale',
-    fait: (e) => (e.vaincus || []).length >= 1,
-    aide: 'Une capitale se défend mieux. Les béliers, eux, sont faits pour ça.' },
-  { cle: 'empire', label: 'Soumettre les trois peuples',
-    fait: (e) => e.fini === 'victoire',
-    aide: 'Prenez les trois capitales : leurs villes rejoindront votre bannière.' },
+  { cle: 'capitale', label: 'Soumettre un peuple',
+    fait: (e) => ((e.stats || {}).peuplesSoumis || 0) >= 1,
+    aide: 'Prenez sa capitale : le peuple capitule et ses villes rejoignent votre bannière.' },
 ];
+
+/**
+ * Passé la liste écrite à la main, les jalons continuent d'eux-mêmes. Le dernier
+ * objectif d'une liste figée serait un mur, et c'est exactement ce qu'on ne veut
+ * pas d'une partie qu'on rouvre pendant des mois à côté de ses heures.
+ */
+function jalonEngendre(n) {
+  const rang = Math.floor(n / 2);
+  if (n % 2 === 0) {
+    const villes = 5 + rang * 3;
+    return { cle: `villes${villes}`, label: `Porter l’empire à ${villes} villes`,
+             fait: (e) => villesDe(e).length >= villes,
+             aide: 'Fondez, ou prenez celles de vos voisins — les deux comptent.' };
+  }
+  const peuples = 2 + rang;
+  return { cle: `peuples${peuples}`, label: `Soumettre ${peuples} peuples`,
+           fait: (e) => ((e.stats || {}).peuplesSoumis || 0) >= peuples,
+           aide: 'Un peuple soumis laisse la place à un autre : il y aura toujours un adversaire.' };
+}
+
+/** Le titre du domaine, qui monte sans plafond. */
+export function titre(etat) {
+  const v = villesDe(etat).length;
+  const p = (etat.stats || {}).peuplesSoumis || 0;
+  const paliers = ['Hameau', 'Bourg', 'Cité', 'Comté', 'Duché', 'Principauté', 'Royaume', 'Empire'];
+  const niveau = Math.floor(v / 2) + p;
+  if (niveau < paliers.length) return paliers[Math.max(0, niveau)];
+  return `Empire · ${niveau - paliers.length + 2}ᵉ couronne`;
+}
 
 export function objectifCourant(etat) {
   const index = OBJECTIFS.findIndex((o) => !o.fait(etat));
-  if (index < 0) return { objectif: null, index: OBJECTIFS.length, total: OBJECTIFS.length };
-  return { objectif: OBJECTIFS[index], index: index + 1, total: OBJECTIFS.length };
+  if (index >= 0) return { objectif: OBJECTIFS[index], index: index + 1, total: null };
+  for (let n = 0; n < 400; n++) {
+    const j = jalonEngendre(n);
+    if (!j.fait(etat)) return { objectif: j, index: OBJECTIFS.length + n + 1, total: null };
+  }
+  return { objectif: null, index: OBJECTIFS.length, total: null };
 }
 
 // ---------- Les règles, écrites une seule fois --------------------------------
@@ -1159,9 +1441,6 @@ export const REGLES = [
  * voulait faire jouer.
  */
 export function prochaineAction(etat, tuiles) {
-  if (etat.fini) {
-    return { texte: etat.fini === 'victoire' ? 'La partie est gagnée.' : 'La partie est perdue.', cible: null };
-  }
   const mesVilles = villesDe(etat);
   if (!mesVilles.length) return { texte: 'Vous n’avez plus de ville.', cible: null };
 
