@@ -745,9 +745,95 @@ export function defenseVille(etat, tuiles, ville) {
   return (20 + ville.pop * 4) * (1 + pct / 100);
 }
 
+// ---------- Tactiques d'assaut ------------------------------------------------
+/**
+ * Attaquer ne doit pas être un bouton unique dont on subit le résultat. Trois
+ * manières de frapper, un chiffrage annoncé avant de s'engager, et un bonus
+ * d'encerclement qui récompense le placement : c'est là qu'est la conduite de
+ * la bataille, pas dans l'attente du tour suivant.
+ */
+export const TACTIQUES = {
+  prudent: {
+    label: 'Sonder les lignes', atk: 0.70, riposte: 0.40, garde: 1,
+    texte: 'Peu de dégâts, peu de pertes — et l’unité garde un mouvement pour se replier.',
+  },
+  assaut: {
+    label: 'Assaut frontal', atk: 1.00, riposte: 1.00, garde: 0,
+    texte: 'L’échange normal : vous frappez fort, vous encaissez autant.',
+  },
+  charge: {
+    label: 'Charge', atk: 1.35, riposte: 1.55, garde: 0,
+    texte: 'On enfonce : bien plus de dégâts, bien plus de pertes.',
+  },
+  encerclement: {
+    label: 'Encerclement', atk: 1.00, riposte: 0.75, garde: 0, parFlanc: 0.22,
+    texte: 'Chaque unité à vous déjà collée à la cible ajoute 22 % d’attaque et abaisse la riposte.',
+  },
+};
+
+/** Vos unités déjà au contact de la cible, l'attaquant non compris. */
+export function flanc(etat, attaquant, q, r) {
+  return neighbors(q, r).filter(([nq, nr]) => {
+    const u = uniteEn(etat, nq, nr);
+    return u && u.peuple === attaquant.peuple && u.id !== attaquant.id && UNITES[u.type].atk > 0;
+  }).length;
+}
+
+/**
+ * Le chiffrage annoncé avant de s'engager. On montre les deux colonnes : ce que
+ * l'on inflige et ce que l'on encaisse. Un assaut dont on ne connaît le prix
+ * qu'après coup n'est pas une décision, c'est un pari.
+ */
+export function previsionCombat(etat, tuiles, attaquant, q, r, bonusPct = 0, tactique = 'assaut') {
+  const T = TACTIQUES[tactique] || TACTIQUES.assaut;
+  const t = tuiles[tileKey(q, r)];
+  if (!t) return null;
+  const defenseur = uniteEn(etat, q, r);
+  const ville = t.ville ? (etat.villes || []).find((v) => v.id === t.ville) : null;
+  const nFlanc = flanc(etat, attaquant, q, r);
+  const mult = T.atk * (1 + (T.parFlanc || 0) * nFlanc);
+  const siege = ville && !defenseur ? (UNITES[attaquant.type].siege || 1) : 1;
+  const atkBase = forceAttaque(etat, attaquant, bonusPct) * siege;
+  const atk = atkBase * mult;
+
+  if (defenseur) {
+    const def = forceDefense(etat, tuiles, defenseur, ville);
+    const inflige = degats(atk, def);
+    // La riposte se mesure sur l'échange de base, puis se module. La calculer
+    // sur l'attaque déjà modifiée s'annulait : sonder les lignes baissait
+    // l'attaque, ce qui rendait le défenseur relativement plus fort, et l'on
+    // encaissait presque autant qu'en chargeant.
+    const subit = Math.round(degats(def, atkBase) * 0.6 * T.riposte);
+    return {
+      genre: 'unite', cible: UNITES[defenseur.type].label, tactique,
+      flanc: nFlanc, terrain: TERRAINS[t.terrain].def,
+      atk: Math.round(atk), def: Math.round(def),
+      inflige, subit,
+      cibleAvant: defenseur.pv, cibleApres: Math.max(0, defenseur.pv - inflige),
+      moiAvant: attaquant.pv, moiApres: Math.max(0, attaquant.pv - subit),
+      tue: defenseur.pv - inflige <= 0, perdu: attaquant.pv - subit <= 0,
+    };
+  }
+  if (ville && ville.peuple !== attaquant.peuple) {
+    const def = defenseVille(etat, tuiles, ville);
+    const inflige = degats(atk, def);
+    return {
+      genre: 'ville', cible: ville.nom, tactique,
+      flanc: nFlanc, terrain: TERRAINS[t.terrain].def,
+      atk: Math.round(atk), def: Math.round(def),
+      inflige, subit: 0,
+      cibleAvant: ville.pv == null ? 100 : ville.pv,
+      cibleApres: Math.max(0, (ville.pv == null ? 100 : ville.pv) - inflige),
+      moiAvant: attaquant.pv, moiApres: attaquant.pv,
+      prise: (ville.pv == null ? 100 : ville.pv) - inflige <= 0, perdu: false,
+    };
+  }
+  return null;
+}
+
 // ---------- Ordres du joueur --------------------------------------------------
 /** Déplace une unité, ou l'envoie au combat si la case visée est hostile. */
-export function deplacer(etat, tuiles, idUnite, q, r, bonusPct = 0, rng = Math.random) {
+export function deplacer(etat, tuiles, idUnite, q, r, bonusPct = 0, rng = Math.random, tactique = 'assaut') {
   const u = uniteParId(etat, idUnite);
   if (!u) return { ok: false, error: 'Unité inconnue.' };
   if (u.peuple !== JOUEUR) return { ok: false, error: 'Cette unité ne vous appartient pas.' };
@@ -761,27 +847,35 @@ export function deplacer(etat, tuiles, idUnite, q, r, bonusPct = 0, rng = Math.r
     explorerAutour(etat, tuiles, q, r, UNITES[u.type].vue || 2);
     return { ok: true, deplace: true };
   }
-  return attaquer(etat, tuiles, u, q, r, bonusPct, rng);
+  return attaquer(etat, tuiles, u, q, r, bonusPct, rng, tactique);
 }
 
 /** Un assaut : sur une unité, ou sur une ville quand la case n'est pas défendue. */
-export function attaquer(etat, tuiles, u, q, r, bonusPct = 0, rng = Math.random) {
+export function attaquer(etat, tuiles, u, q, r, bonusPct = 0, rng = Math.random, tactique = 'assaut') {
   const t = tuiles[tileKey(q, r)];
   const defenseur = uniteEn(etat, q, r);
   const ville = t && t.ville ? (etat.villes || []).find((v) => v.id === t.ville) : null;
   if (UNITES[u.type].atk <= 0) return { ok: false, error: `Un ${UNITES[u.type].label.toLowerCase()} ne se bat pas.` };
+  const T = TACTIQUES[tactique] || TACTIQUES.assaut;
+  if (tactique === 'encerclement' && flanc(etat, u, q, r) < 1) {
+    return { ok: false, error: 'L’encerclement demande au moins une de vos unités déjà au contact de la cible.' };
+  }
 
-  const siege = ville ? (UNITES[u.type].siege || 1) : 1;
-  const atk = forceAttaque(etat, u, bonusPct) * siege;
+  // Le résultat est exactement celui qui a été annoncé avant l'ordre : un
+  // chiffrage qui ne se vérifie pas ne vaut rien.
+  const vue = previsionCombat(etat, tuiles, u, q, r, bonusPct, tactique);
+  if (!vue) return { ok: false, error: 'Rien à attaquer ici.' };
+  // L'unité garde un mouvement quand elle s'est contentée de sonder les lignes.
+  const resteMp = Math.min(T.garde, Math.max(0, u.mp - 1));
 
   if (defenseur) {
-    const def = forceDefense(etat, tuiles, defenseur, ville);
-    const subit = degats(atk, def);
-    const rend = Math.round(degats(def, atk) * 0.6);      // la riposte fait moins mal
+    const subit = vue.inflige;
+    const rend = vue.subit;
     defenseur.pv -= subit;
     u.pv -= rend;
-    u.mp = 0; u.fortifie = false;
-    const res = { ok: true, combat: true, subit, rend, cible: UNITES[defenseur.type].label };
+    u.mp = resteMp; u.fortifie = false;
+    const res = { ok: true, combat: true, subit, rend, tactique, flanc: vue.flanc,
+                  cible: UNITES[defenseur.type].label };
     if (defenseur.pv <= 0) {
       etat.unites = etat.unites.filter((x) => x.id !== defenseur.id);
       res.tue = true;
@@ -800,12 +894,11 @@ export function attaquer(etat, tuiles, u, q, r, bonusPct = 0, rng = Math.random)
   }
 
   if (ville && ville.peuple !== u.peuple) {
-    const def = defenseVille(etat, tuiles, ville);
-    const subit = degats(atk, def);
+    const subit = vue.inflige;
     ville.pv = (ville.pv == null ? 100 : ville.pv) - subit;
-    u.mp = 0; u.fortifie = false;
+    u.mp = resteMp; u.fortifie = false;
     if (ville.pv <= 0) { return { ok: true, ...prendreVille(etat, tuiles, ville, u.peuple), combat: true, subit }; }
-    return { ok: true, combat: true, subit, rend: 0, cible: ville.nom, villePv: ville.pv };
+    return { ok: true, combat: true, subit, rend: 0, tactique, flanc: vue.flanc, cible: ville.nom, villePv: ville.pv };
   }
   return { ok: false, error: 'Rien à attaquer ici.' };
 }

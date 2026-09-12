@@ -14,8 +14,8 @@ import {
   serverTimestamp,
   setDoc,
   onSnapshot,
-} from './firebase-config.js?v=2026-09-11-04';
-import * as EMPIRE from './empire.js?v=2026-09-11-04';
+} from './firebase-config.js?v=2026-09-12-01';
+import * as EMPIRE from './empire.js?v=2026-09-12-01';
 
 // =============================================================
 // 💰 RÈGLES MÉTIER · CONSTANTES
@@ -965,7 +965,7 @@ async function assurerCarte() {
   if (carteEtat !== 'repos') return;
   carteEtat = 'chargement';
   try {
-    carteMod = await import('./carte3d.js?v=2026-09-11-04');
+    carteMod = await import('./carte3d.js?v=2026-09-12-01');
     const canvas = document.getElementById('game-canvas');
     if (!canvas) throw new Error('canvas #game-canvas introuvable');
     carteMod.initCarte(canvas, { onSelect: surCaseTouchee });
@@ -1042,8 +1042,10 @@ function rendreHud() {
   // L'objectif dit où l'on va ; le geste dit quoi toucher maintenant. C'est ce
   // second point qui manquait : « fondez une deuxième ville » ne dit ni où est
   // le colon ni sur quoi appuyer, et on peut y passer trente tours sans avancer.
-  const { objectif, index, total } = EMPIRE.objectifCourant(e);
-  txt('g-obj-compte', `${index}/${total}`);
+  // Le total n'existe plus : les jalons sont infinis. Afficher « 1/null » était
+  // le reste d'une liste qui avait une fin.
+  const { objectif, index } = EMPIRE.objectifCourant(e);
+  txt('g-obj-compte', `n° ${index}`);
   txt('g-obj-titre', objectif ? objectif.label : 'Tous les objectifs sont accomplis');
   txt('g-obj-aide', objectif ? objectif.aide : 'Prenez les capitales restantes.');
 
@@ -1096,8 +1098,19 @@ function surCaseTouchee(sel) {
   if (JEU.unite) {
     const u = EMPIRE.uniteParId(JEU.etat, JEU.unite);
     if (u && (u.q !== sel.q || u.r !== sel.r) && u.mp > 0) {
-      const portee = EMPIRE.portee(JEU.etat, JEU.tuiles, u);
-      if (portee.has(cle)) { ordonner(u, sel); return; }
+      const dest = EMPIRE.portee(JEU.etat, JEU.tuiles, u).get(cle);
+      // Marcher part au premier toucher ; frapper, non. Une case ennemie ouvre
+      // le plan de bataille, et c'est le choix d'une tactique qui engage
+      // l'assaut — sinon on clique « attaquer » et on subit le résultat, ce qui
+      // n'est pas conduire une bataille.
+      if (dest && !dest.attaque) { ordonner(u, sel); return; }
+      if (dest && dest.attaque) {
+        JEU.selection = sel;
+        if (carteMod && carteEtat === 'prete') carteMod.selectionner(sel.q, sel.r);
+        dessinerJeu();
+        rendrePanneau();
+        return;
+      }
     }
     if (u && u.q === sel.q && u.r === sel.r) { JEU.unite = null; JEU.selection = sel; apresCoup(false); return; }
   }
@@ -1111,15 +1124,16 @@ function surCaseTouchee(sel) {
   rendrePanneau();
 }
 
-function ordonner(u, sel) {
+function ordonner(u, sel, tactique = 'assaut') {
   const bonus = EMPIRE.bonusHeures(heuresDuMois(dernierAgg), NESSY.socleHours, NESSY.minHoursEq);
-  const res = EMPIRE.deplacer(JEU.etat, JEU.tuiles, u.id, sel.q, sel.r, bonus.pct);
+  const res = EMPIRE.deplacer(JEU.etat, JEU.tuiles, u.id, sel.q, sel.r, bonus.pct, Math.random, tactique);
   if (!res.ok) { toastJeu(res.error, false); return; }
   if (res.combat) {
+    const nom = EMPIRE.TACTIQUES[res.tactique] ? EMPIRE.TACTIQUES[res.tactique].label : '';
     if (res.villePrise) toastJeu(`${res.villePrise} est prise !`, true);
-    else if (res.tue) toastJeu(`${res.cible} détruit · ${res.subit} dégâts`, true);
-    else if (res.perdu) toastJeu(`Votre unité est tombée · ${res.rend} dégâts subis`, false);
-    else toastJeu(`${res.subit} dégâts infligés · ${res.rend} subis`, res.subit >= res.rend);
+    else if (res.tue) toastJeu(`${nom} · ${res.cible} détruit (−${res.subit})`, true);
+    else if (res.perdu) toastJeu(`${nom} · votre unité est tombée (−${res.rend})`, false);
+    else toastJeu(`${nom} · −${res.subit} pour eux, −${res.rend} pour vous`, res.subit >= res.rend);
     if (res.perdu) JEU.unite = null;
   } else {
     JEU.selection = { q: sel.q, r: sel.r };
@@ -1180,8 +1194,12 @@ function rendrePanneau() {
     }
   }
 
-  const actions = EMPIRE.actionsPour(JEU.etat, JEU.tuiles, t, JEU.unite);
+  // Une cible à portée : on remplace le bouton unique par un vrai plan de
+  // bataille. Frapper sans savoir ce qu'on encaisse n'est pas une décision.
   const zone = document.getElementById('g-panneau-actions');
+  if (rendreCombat(t, zone)) return;
+
+  const actions = EMPIRE.actionsPour(JEU.etat, JEU.tuiles, t, JEU.unite);
   zone.innerHTML = actions.map((a, i) => {
     const detail = a.genre === 'marcher' ? `${a.cout} point${a.cout > 1 ? 's' : ''} de mouvement`
       : a.genre === 'attaquer' ? `contre ${echapper(a.cible || '')}`
@@ -1196,6 +1214,75 @@ function rendrePanneau() {
   zone.querySelectorAll('button[data-act]').forEach((b) => {
     b.addEventListener('click', () => lancerAction(actions[Number(b.getAttribute('data-act'))], t));
   });
+}
+
+/**
+ * Le plan de bataille : ce qu'on inflige, ce qu'on encaisse, et quatre manières
+ * de s'y prendre. Renvoie vrai s'il a pris la main sur le panneau d'actions.
+ */
+function rendreCombat(t, zone) {
+  const u = JEU.unite ? EMPIRE.uniteParId(JEU.etat, JEU.unite) : null;
+  if (!u || u.peuple !== EMPIRE.JOUEUR || u.mp <= 0) return false;
+  if (EMPIRE.UNITES[u.type].atk <= 0) return false;
+  const dest = EMPIRE.portee(JEU.etat, JEU.tuiles, u).get(EMPIRE.tileKey(t.q, t.r));
+  if (!dest || !dest.attaque) return false;
+
+  const bonus = EMPIRE.bonusHeures(heuresDuMois(dernierAgg), NESSY.socleHours, NESSY.minHoursEq);
+  const vues = Object.keys(EMPIRE.TACTIQUES).map((cle) => ({
+    cle, T: EMPIRE.TACTIQUES[cle],
+    v: EMPIRE.previsionCombat(JEU.etat, JEU.tuiles, u, t.q, t.r, bonus.pct, cle),
+  })).filter((x) => x.v);
+  if (!vues.length) return false;
+
+  const ref = vues[0].v;
+  const barre = (avant, apres, max, couleur) => {
+    const a = Math.max(0, Math.round((apres / max) * 100));
+    const b = Math.max(0, Math.round((avant / max) * 100));
+    return `<div class="h-1.5 rounded-full bg-zinc-800 overflow-hidden relative">
+      <div class="absolute inset-y-0 left-0 ${couleur}/40" style="width:${b}%"></div>
+      <div class="absolute inset-y-0 left-0 ${couleur}" style="width:${a}%"></div>
+    </div>`;
+  };
+
+  zone.innerHTML = `
+    <div class="col-span-2 rounded-xl px-2.5 py-2 bg-black/25 border border-white/10">
+      <div class="flex items-center justify-between text-[10px] text-zinc-400 mb-1.5">
+        <span>Terrain +${ref.terrain} %</span>
+        ${ref.flanc ? `<span class="text-amber-300">${ref.flanc} unité${ref.flanc > 1 ? 's' : ''} au contact</span>` : '<span class="text-zinc-600">aucun appui</span>'}
+        ${bonus.pct ? `<span class="text-fuchsia-300">heures +${bonus.pct} %</span>` : ''}
+      </div>
+      <div class="grid grid-cols-2 gap-2 text-[10px]">
+        <div>
+          <div class="flex justify-between"><span class="text-zinc-300">${echapper(EMPIRE.UNITES[u.type].label)}</span>
+            <span class="font-mono text-zinc-400">${ref.moiAvant}</span></div>
+          ${barre(ref.moiAvant, ref.moiApres, u.pvMax, 'bg-amber-400')}
+        </div>
+        <div>
+          <div class="flex justify-between"><span class="text-red-200">${echapper(ref.cible)}</span>
+            <span class="font-mono text-zinc-400">${ref.cibleAvant}</span></div>
+          ${barre(ref.cibleAvant, ref.cibleApres, Math.max(ref.cibleAvant, 100), 'bg-red-400')}
+        </div>
+      </div>
+    </div>
+    ${vues.map(({ cle, T, v }) => {
+      const possible = cle !== 'encerclement' || v.flanc > 0;
+      return `<button type="button" data-tac="${cle}" ${possible ? '' : 'disabled'}
+        class="jeu-bouton ${cle === 'charge' ? 'jeu-bouton-guerre' : ''} rounded-xl px-2.5 py-2 text-left">
+        <span class="block text-[11px] font-semibold">${echapper(T.label)}</span>
+        <span class="block text-[9px] font-mono mt-0.5 ${possible ? 'opacity-80' : 'text-amber-400/70'}">
+          ${possible ? `−${v.inflige} eux · −${v.subit} vous${v.tue ? ' · tué' : ''}${v.prise ? ' · prise !' : ''}`
+                     : 'aucune unité au contact'}
+        </span>
+      </button>`;
+    }).join('')}
+    <div class="col-span-2 text-[9px] text-zinc-500 leading-snug" id="g-tac-aide">${echapper(vues[0].T.texte)}</div>`;
+
+  zone.querySelectorAll('button[data-tac]').forEach((b) => {
+    const cle = b.getAttribute('data-tac');
+    b.addEventListener('mouseenter', () => { const a = document.getElementById('g-tac-aide'); if (a) a.textContent = EMPIRE.TACTIQUES[cle].texte; });
+    b.addEventListener('click', () => ordonner(u, { q: t.q, r: t.r }, cle));
+  });
+  return true;
 }
 
 function lancerAction(a, t) {

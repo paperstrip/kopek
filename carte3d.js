@@ -10,11 +10,11 @@
 // l'effort : la lumière, la caméra, l'animation, et le fait que chaque chose
 // affichée réponde à une question du joueur.
 // =============================================================================
-import * as THREE from './vendor/three/three.module.js?v=2026-09-11-04';
-import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-11-04';
-import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-11-04';
-import { GLTFLoader } from './vendor/three/GLTFLoader.js?v=2026-09-11-04';
-import { axialToWorld, tileKey, TERRAINS, RESSOURCES, peupleById, JOUEUR } from './empire.js?v=2026-09-11-04';
+import * as THREE from './vendor/three/three.module.js?v=2026-09-12-01';
+import { OrbitControls } from './vendor/three/OrbitControls.js?v=2026-09-12-01';
+import { RGBELoader } from './vendor/three/RGBELoader.js?v=2026-09-12-01';
+import { GLTFLoader } from './vendor/three/GLTFLoader.js?v=2026-09-12-01';
+import { axialToWorld, tileKey, TERRAINS, RESSOURCES, peupleById, JOUEUR } from './empire.js?v=2026-09-12-01';
 
 // Le socle du pack mesure exactement 2,0 de plat à plat, soit un hexagone de
 // rayon 2/√3. En les espaçant à 1,0 on les faisait se chevaucher de 13 % : les

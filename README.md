@@ -214,6 +214,31 @@ culture, et sept bâtiments changent ces équilibres.
 tombée sur des collines aurifères affichait un surplus nul : le joueur voyait
 de l'or s'entasser sans que rien ne grandisse jamais.
 
+### Conduire un assaut
+
+Frapper n'est pas un bouton dont on subit le résultat. Toucher une case ennemie
+**ouvre un plan de bataille** au lieu de lancer l'attaque : on y lit ce qu'on
+inflige, ce qu'on encaisse, le bonus de terrain du défenseur et le nombre
+d'unités à soi déjà au contact. Quatre manières de s'y prendre :
+
+| Tactique | Attaque | Riposte | Particularité |
+|---|---|---|---|
+| Sonder les lignes | ×0,70 | ×0,40 | l'unité garde un mouvement pour se replier |
+| Assaut frontal | ×1,00 | ×1,00 | l'échange normal |
+| Charge | ×1,35 | ×1,55 | on enfonce, on paie |
+| Encerclement | +22 % par appui | ×0,75 | exige une unité déjà au contact |
+
+C'est l'encerclement qui fait du placement une décision : amener deux unités au
+contact avant d'attaquer avec la troisième change réellement le résultat.
+
+⚠️ **La riposte se mesure sur l'échange de base, pas sur l'attaque déjà
+modifiée.** Calculée sur l'attaque modulée, elle s'annulait : sonder les lignes
+baissait l'attaque, ce qui rendait le défenseur relativement plus fort, et l'on
+encaissait presque autant qu'en chargeant.
+
+Le résultat appliqué est exactement celui qui a été annoncé — un test le
+vérifie, parce qu'un chiffrage qui ne se vérifie pas ne vaut rien.
+
 ### Le combat
 
 Des points de vie des deux côtés, pas un tirage en tout ou rien : `degats()`
